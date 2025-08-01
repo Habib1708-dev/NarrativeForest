@@ -1,6 +1,11 @@
 uniform vec3 uColor;
 uniform float uElevation;
 
+// Add lighting uniform controls
+uniform vec3 uLightDirection;
+uniform float uAmbientIntensity;
+uniform float uDiffuseIntensity;
+
 // We'll receive the normal from the vertex shader
 varying vec3 vNormal;
 
@@ -11,10 +16,10 @@ void main() {
     // Calculate diffuse lighting
     float diffuse = max(dot(vNormal, lightDirection), 0.0);
     
-    // Add ambient light
-    float light = 0.3 + diffuse * 0.7;
+    // Add ambient light with controlled intensity
+    float light = uAmbientIntensity + diffuse * uDiffuseIntensity;
     
-    // Base color (dark gray)
+    // Base color
     vec3 color = uColor;
     
     // Apply height-based coloring
