@@ -1,6 +1,7 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
 import Terrain from "./components/Terrain";
+import Tree from "./components/Tree";
 import { useControls, folder } from "leva";
 import { useRef } from "react";
 import * as THREE from "three";
@@ -64,6 +65,7 @@ export default function Experience() {
       />
 
       <Terrain />
+      <Tree position={[0, 12, 0]} rotation={[0, Math.PI / 4, 0]} scale={1.5} />
     </>
   );
 }

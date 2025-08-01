@@ -252,7 +252,7 @@ export default function Terrain() {
 
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -10, 0]}>
-      <planeGeometry args={[300, 300, 1024, 1024]} />
+      <planeGeometry args={[300, 300, 512, 512]} />
       <meshStandardMaterial
         key={materialKey}
         ref={materialRef}
