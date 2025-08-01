@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import * as THREE from "three";
 import { useControls } from "leva";
 
@@ -10,8 +10,8 @@ export default function Terrain() {
   const terrainRef = useRef();
 
   // Define terrain dimensions
-  const width = 100;
-  const height = 100;
+  const width = 300;
+  const height = 300;
   const widthSegments = 512;
   const heightSegments = 512;
 
@@ -22,14 +22,28 @@ export default function Terrain() {
     uElevation: { value: 2.0 },
     uFrequency: { value: 1.0 },
     uSeed: { value: 0 },
+    uZoomFactor: { value: 1.0 },
+    uFocusX: { value: 0.0 },
+    uFocusY: { value: 0.0 },
   });
 
   // Add controls with Leva
-  const { terrainColor, elevation, frequency, seed } = useControls("Terrain", {
+  const {
+    terrainColor,
+    elevation,
+    frequency,
+    seed,
+    zoomFactor,
+    focusX,
+    focusY,
+  } = useControls("Terrain", {
     terrainColor: "#3f3f3f",
     elevation: { value: 2.0, min: 0, max: 10, step: 0.1 },
     frequency: { value: 1.0, min: 0.1, max: 3, step: 0.05 },
     seed: { value: 0, min: 0, max: 100, step: 1 },
+    zoomFactor: { value: 1.0, min: 0.1, max: 10, step: 0.1 },
+    focusX: { value: 0, min: -1000, max: 1000, step: 10 },
+    focusY: { value: 0, min: -1000, max: 1000, step: 10 },
   });
 
   // Update uniforms when controls change
@@ -38,7 +52,10 @@ export default function Terrain() {
     uniformsRef.current.uElevation.value = elevation;
     uniformsRef.current.uFrequency.value = frequency;
     uniformsRef.current.uSeed.value = seed;
-  }, [terrainColor, elevation, frequency, seed]);
+    uniformsRef.current.uZoomFactor.value = zoomFactor;
+    uniformsRef.current.uFocusX.value = focusX;
+    uniformsRef.current.uFocusY.value = focusY;
+  }, [terrainColor, elevation, frequency, seed, zoomFactor, focusX, focusY]);
 
   return (
     <mesh

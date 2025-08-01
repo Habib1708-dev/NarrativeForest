@@ -2,6 +2,9 @@ uniform float uTime;
 uniform float uElevation;
 uniform float uFrequency;
 uniform float uSeed;
+uniform float uZoomFactor;
+uniform float uFocusX;
+uniform float uFocusY;
 
 varying vec3 vNormal;
 
@@ -95,24 +98,31 @@ void main() {
     // Add seed offset to create different terrains with same noise pattern
     vec3 seedOffset = vec3(uSeed * 100.0, uSeed * 50.0, uSeed * 25.0);
     
+    // Use the uniform values from React for zoom and focus
+    float zoom = 1.0 / uZoomFactor; // Invert so higher values = more zoom
+    vec2 focusPoint = vec2(uFocusX, uFocusY); // Use the focus point from uniforms
+    
+    // Calculate the scaled and offset position for noise sampling
+    vec2 scaledPos = position.xy * zoom + focusPoint;
+    
     // Add noise-based elevation - apply multiple octaves of noise for more detail
     float elevation = 0.0;
     
     // First noise layer - large features
-    float noise1 = snoise(vec3(position.x * 0.02 * uFrequency, position.y * 0.02 * uFrequency, position.z * 0.02 * uFrequency) + seedOffset * 0.1);
+    float noise1 = snoise(vec3(scaledPos.x * 0.02 * uFrequency, scaledPos.y * 0.02 * uFrequency, 0.0) + seedOffset * 0.1);
     elevation += noise1 * 3.0;
     
     // Second noise layer - medium features
-    float noise2 = snoise(vec3(position.x * 0.1 * uFrequency, position.y * 0.1 * uFrequency, position.z * 0.1 * uFrequency) + seedOffset * 0.2);
+    float noise2 = snoise(vec3(scaledPos.x * 0.1 * uFrequency, scaledPos.y * 0.1 * uFrequency, 0.0) + seedOffset * 0.2);
     elevation += noise2 * 1.5;
     
     // Third noise layer - small details
-    float noise3 = snoise(vec3(position.x * 0.3 * uFrequency, position.y * 0.3 * uFrequency, position.z * 0.3 * uFrequency) + seedOffset * 0.3);
+    float noise3 = snoise(vec3(scaledPos.x * 0.3 * uFrequency, scaledPos.y * 0.3 * uFrequency, 0.0) + seedOffset * 0.3);
     elevation += noise3 * 0.5;
     
     // Apply elevation to y component (considering plane is rotated in the scene)
     newPosition.z += elevation * uElevation;
-    
+
     // Calculate new normal by using derivatives
     // This recreates proper normals for lighting calculations
     vec3 tangent = normalize(vec3(1.0, 0.0, noise3 * uElevation));
