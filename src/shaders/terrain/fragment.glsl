@@ -6,12 +6,13 @@ uniform vec3 uLightDirection;
 uniform float uAmbientIntensity;
 uniform float uDiffuseIntensity;
 
-// We'll receive the normal from the vertex shader
+// Receive data from vertex shader
 varying vec3 vNormal;
+varying float vElevation; // Add this to receive the elevation
 
 void main() {
-    // Calculate light direction (simple directional light)
-    vec3 lightDirection = normalize(vec3(0.5, 1.0, 0.3));
+    // Use light direction from uniform instead of hardcoded value
+    vec3 lightDirection = normalize(uLightDirection);
     
     // Calculate diffuse lighting
     float diffuse = max(dot(vNormal, lightDirection), 0.0);
@@ -19,16 +20,16 @@ void main() {
     // Add ambient light with controlled intensity
     float light = uAmbientIntensity + diffuse * uDiffuseIntensity;
     
-    // Base color
-    vec3 color = uColor;
+    // Base color - use the elevation data directly for coloring
+    // This is independent of viewing angle
+    vec3 baseColor = mix(
+        uColor * 0.7,  // Darker color for valleys
+        uColor * 1.3,  // Brighter color for peaks
+        vElevation     // Use actual height data
+    );
     
-    // Apply height-based coloring
-    // Higher areas are slightly lighter
-    float heightFactor = clamp(vNormal.y * 0.5 + 0.5, 0.0, 1.0);
-    color = mix(color * 0.8, color * 1.2, heightFactor);
+    // Apply lighting after the height-based coloring
+    vec3 finalColor = baseColor * light;
     
-    // Apply lighting
-    color = color * light;
-    
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(finalColor, 1.0);
 }

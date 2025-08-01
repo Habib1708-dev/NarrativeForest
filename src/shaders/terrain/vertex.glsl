@@ -7,6 +7,7 @@ uniform float uFocusX;
 uniform float uFocusY;
 
 varying vec3 vNormal;
+varying float vElevation;
 
 //
 // Description : Array and textureless GLSL 2D/3D/4D simplex 
@@ -123,6 +124,8 @@ void main() {
     // Apply elevation to y component (considering plane is rotated in the scene)
     newPosition.z += elevation * uElevation;
 
+    
+
     // Calculate new normal by using derivatives
     // This recreates proper normals for lighting calculations
     vec3 tangent = normalize(vec3(1.0, 0.0, noise3 * uElevation));
@@ -132,6 +135,11 @@ void main() {
     // Pass normal to fragment shader
     vNormal = normalMatrix * newNormal;
     
+    // Pass normalized elevation to fragment shader (0.0 to 1.0)
+    // Map from [-5,5] range to [0,1] range
+    vElevation = clamp((elevation + 5.0) / 10.0, 0.0, 1.0);
+
+
     // Apply model-view-projection matrix
     gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
 }
