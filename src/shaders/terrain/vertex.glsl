@@ -5,6 +5,8 @@ uniform float uSeed;
 uniform float uZoomFactor;
 uniform float uFocusX;
 uniform float uFocusY;
+uniform float uFlatThreshold; // Threshold for creating flat areas (0.0-1.0)
+uniform float uFlatStrength; // How flat to make the flat areas (0.0-1.0)
 
 varying vec3 vNormal;
 varying float vElevation;
@@ -92,6 +94,16 @@ float snoise(vec3 v) {
                                 dot(p2,x2), dot(p3,x3) ) );
 }
 
+// Function to create flat areas by clamping noise values
+float createFlatArea(float noise, float threshold, float strength) {
+    // If noise value is close to 0 (within threshold), flatten it
+    if (abs(noise) < threshold) {
+        // Lerp between original noise and 0 based on strength
+        return mix(noise, 0.0, strength);
+    }
+    return noise;
+}
+
 void main() {
     // Use the original vertex position
     vec3 newPosition = position;
@@ -106,26 +118,35 @@ void main() {
     // Calculate the scaled and offset position for noise sampling
     vec2 scaledPos = position.xy * zoom + focusPoint;
     
+    // Calculate raw noise without any flat area processing
+    float rawNoise1 = snoise(vec3(scaledPos.x * 0.02 * uFrequency, scaledPos.y * 0.02 * uFrequency, 0.0) + seedOffset * 0.1);
+    float rawNoise2 = snoise(vec3(scaledPos.x * 0.1 * uFrequency, scaledPos.y * 0.1 * uFrequency, 0.0) + seedOffset * 0.2);
+    float rawNoise3 = snoise(vec3(scaledPos.x * 0.3 * uFrequency, scaledPos.y * 0.3 * uFrequency, 0.0) + seedOffset * 0.3);
+    
+    // Apply flat areas by clamping noise values
+    // If noise is within threshold range, flatten it
+    float noise1 = createFlatArea(rawNoise1, uFlatThreshold, uFlatStrength);
+    float noise2 = createFlatArea(rawNoise2, uFlatThreshold, uFlatStrength);
+    float noise3 = rawNoise3; // Keep small details unflattened
+    
     // Add noise-based elevation - apply multiple octaves of noise for more detail
     float elevation = 0.0;
     
-    // First noise layer - large features
-    float noise1 = snoise(vec3(scaledPos.x * 0.02 * uFrequency, scaledPos.y * 0.02 * uFrequency, 0.0) + seedOffset * 0.1);
+    // First noise layer - large features (flattened)
     elevation += noise1 * 3.0;
     
-    // Second noise layer - medium features
-    float noise2 = snoise(vec3(scaledPos.x * 0.1 * uFrequency, scaledPos.y * 0.1 * uFrequency, 0.0) + seedOffset * 0.2);
+    // Second noise layer - medium features (flattened)
     elevation += noise2 * 1.5;
     
-    // Third noise layer - small details
-    float noise3 = snoise(vec3(scaledPos.x * 0.3 * uFrequency, scaledPos.y * 0.3 * uFrequency, 0.0) + seedOffset * 0.3);
+    // Third noise layer - small details (unmodified)
     elevation += noise3 * 0.5;
     
-    // Apply elevation to y component (considering plane is rotated in the scene)
+    // Apply elevation to z component
     newPosition.z += elevation * uElevation;
-
     
-
+    // Pass normalized elevation to fragment shader
+    vElevation = clamp((elevation + 5.0) / 10.0, 0.0, 1.0);
+    
     // Calculate new normal by using derivatives
     // This recreates proper normals for lighting calculations
     vec3 tangent = normalize(vec3(1.0, 0.0, noise3 * uElevation));
@@ -135,11 +156,7 @@ void main() {
     // Pass normal to fragment shader
     vNormal = normalMatrix * newNormal;
     
-    // Pass normalized elevation to fragment shader (0.0 to 1.0)
-    // Map from [-5,5] range to [0,1] range
-    vElevation = clamp((elevation + 5.0) / 10.0, 0.0, 1.0);
-
-
     // Apply model-view-projection matrix
     gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
 }
+

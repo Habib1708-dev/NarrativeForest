@@ -28,6 +28,8 @@ export default function Terrain() {
     uLightDirection: { value: new THREE.Vector3(0.5, 1.0, 0.3) },
     uAmbientIntensity: { value: 0.3 },
     uDiffuseIntensity: { value: 0.7 },
+    uFlatThreshold: { value: 0.3 },
+    uFlatStrength: { value: 0.7 },
   });
 
   // Add controls with Leva
@@ -44,24 +46,30 @@ export default function Terrain() {
     lightZ,
     ambientIntensity,
     diffuseIntensity,
+    flatThreshold,
+    flatStrength,
   } = useControls({
     Terrain: folder({
-      terrainColor: "#3f3f3f",
-      elevation: { value: 2.0, min: 0, max: 10, step: 0.1 },
-      frequency: { value: 1.0, min: 0.1, max: 3, step: 0.05 },
+      terrainColor: "#969696",
+      elevation: { value: 8.7, min: 0, max: 10, step: 0.1 },
+      frequency: { value: 0.75, min: 0.1, max: 3, step: 0.05 },
       seed: { value: 0, min: 0, max: 100, step: 1 },
     }),
+    FlatAreas: folder({
+      flatThreshold: { value: 0.0, min: 0, max: 1, step: 0.01 },
+      flatStrength: { value: 0.0, min: 0, max: 1, step: 0.01 },
+    }),
     Navigation: folder({
-      zoomFactor: { value: 1.0, min: 0.1, max: 10, step: 0.1 },
-      focusX: { value: 0, min: -1000, max: 1000, step: 10 },
+      zoomFactor: { value: 10.0, min: 0.1, max: 10, step: 0.1 },
+      focusX: { value: -240.0, min: -1000, max: 1000, step: 10 },
       focusY: { value: 0, min: -1000, max: 1000, step: 10 },
     }),
     Lighting: folder({
-      lightX: { value: 0.5, min: -1, max: 1, step: 0.01 },
-      lightY: { value: 1.0, min: 0, max: 2, step: 0.01 },
-      lightZ: { value: 0.3, min: -1, max: 1, step: 0.01 },
-      ambientIntensity: { value: 0.3, min: 0, max: 1, step: 0.01 },
-      diffuseIntensity: { value: 0.7, min: 0, max: 1, step: 0.01 },
+      lightX: { value: 0.95, min: -1, max: 1, step: 0.01 },
+      lightY: { value: 2.0, min: 0, max: 2, step: 0.01 },
+      lightZ: { value: 1.0, min: -1, max: 1, step: 0.01 },
+      ambientIntensity: { value: 0.53, min: 0, max: 1, step: 0.01 },
+      diffuseIntensity: { value: 0.3, min: 0, max: 1, step: 0.01 },
     }),
   });
 
@@ -79,6 +87,10 @@ export default function Terrain() {
     uniformsRef.current.uLightDirection.value.set(lightX, lightY, lightZ);
     uniformsRef.current.uAmbientIntensity.value = ambientIntensity;
     uniformsRef.current.uDiffuseIntensity.value = diffuseIntensity;
+
+    // Update flat area uniforms
+    uniformsRef.current.uFlatThreshold.value = flatThreshold;
+    uniformsRef.current.uFlatStrength.value = flatStrength;
   }, [
     terrainColor,
     elevation,
@@ -92,13 +104,14 @@ export default function Terrain() {
     lightZ,
     ambientIntensity,
     diffuseIntensity,
+    flatThreshold,
+    flatStrength,
   ]);
 
   return (
     <mesh
       ref={terrainRef}
       rotation={[-Math.PI / 2, 0, 0]} // Rotate to be horizontal
-      receiveShadow
       position={[0, -1, 0]} // Slightly below center
     >
       <planeGeometry args={[width, height, widthSegments, heightSegments]} />
