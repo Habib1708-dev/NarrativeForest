@@ -24,8 +24,8 @@ export default function CameraController() {
 
   // Lock camera height in exploration mode
   useFrame(() => {
-    if (isExplorationMode && camera.position.y !== 2) {
-      camera.position.y = 2;
+    if (isExplorationMode && camera.position.y !== 3) {
+      camera.position.y = 3; // Slightly higher for better terrain view
     }
   });
 
@@ -33,9 +33,14 @@ export default function CameraController() {
     <CameraControls
       ref={controlsRef}
       enabled={isExplorationMode}
-      maxPolarAngle={Math.PI / 2} // Prevent looking below ground
-      minDistance={1}
-      maxDistance={20}
+      maxPolarAngle={Math.PI * 0.4} // Allow more vertical viewing angle
+      minDistance={2}
+      maxDistance={60} // Adjusted for terrain viewing
+      target={[0, 0, 0]} // Center on terrain
+      enableDamping={true}
+      dampingFactor={0.05}
+      enablePan={true}
+      panSpeed={0.5}
     />
   );
 }

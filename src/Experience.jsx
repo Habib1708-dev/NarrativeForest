@@ -9,14 +9,29 @@ export default function Experience() {
 
       <OrbitControls
         makeDefault
-        maxPolarAngle={Math.PI * 0.45}
-        minDistance={5}
-        maxDistance={50}
+        maxPolarAngle={Math.PI * 0.4} // Allow more vertical viewing angle
+        minDistance={3}
+        maxDistance={80} // Increased for better overview of the terrain
+        target={[0, 0, 0]} // Center the camera on the terrain
+        enableDamping={true}
+        dampingFactor={0.05}
+        enablePan={true}
+        panSpeed={0.5}
       />
 
       {/* Lights */}
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
+      <ambientLight intensity={0.6} />
+      <directionalLight
+        position={[10, 15, 10]}
+        intensity={1.5}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-far={100}
+        shadow-camera-left={-30}
+        shadow-camera-right={30}
+        shadow-camera-top={30}
+        shadow-camera-bottom={-30}
+      />
 
       <Terrain />
     </>
