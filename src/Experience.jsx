@@ -1,29 +1,61 @@
 import { Perf } from "r3f-perf";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, Sky } from "@react-three/drei";
 import Terrain from "./components/Terrain";
+import { useControls, folder } from "leva";
+import { useRef } from "react";
+import * as THREE from "three";
 
 export default function Experience() {
+  const skyRef = useRef();
+
+  // Add controls for fog and sky
+  const { fogColor, fogNear, fogFar, sunPosition } = useControls({
+    Atmosphere: folder({
+      fogColor: "#ffb380", // Sunset-like color
+      fogNear: { value: 10, min: 1, max: 50, step: 1 },
+      fogFar: { value: 80, min: 50, max: 200, step: 1 },
+      sunPosition: { value: [1, 0.3, 2], step: 0.1 },
+    }),
+  });
+
   return (
     <>
       <Perf position="top-left" />
 
+      {/* Add fog */}
+      <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
+
+      {/* Add Sky with sunset preset */}
+      <Sky
+        ref={skyRef}
+        sunPosition={sunPosition}
+        inclination={0.1} // Low sun for sunset effect
+        azimuth={0.25}
+        distance={450000}
+        rayleigh={2}
+        turbidity={10}
+        mieCoefficient={0.005}
+        mieDirectionalG={0.8}
+      />
+
       <OrbitControls
         makeDefault
-        maxPolarAngle={Math.PI * 0.4} // Allow more vertical viewing angle
+        maxPolarAngle={Math.PI * 0.4}
         minDistance={3}
-        maxDistance={80} // Increased for better overview of the terrain
-        target={[0, 0, 0]} // Center the camera on the terrain
+        maxDistance={80}
+        target={[0, 0, 0]}
         enableDamping={true}
         dampingFactor={0.05}
         enablePan={true}
         panSpeed={0.5}
       />
 
-      {/* Lights */}
-      <ambientLight intensity={0.6} />
+      {/* Adjust lights to match sunset atmosphere */}
+      <ambientLight intensity={0.4} color="#ffe0cc" />
       <directionalLight
         position={[10, 15, 10]}
-        intensity={1.5}
+        intensity={1.2}
+        color="#ff9966"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-camera-far={100}

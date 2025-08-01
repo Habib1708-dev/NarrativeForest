@@ -69,7 +69,7 @@ export default function Terrain() {
       lightY: { value: 2.0, min: 0, max: 2, step: 0.01 },
       lightZ: { value: 1.0, min: -1, max: 1, step: 0.01 },
       ambientIntensity: { value: 0.53, min: 0, max: 1, step: 0.01 },
-      diffuseIntensity: { value: 0.3, min: 0, max: 1, step: 0.01 },
+      diffuseIntensity: { value: 0.08, min: 0, max: 1, step: 0.01 },
     }),
   });
 

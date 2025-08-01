@@ -23,6 +23,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "three": "^0.178.0",
+    "three-custom-shader-material": "^5.3.5",
     "three-stdlib": "^2.36.0",
     "zustand": "^5.0.6"
   }
