@@ -56,6 +56,8 @@ export default function Terrain() {
       shader.uniforms.noiseFrequency.value = terrainParams.frequency;
       shader.uniforms.noiseSeed.value = terrainParams.seed;
       shader.uniforms.noiseScale.value = terrainParams.scale;
+      shader.uniforms.plateauHeight.value = terrainParams.plateauHeight;
+      shader.uniforms.plateauSmoothing.value = terrainParams.plateauSmoothing;
     }
 
     // Force the material to update
