@@ -9,11 +9,8 @@ export default function Experience() {
   const skyRef = useRef();
 
   // Add controls for fog and sky
-  const { fogColor, fogNear, fogFar, sunPosition } = useControls({
+  const { sunPosition } = useControls({
     Atmosphere: folder({
-      fogColor: "#ffb380", // Sunset-like color
-      fogNear: { value: 10, min: 1, max: 50, step: 1 },
-      fogFar: { value: 80, min: 50, max: 200, step: 1 },
       sunPosition: { value: [1, 0.3, 2], step: 0.1 },
     }),
   });
@@ -21,9 +18,6 @@ export default function Experience() {
   return (
     <>
       <Perf position="top-left" />
-
-      {/* Add fog */}
-      <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
 
       {/* Add Sky with sunset preset */}
       <Sky
