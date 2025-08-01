@@ -21,6 +21,7 @@ export default function Terrain() {
     octaves: { value: 5, min: 1, max: 8, step: 1, label: "Detail Layers" },
     seed: { value: 1.0, min: 0.1, max: 10.0, step: 0.1, label: "Seed" },
     scale: { value: 1.0, min: 0.1, max: 5.0, step: 0.1, label: "Zoom" },
+    color: { value: "#4b7d23", label: "Terrain Color" },
   });
 
   // Force material recreation for structural changes that require recompilation
@@ -31,6 +32,9 @@ export default function Terrain() {
   // Ensure uniform updates for parameters that don't need full recompilation
   useEffect(() => {
     if (!materialRef.current) return;
+
+    // Update material color directly
+    materialRef.current.color.set(terrainParams.color);
 
     const shader = materialRef.current.userData.shader;
     if (shader) {
@@ -47,6 +51,7 @@ export default function Terrain() {
     terrainParams.frequency,
     terrainParams.seed,
     terrainParams.scale,
+    terrainParams.color,
   ]);
 
   useEffect(() => {
@@ -178,7 +183,7 @@ export default function Terrain() {
       <meshStandardMaterial
         key={materialKey}
         ref={materialRef}
-        color={"#4b7d23"}
+        color={terrainParams.color}
         wireframe={false}
         flatShading={true}
         side={THREE.DoubleSide}
