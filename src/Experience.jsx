@@ -40,14 +40,18 @@ export default function Experience() {
 
       <OrbitControls
         makeDefault
-        maxPolarAngle={Math.PI * 0.4}
-        minDistance={3}
-        maxDistance={80}
+        // Remove restrictions on polar angle to allow complete freedom
+        // maxPolarAngle={Math.PI * 0.4} - removed this restriction
+        minDistance={1} // Allow getting closer
+        maxDistance={200} // Allow getting farther
         target={[0, 0, 0]}
         enableDamping={true}
         dampingFactor={0.05}
         enablePan={true}
         panSpeed={0.5}
+        // Additional settings for more freedom
+        screenSpacePanning={true}
+        rotateSpeed={0.5}
       />
 
       {/* Adjust lights to match sunset atmosphere */}
