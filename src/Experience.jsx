@@ -65,7 +65,7 @@ export default function Experience() {
       />
 
       <Terrain />
-      <Tree position={[0, 1, 0]} rotation={[0, Math.PI / 4, 0]} scale={1.5} />
+      <Tree position={[0, 0, 0]} rotation={[0, Math.PI / 4, 0]} scale={0.04} />
     </>
   );
 }

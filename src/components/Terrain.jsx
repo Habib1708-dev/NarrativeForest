@@ -77,6 +77,12 @@ export default function Terrain() {
 
     // Hook into shader
     materialRef.current.onBeforeCompile = (shader) => {
+      // Log original shaders
+      console.log("ORIGINAL VERTEX SHADER:");
+      console.log(shader.vertexShader);
+      console.log("\nORIGINAL FRAGMENT SHADER:");
+      console.log(shader.fragmentShader);
+
       // Inject uniforms
       shader.uniforms.time = { value: 0 };
       shader.uniforms.elevation = { value: terrainParams.elevation };
@@ -89,7 +95,9 @@ export default function Terrain() {
       shader.uniforms.plateauSmoothing = {
         value: terrainParams.plateauSmoothing,
       };
-      shader.uniforms.cellSize = { value: 300.0 / 256.0 }; // planeWidth / segments
+      shader.uniforms.cellSize = { value: 20.0 / 512.0 }; // planeWidth / segments
+
+      console.log("\nINJECTED UNIFORMS:", Object.keys(shader.uniforms));
 
       // Store the compiled shader for updates
       materialRef.current.userData.shader = shader;
@@ -171,6 +179,9 @@ export default function Terrain() {
         ${shader.vertexShader}
       `;
 
+      console.log("\nAFTER PREPENDING FUNCTIONS TO VERTEX SHADER:");
+      console.log(shader.vertexShader);
+
       shader.vertexShader = shader.vertexShader.replace(
         "#include <begin_vertex>",
         `
@@ -189,6 +200,9 @@ export default function Terrain() {
   transformed.z += plateauizedDisp;
   `
       );
+
+      console.log("\nAFTER REPLACING #include <begin_vertex>:");
+      console.log(shader.vertexShader);
 
       // Also modify the normal calculation
       shader.vertexShader = shader.vertexShader.replace(
@@ -225,6 +239,14 @@ export default function Terrain() {
   objectNormal = customNormal;
   `
       );
+
+      console.log("\nFINAL VERTEX SHADER:");
+      console.log(shader.vertexShader);
+
+      console.log("\nFINAL FRAGMENT SHADER:");
+      console.log(shader.fragmentShader);
+
+      console.log("=== SHADER COMPILATION END ===");
     };
 
     // Set up onBeforeRender to update uniforms continuously during rendering
@@ -254,7 +276,7 @@ export default function Terrain() {
 
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -10, 0]}>
-      <planeGeometry args={[300, 300, 256, 256]} />
+      <planeGeometry args={[20, 30, 512, 512]} />
       <meshStandardMaterial
         key={materialKey}
         ref={materialRef}
