@@ -89,6 +89,7 @@ export default function Terrain() {
       shader.uniforms.plateauSmoothing = {
         value: terrainParams.plateauSmoothing,
       };
+      shader.uniforms.cellSize = { value: 300.0 / 256.0 }; // planeWidth / segments
 
       // Store the compiled shader for updates
       materialRef.current.userData.shader = shader;
@@ -102,6 +103,7 @@ export default function Terrain() {
         uniform int noiseOctaves;
         uniform float plateauHeight;
         uniform float plateauSmoothing;
+        uniform float cellSize;
 
 
         vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
@@ -152,19 +154,19 @@ export default function Terrain() {
         }
 
         // Smoothstep function to create plateaus
-  float plateauize(float height, float threshold, float smoothing) {
-    float lowThreshold = max(0.0, threshold - smoothing);
-    float highThreshold = min(1.0, threshold + smoothing);
-    
-    // Remap height from [0,1] for smoothstep
-    float normalizedHeight = (height - lowThreshold) / (highThreshold - lowThreshold);
-    float stepped = smoothstep(0.0, 1.0, normalizedHeight);
-    
-    // Blend between original and plateaued height based on how close to threshold
-    if (height < lowThreshold) return height;
-    if (height > highThreshold) return height;
-    return mix(lowThreshold, height, stepped);
-  }
+        float plateauize(float height, float threshold, float smoothing) {
+          float lowThreshold = max(0.0, threshold - smoothing);
+          float highThreshold = min(1.0, threshold + smoothing);
+          
+          // Remap height from [0,1] for smoothstep
+          float normalizedHeight = (height - lowThreshold) / (highThreshold - lowThreshold);
+          float stepped = smoothstep(0.0, 1.0, normalizedHeight);
+          
+          // Blend between original and plateaued height based on how close to threshold
+          if (height < lowThreshold) return height;
+          if (height > highThreshold) return height;
+          return mix(lowThreshold, height, stepped);
+        }
 
         ${shader.vertexShader}
       `;
@@ -185,42 +187,34 @@ export default function Terrain() {
   // Apply final displacement
   plateauizedDisp = abs(plateauizedDisp) + 5.0;
   transformed.z += plateauizedDisp;
+  `
+      );
 
-  #ifdef USE_NORMAL
-    float dx = 0.1;
-    // Recalculate normals using the plateauized displacement
-    vec2 posX = position.xy + vec2(dx, 0.0);
-    vec2 negX = position.xy + vec2(-dx, 0.0);
-    vec2 posY = position.xy + vec2(0.0, dx);
-    vec2 negY = position.xy + vec2(0.0, -dx);
-    
-    float dispPosX = fbm(posX) * elevation;
-    float normPosX = (dispPosX / elevation);
-    float plateauPosX = plateauize(normPosX, plateauHeight, plateauSmoothing) * elevation;
-    plateauPosX = abs(plateauPosX) + 5.0;
-    
-    float dispNegX = fbm(negX) * elevation;
-    float normNegX = (dispNegX / elevation);
-    float plateauNegX = plateauize(normNegX, plateauHeight, plateauSmoothing) * elevation;
-    plateauNegX = abs(plateauNegX) + 5.0;
-    
-    float dispPosY = fbm(posY) * elevation;
-    float normPosY = (dispPosY / elevation);
-    float plateauPosY = plateauize(normPosY, plateauHeight, plateauSmoothing) * elevation;
-    plateauPosY = abs(plateauPosY) + 5.0;
-    
-    float dispNegY = fbm(negY) * elevation;
-    float normNegY = (dispNegY / elevation);
-    float plateauNegY = plateauize(normNegY, plateauHeight, plateauSmoothing) * elevation;
-    plateauNegY = abs(plateauNegY) + 5.0;
-
-    vec3 newNormal = normalize(vec3(
-      plateauNegX - plateauPosX,
-      plateauNegY - plateauPosY,
-      2.0 * dx
-    ));
-    objectNormal = newNormal;
-  #endif
+      // Also modify the normal calculation
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <beginnormal_vertex>",
+        `
+  #include <beginnormal_vertex>
+  
+  // Calculate custom normals for proper lighting
+  float dx = cellSize;
+  
+  // Sample heights at neighboring points
+  float hL = fbm(position.xy + vec2(-dx, 0.0)) * elevation;
+  hL = abs(plateauize(hL / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  
+  float hR = fbm(position.xy + vec2(dx, 0.0)) * elevation;
+  hR = abs(plateauize(hR / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  
+  float hD = fbm(position.xy + vec2(0.0, -dx)) * elevation;
+  hD = abs(plateauize(hD / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  
+  float hU = fbm(position.xy + vec2(0.0, dx)) * elevation;
+  hU = abs(plateauize(hU / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  
+  // Calculate normal using finite difference
+  vec3 customNormal = normalize(vec3(hL - hR, hD - hU, 2.0 * dx));
+  objectNormal = customNormal;
   `
       );
     };
@@ -252,14 +246,15 @@ export default function Terrain() {
 
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -10, 0]}>
-      <planeGeometry args={[300, 300, 512, 512]} />
+      <planeGeometry args={[300, 300, 256, 256]} />
       <meshStandardMaterial
         key={materialKey}
         ref={materialRef}
         color={terrainParams.color}
         wireframe={false}
-        flatShading={true}
+        flatShading={false}
         side={THREE.DoubleSide}
+        normalScale={[1, 1]}
       />
     </mesh>
   );
