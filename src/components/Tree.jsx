@@ -1,125 +1,83 @@
-import React, { useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
+import { forwardRef, useEffect, useRef } from "react";
+import { useControls } from "leva";
+import * as THREE from "three";
 
-export function Tree({
-  position = [0, 0, 0],
-  rotation = [0, 0, 0],
-  scale = 1,
-  variant = "a", // 'a', 'b', or 'c'
-}) {
-  // Load the GLTF model
-  const { scene } = useGLTF("/models/tree/fir_tree_01_1k.gltf");
+const Tree = forwardRef(function Tree(props, ref) {
+  const { scene } = useGLTF("/models/tree/tree_a.glb");
+  const treeRef = useRef();
+  const originalMaterials = useRef(new Map());
 
-  // Extract the specific tree variant
-  const treeModel = useMemo(() => {
-    // Clone the scene to avoid reference issues
-    const clonedScene = scene.clone();
+  // Leva controls for tree tinting
+  const { tintColor, tintIntensity } = useControls("Tree", {
+    tintColor: { value: "#ffffff", label: "Tint Color" },
+    tintIntensity: {
+      value: 0.0,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Tint Intensity",
+    },
+  });
 
-    // Find the requested tree variant
-    const variantName = `fir_tree_01_${variant}_LOD0`;
-    const treeVariant = clonedScene.children.find(
-      (child) => child.name === variantName
-    );
+  // Apply tinting to all materials in the tree
+  useEffect(() => {
+    if (!treeRef.current) return;
 
-    if (!treeVariant) {
-      console.warn(
-        `Tree variant "${variant}" not found, using first available tree`
-      );
-      return clonedScene.children[0].clone();
-    }
+    treeRef.current.traverse((child) => {
+      if (child.isMesh && child.material) {
+        const material = child.material;
 
-    return treeVariant.clone();
-  }, [scene, variant]);
+        // Store original material properties if not already stored
+        if (!originalMaterials.current.has(material.uuid)) {
+          originalMaterials.current.set(material.uuid, {
+            color: material.color.clone(),
+            map: material.map,
+          });
+        }
 
-  console.log("Tree model loaded:", treeModel);
+        const original = originalMaterials.current.get(material.uuid);
+
+        // Clone material to avoid affecting other instances
+        if (!child.userData.originalMaterial) {
+          child.userData.originalMaterial = material;
+          child.material = material.clone();
+        }
+
+        // Apply tinting
+        const tintColorObj = new THREE.Color(tintColor);
+
+        if (tintIntensity === 0) {
+          // No tint - restore original color and texture
+          child.material.color.copy(original.color);
+          child.material.map = original.map;
+        } else {
+          // Apply tint by mixing original color with tint color
+          const mixedColor = original.color
+            .clone()
+            .lerp(tintColorObj, tintIntensity);
+          child.material.color.copy(mixedColor);
+
+          // Optionally reduce texture influence when tinting is strong
+          if (tintIntensity > 0.5 && original.map) {
+            // You can choose to keep or remove texture based on tint intensity
+            child.material.map = original.map;
+          }
+        }
+
+        child.material.needsUpdate = true;
+      }
+    });
+  }, [tintColor, tintIntensity]);
 
   return (
-    <primitive
-      object={treeModel}
-      position={position}
-      rotation={rotation}
-      scale={scale}
-      castShadow
-    />
+    <group ref={ref} {...props} dispose={null}>
+      <primitive ref={treeRef} object={scene} />
+    </group>
   );
-}
+});
 
-// Preload the model
-useGLTF.preload("/models/tree/fir_tree_01_1k.gltf");
+// Preload the model for better performance
+useGLTF.preload("/models/tree/tree_a.glb");
 
 export default Tree;
-
-/* ---------------------------------------------------------------------------
-  Darkening the tree model – three quick methods
-  ----------------------------------------------
-
-  1. Tint via material.color  (fast & simple)
-     -------------------------------------------------
-     scene.traverse(obj => {
-       if (!obj.isMesh) return;
-       obj.material = obj.material.clone();      // avoid mutating shared mats
-       obj.material.color.multiplyScalar(0.4);   // 0-1 → darker
-     });
-
-  2. Dim the light / environment  (physically correct)
-     -------------------------------------------------
-       <ambientLight intensity={0.15} />
-       <directionalLight intensity={0.5} />
-     Optionally reduce reflections only:
-       obj.material.envMapIntensity = 0.3;
-
-  3. Shader uniform for animated darkness  (day ↔ night fade)
-     -------------------------------------------------
-     obj.material.onBeforeCompile = (shader) => {
-       shader.uniforms.uDark = { value: 0.0 };           // 0 = bright, 1 = black
-       shader.fragmentShader = shader.fragmentShader.replace(
-         'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-         `
-         outgoingLight *= (1.0 - uDark);
-         gl_FragColor = vec4( outgoingLight, diffuseColor.a );
-         `
-       );
-       obj.userData.shader = shader;                     // keep reference
-     };
-
-     // later in useFrame:
-     scene.traverse(o => {
-       if (o.userData.shader) o.userData.shader.uniforms.uDark.value = nightValue;
-     });
-
-  Choose #1 for a static tint, #2 to darken the whole scene realistically,
-  or #3 for smooth, per-pixel day-to-night transitions.
---------------------------------------------------------------------------- */
-
-// Group "fir_tree_01_a_LOD0"
-// │
-// ├─ Mesh "NurbsPath001"            (trunk)
-// │   ├─ geometry: BufferGeometry
-// │   └─ material: MeshPhysicalMaterial  "fir_tree_01_bark"
-// │       ├─ color          : Color(1,1,1) ← you tint this
-// │       ├─ map            : Texture "fir_tree_01_bark_diff"        ← delete if you want uniform tint
-// │       ├─ normalMap      : Texture "fir_tree_01_bark_nor_gl"
-// │       ├─ roughnessMap   : Texture "fir_tree_01_bark_rough"
-// │       ├─ metalnessMap   : Texture "fir_tree_01_bark_rough"
-// │       └─ (other PBR slots…)
-// │
-// ├─ Mesh "NurbsPath001_1"          (foliage chunk 1)
-// │   └─ material: MeshPhysicalMaterial "fir_tree_01_leaf"
-// │       ├─ color        : Color(1,1,1)
-// │       ├─ map          : Texture "fir_tree_01_leaf_diff"
-// │       ├─ alphaMap     : Texture "fir_tree_01_leaf_alpha"
-// │       ├─ normalMap    : Texture "fir_tree_01_leaf_nor_gl"
-// │       └─ roughnessMap : Texture "fir_tree_01_leaf_rough"
-// │
-// ├─ Mesh "NurbsPath001_2"          (foliage chunk 2) ── same slots
-// └─ Mesh "NurbsPath001_3"          (foliage chunk 3) ── same slots
-
-// Physically-based shading still works.
-// When you delete material.map and set material.color = new THREE.Color(tint), that colour becomes the new base-albedo that the shader multiplies by the light.
-// Normal-, roughness-, metalness-, displacement-, and alpha-maps are left intact, so you keep:
-
-// fine-grained surface bumps (normal/displacement),
-
-// realistic specular highlights & matte areas (roughness/metalness),
-
-// cut-out leaves (alpha).
