@@ -196,21 +196,29 @@ export default function Terrain() {
         `
   #include <beginnormal_vertex>
   
-  // Calculate custom normals for proper lighting
+  // Calculate proper normals for depth perception
   float dx = cellSize;
   
-  // Sample heights at neighboring points
-  float hL = fbm(position.xy + vec2(-dx, 0.0)) * elevation;
-  hL = abs(plateauize(hL / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  // Sample heights at neighboring points using the same calculation as main displacement
+  float hL_noise = fbm(position.xy + vec2(-dx, 0.0)) * elevation;
+  float hL_normalized = hL_noise / elevation;
+  float hL_plateau = plateauize(hL_normalized, plateauHeight, plateauSmoothing) * elevation;
+  float hL = abs(hL_plateau) + 5.0;
   
-  float hR = fbm(position.xy + vec2(dx, 0.0)) * elevation;
-  hR = abs(plateauize(hR / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  float hR_noise = fbm(position.xy + vec2(dx, 0.0)) * elevation;
+  float hR_normalized = hR_noise / elevation;
+  float hR_plateau = plateauize(hR_normalized, plateauHeight, plateauSmoothing) * elevation;
+  float hR = abs(hR_plateau) + 5.0;
   
-  float hD = fbm(position.xy + vec2(0.0, -dx)) * elevation;
-  hD = abs(plateauize(hD / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  float hD_noise = fbm(position.xy + vec2(0.0, -dx)) * elevation;
+  float hD_normalized = hD_noise / elevation;
+  float hD_plateau = plateauize(hD_normalized, plateauHeight, plateauSmoothing) * elevation;
+  float hD = abs(hD_plateau) + 5.0;
   
-  float hU = fbm(position.xy + vec2(0.0, dx)) * elevation;
-  hU = abs(plateauize(hU / elevation, plateauHeight, plateauSmoothing) * elevation) + 5.0;
+  float hU_noise = fbm(position.xy + vec2(0.0, dx)) * elevation;
+  float hU_normalized = hU_noise / elevation;
+  float hU_plateau = plateauize(hU_normalized, plateauHeight, plateauSmoothing) * elevation;
+  float hU = abs(hU_plateau) + 5.0;
   
   // Calculate normal using finite difference
   vec3 customNormal = normalize(vec3(hL - hR, hD - hU, 2.0 * dx));
