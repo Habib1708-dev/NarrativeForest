@@ -1,35 +1,44 @@
-uniform vec3 uColor;
-uniform float uElevation;
+uniform vec3 uColorWaterDeep;
+uniform vec3 uColorWaterSurface;
+uniform vec3 uColorSand;
+uniform vec3 uColorGrass;
+uniform vec3 uColorSnow;
+uniform vec3 uColorRock;
 
-// Add lighting uniform controls
-uniform vec3 uLightDirection;
-uniform float uAmbientIntensity;
-uniform float uDiffuseIntensity;
+varying vec3 vPosition;
+varying float vUpDot;
 
-// Receive data from vertex shader
-varying vec3 vNormal;
-varying float vElevation; // Add this to receive the elevation
+#include ../includes/simplexNoise2d.glsl
 
-void main() {
-    // Use light direction from uniform instead of hardcoded value
-    vec3 lightDirection = normalize(uLightDirection);
-    
-    // Calculate diffuse lighting
-    float diffuse = max(dot(vNormal, lightDirection), 0.0);
-    
-    // Add ambient light with controlled intensity
-    float light = uAmbientIntensity + diffuse * uDiffuseIntensity;
-    
-    // Base color - use the elevation data directly for coloring
-    // This is independent of viewing angle
-    vec3 baseColor = mix(
-        uColor * 0.7,  // Darker color for valleys
-        uColor * 1.3,  // Brighter color for peaks
-        vElevation     // Use actual height data
-    );
-    
-    // Apply lighting after the height-based coloring
-    vec3 finalColor = baseColor * light;
-    
-    gl_FragColor = vec4(finalColor, 1.0);
+void main()
+{
+    // Color
+    vec3 color = vec3(1.0);
+
+    // Water
+    float surfaceWaterMix = smoothstep(- 1.0, - 0.1, vPosition.y);
+    color = mix(uColorWaterDeep, uColorWaterSurface, surfaceWaterMix);
+
+    // Sand
+    float sandMix = step(- 0.1, vPosition.y);
+    color = mix(color, uColorSand, sandMix);
+
+    // Grass
+    float grassMix = step(- 0.06, vPosition.y);
+    color = mix(color, uColorGrass, grassMix);
+
+    // Rock
+    float rockMix = vUpDot;
+    rockMix = 1.0 - step(0.8, rockMix);
+    rockMix *= step(-0.06, vPosition.y);
+    color = mix(color, uColorRock, rockMix);
+
+    // Snow
+    float snowThreshold = 0.45;
+    snowThreshold += simplexNoise2d(vPosition.xz * 15.0) * 0.1;
+    float snowMix = step(snowThreshold, vPosition.y);
+    color = mix(color, uColorSnow, snowMix);
+
+    // Final color
+    csm_DiffuseColor = vec4(color, 1.0);
 }

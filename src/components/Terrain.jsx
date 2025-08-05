@@ -1,290 +1,196 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useMemo } from "react";
 import * as THREE from "three";
 import { useControls } from "leva";
 
-export default function Terrain() {
-  const materialRef = useRef();
-  const clockRef = useRef(new THREE.Clock());
-  // Use this to force material recreation
-  const [materialKey, setMaterialKey] = useState(0);
+// Simplex noise implementation for JavaScript
+function permute(x) {
+  return ((x * 34.0 + 1.0) * x) % 289.0;
+}
 
-  // Leva controls
+function simplexNoise(x, y) {
+  const C = [
+    0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439,
+  ];
+
+  let i = Math.floor(x + (x + y) * C[1]);
+  let j = Math.floor(y + (x + y) * C[1]);
+
+  let x0 = x - i + (i + j) * C[0];
+  let y0 = y - j + (i + j) * C[0];
+
+  let i1 = x0 > y0 ? 1.0 : 0.0;
+  let j1 = x0 > y0 ? 0.0 : 1.0;
+
+  let x1 = x0 - i1 + C[0];
+  let y1 = y0 - j1 + C[0];
+  let x2 = x0 - 1.0 + 2.0 * C[0];
+  let y2 = y0 - 1.0 + 2.0 * C[0];
+
+  i %= 289.0;
+  j %= 289.0;
+
+  const p0 = permute(permute(j) + i);
+  const p1 = permute(permute(j + j1) + i + i1);
+  const p2 = permute(permute(j + 1.0) + i + 1.0);
+
+  let m0 = Math.max(0.5 - x0 * x0 - y0 * y0, 0.0);
+  let m1 = Math.max(0.5 - x1 * x1 - y1 * y1, 0.0);
+  let m2 = Math.max(0.5 - x2 * x2 - y2 * y2, 0.0);
+
+  m0 = m0 ** 4;
+  m1 = m1 ** 4;
+  m2 = m2 ** 4;
+
+  const px0 = 2.0 * ((p0 * C[3]) % 1.0) - 1.0;
+  const py0 = Math.abs(px0) - 0.5;
+  const ax0 = px0 - Math.floor(px0 + 0.5);
+
+  const px1 = 2.0 * ((p1 * C[3]) % 1.0) - 1.0;
+  const py1 = Math.abs(px1) - 0.5;
+  const ax1 = px1 - Math.floor(px1 + 0.5);
+
+  const px2 = 2.0 * ((p2 * C[3]) % 1.0) - 1.0;
+  const py2 = Math.abs(px2) - 0.5;
+  const ax2 = px2 - Math.floor(px2 + 0.5);
+
+  m0 *= 1.79284291400159 - 0.85373472095314 * (ax0 * ax0 + py0 * py0);
+  m1 *= 1.79284291400159 - 0.85373472095314 * (ax1 * ax1 + py1 * py1);
+  m2 *= 1.79284291400159 - 0.85373472095314 * (ax2 * ax2 + py2 * py2);
+
+  const g0 = ax0 * x0 + py0 * y0;
+  const g1 = ax1 * x1 + py1 * y1;
+  const g2 = ax2 * x2 + py2 * y2;
+
+  return 130.0 * (m0 * g0 + m1 * g1 + m2 * g2);
+}
+
+// Fractional Brownian Motion (fBm)
+function fbm(x, y, frequency, octaves, seed, scale) {
+  let value = 0.0;
+  let amplitude = 0.5;
+  let freq = frequency;
+
+  for (let o = 0; o < octaves; o++) {
+    value +=
+      amplitude *
+      simplexNoise(
+        (x + seed * 100) * freq * scale,
+        (y + seed * 100) * freq * scale
+      );
+    freq *= 2;
+    amplitude *= 0.5;
+  }
+
+  return value;
+}
+
+// Plateau smoothing
+function smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+function plateauize(h, threshold, smoothing) {
+  const low = Math.max(0, threshold - smoothing);
+  const high = Math.min(1, threshold + smoothing);
+  if (h < low || h > high) return h;
+  const n = (h - low) / (high - low);
+  return low + (h - low) * smoothstep(0, 1, n);
+}
+
+export default function Terrain() {
+  const meshRef = useRef();
+
   const terrainParams = useControls("Terrain", {
-    elevation: { value: 50, min: 0, max: 150, step: 1, label: "Elevation" },
-    frequency: {
-      value: 0.005,
-      min: 0.001,
-      max: 0.05,
-      step: 0.001,
-      label: "Feature Size",
-    },
-    octaves: { value: 5, min: 1, max: 8, step: 1, label: "Detail Layers" },
-    seed: { value: 1.0, min: 0.1, max: 10.0, step: 0.1, label: "Seed" },
-    scale: { value: 1.0, min: 0.1, max: 5.0, step: 0.1, label: "Zoom" },
-    color: { value: "#4b7d23", label: "Terrain Color" },
-    plateauHeight: {
-      value: 0.3,
-      min: 0,
-      max: 1.0,
-      step: 0.01,
-      label: "Plateau Height",
-    },
-    plateauSmoothing: {
-      value: 0.2,
-      min: 0,
-      max: 1.0,
-      step: 0.01,
-      label: "Plateau Smoothness",
-    },
+    elevation: { value: 7, min: 0, max: 150, step: 1 },
+    frequency: { value: 0.004, min: 0.001, max: 0.05, step: 0.001 },
+    octaves: { value: 8, min: 1, max: 8, step: 1 },
+    seed: { value: 2.2, min: 0.1, max: 10, step: 0.1 },
+    scale: { value: 5, min: 0.1, max: 5, step: 0.1 },
+    color: { value: "#4b7d23" },
+    plateauHeight: { value: 0, min: 0, max: 1, step: 0.01 },
+    plateauSmoothing: { value: 0.2, min: 0, max: 1, step: 0.01 },
+    segments: { value: 256, min: 32, max: 512, step: 32 },
+    size: { value: 30, min: 10, max: 100, step: 5 },
+    baseHeight: { value: 5, min: 0, max: 20, step: 1 },
   });
 
-  // Force material recreation for structural changes that require recompilation
-  useEffect(() => {
-    setMaterialKey((prev) => prev + 1);
-  }, [terrainParams.octaves]);
+  const terrainGeometry = useMemo(() => {
+    const geom = new THREE.PlaneGeometry(
+      terrainParams.size,
+      terrainParams.size,
+      terrainParams.segments,
+      terrainParams.segments
+    );
 
-  // Ensure uniform updates for parameters that don't need full recompilation
-  useEffect(() => {
-    if (!materialRef.current) return;
+    const pos = geom.attributes.position.array;
+    const segs = terrainParams.segments;
+    const count = segs + 1;
 
-    // Update material color directly
-    materialRef.current.color.set(terrainParams.color);
-
-    const shader = materialRef.current.userData.shader;
-    if (shader) {
-      shader.uniforms.elevation.value = terrainParams.elevation;
-      shader.uniforms.noiseFrequency.value = terrainParams.frequency;
-      shader.uniforms.noiseSeed.value = terrainParams.seed;
-      shader.uniforms.noiseScale.value = terrainParams.scale;
-      shader.uniforms.plateauHeight.value = terrainParams.plateauHeight;
-      shader.uniforms.plateauSmoothing.value = terrainParams.plateauSmoothing;
+    // build height map
+    const heightMap = Array.from({ length: count }, () => Array(count).fill(0));
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < count; j++) {
+        const x = (i / segs) * terrainParams.size - terrainParams.size / 2;
+        const y = (j / segs) * terrainParams.size - terrainParams.size / 2;
+        const d =
+          fbm(
+            x,
+            y,
+            terrainParams.frequency,
+            terrainParams.octaves,
+            terrainParams.seed,
+            terrainParams.scale
+          ) * terrainParams.elevation;
+        const n =
+          plateauize(
+            d / terrainParams.elevation,
+            terrainParams.plateauHeight,
+            terrainParams.plateauSmoothing
+          ) * terrainParams.elevation;
+        heightMap[i][j] = Math.abs(n) + terrainParams.baseHeight;
+      }
     }
 
-    // Force the material to update
-    materialRef.current.needsUpdate = true;
+    // apply heights
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < count; j++) {
+        const idx = 3 * (i * count + j);
+        pos[idx + 2] = heightMap[i][j];
+      }
+    }
+
+    geom.attributes.position.needsUpdate = true;
+    geom.computeVertexNormals();
+    geom.attributes.normal.needsUpdate = true;
+    geom.computeBoundingBox();
+    geom.computeBoundingSphere();
+
+    return geom;
   }, [
     terrainParams.elevation,
     terrainParams.frequency,
+    terrainParams.octaves,
     terrainParams.seed,
     terrainParams.scale,
-    terrainParams.color,
     terrainParams.plateauHeight,
     terrainParams.plateauSmoothing,
+    terrainParams.segments,
+    terrainParams.size,
+    terrainParams.baseHeight,
   ]);
 
-  useEffect(() => {
-    if (!materialRef.current) return;
-
-    // Hook into shader
-    materialRef.current.onBeforeCompile = (shader) => {
-      // Log original shaders
-      console.log("ORIGINAL VERTEX SHADER:");
-      console.log(shader.vertexShader);
-      console.log("\nORIGINAL FRAGMENT SHADER:");
-      console.log(shader.fragmentShader);
-
-      // Inject uniforms
-      shader.uniforms.time = { value: 0 };
-      shader.uniforms.elevation = { value: terrainParams.elevation };
-      shader.uniforms.noiseFrequency = { value: terrainParams.frequency };
-      shader.uniforms.noiseSeed = { value: terrainParams.seed };
-      shader.uniforms.noiseScale = { value: terrainParams.scale };
-      shader.uniforms.noiseOctaves = { value: terrainParams.octaves };
-      // Inside onBeforeCompile function
-      shader.uniforms.plateauHeight = { value: terrainParams.plateauHeight };
-      shader.uniforms.plateauSmoothing = {
-        value: terrainParams.plateauSmoothing,
-      };
-      shader.uniforms.cellSize = { value: 20.0 / 512.0 }; // planeWidth / segments
-
-      console.log("\nINJECTED UNIFORMS:", Object.keys(shader.uniforms));
-
-      // Store the compiled shader for updates
-      materialRef.current.userData.shader = shader;
-
-      // Inject noise + terrain displacement
-      shader.vertexShader = `
-        uniform float elevation;
-        uniform float noiseFrequency;
-        uniform float noiseSeed;
-        uniform float noiseScale;
-        uniform int noiseOctaves;
-        uniform float plateauHeight;
-        uniform float plateauSmoothing;
-        uniform float cellSize;
-
-
-        vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-
-        float snoise(vec2 v) {
-          const vec4 C = vec4(0.211324865405187, 0.366025403784439,
-                   -0.577350269189626, 0.024390243902439);
-
-          vec2 i  = floor(v + dot(v, C.yy));
-          vec2 x0 = v -   i + dot(i, C.xx);
-
-          vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-          vec4 x12 = x0.xyxy + C.xxzz;
-          x12.xy -= i1;
-
-          i = mod(i, 289.0);
-          vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
-            + i.x + vec3(0.0, i1.x, 1.0 ));
-
-          vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy),
-            dot(x12.zw,x12.zw)), 0.0);
-          m = m*m; m = m*m;
-
-          vec3 x = 2.0 * fract(p * C.www) - 1.0;
-          vec3 h = abs(x) - 0.5;
-          vec3 ox = floor(x + 0.5);
-          vec3 a0 = x - ox;
-
-          m *= 1.79284291400159 - 0.85373472095314 * (a0*a0+h*h);
-
-          vec3 g;
-          g.x  = a0.x  * x0.x  + h.x  * x0.y;
-          g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-          return 130.0 * dot(m, g);
-        }
-
-        float fbm(vec2 p) {
-          float value = 0.0;
-          float amplitude = 0.5;
-          float frequency = noiseFrequency;
-          for (int i = 0; i < 8; i++) {
-            if (i >= noiseOctaves) break;
-            value += amplitude * snoise((p + noiseSeed * 100.0) * frequency * noiseScale);
-            frequency *= 2.0;
-            amplitude *= 0.5;
-          }
-          return value;
-        }
-
-        // Smoothstep function to create plateaus
-        float plateauize(float height, float threshold, float smoothing) {
-          float lowThreshold = max(0.0, threshold - smoothing);
-          float highThreshold = min(1.0, threshold + smoothing);
-          
-          // Remap height from [0,1] for smoothstep
-          float normalizedHeight = (height - lowThreshold) / (highThreshold - lowThreshold);
-          float stepped = smoothstep(0.0, 1.0, normalizedHeight);
-          
-          // Blend between original and plateaued height based on how close to threshold
-          if (height < lowThreshold) return height;
-          if (height > highThreshold) return height;
-          return mix(lowThreshold, height, stepped);
-        }
-
-        ${shader.vertexShader}
-      `;
-
-      console.log("\nAFTER PREPENDING FUNCTIONS TO VERTEX SHADER:");
-      console.log(shader.vertexShader);
-
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <begin_vertex>",
-        `
-  #include <begin_vertex>
-  // Get raw noise displacement
-  float displacement = fbm(position.xy) * elevation;
-  
-  // Normalize displacement to 0-1 range for plateauizing
-  float normalizedDisp = (displacement / elevation);
-  
-  // Apply plateau effect - only flatten areas below the threshold
-  float plateauizedDisp = plateauize(normalizedDisp, plateauHeight, plateauSmoothing) * elevation;
-  
-  // Apply final displacement
-  plateauizedDisp = abs(plateauizedDisp) + 5.0;
-  transformed.z += plateauizedDisp;
-  `
-      );
-
-      console.log("\nAFTER REPLACING #include <begin_vertex>:");
-      console.log(shader.vertexShader);
-
-      // Also modify the normal calculation
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <beginnormal_vertex>",
-        `
-  #include <beginnormal_vertex>
-  
-  // Calculate proper normals for depth perception
-  float dx = cellSize;
-  
-  // Sample heights at neighboring points using the same calculation as main displacement
-  float hL_noise = fbm(position.xy + vec2(-dx, 0.0)) * elevation;
-  float hL_normalized = hL_noise / elevation;
-  float hL_plateau = plateauize(hL_normalized, plateauHeight, plateauSmoothing) * elevation;
-  float hL = abs(hL_plateau) + 5.0;
-  
-  float hR_noise = fbm(position.xy + vec2(dx, 0.0)) * elevation;
-  float hR_normalized = hR_noise / elevation;
-  float hR_plateau = plateauize(hR_normalized, plateauHeight, plateauSmoothing) * elevation;
-  float hR = abs(hR_plateau) + 5.0;
-  
-  float hD_noise = fbm(position.xy + vec2(0.0, -dx)) * elevation;
-  float hD_normalized = hD_noise / elevation;
-  float hD_plateau = plateauize(hD_normalized, plateauHeight, plateauSmoothing) * elevation;
-  float hD = abs(hD_plateau) + 5.0;
-  
-  float hU_noise = fbm(position.xy + vec2(0.0, dx)) * elevation;
-  float hU_normalized = hU_noise / elevation;
-  float hU_plateau = plateauize(hU_normalized, plateauHeight, plateauSmoothing) * elevation;
-  float hU = abs(hU_plateau) + 5.0;
-  
-  // Calculate normal using finite difference
-  vec3 customNormal = normalize(vec3(hL - hR, hD - hU, 2.0 * dx));
-  objectNormal = customNormal;
-  `
-      );
-
-      console.log("\nFINAL VERTEX SHADER:");
-      console.log(shader.vertexShader);
-
-      console.log("\nFINAL FRAGMENT SHADER:");
-      console.log(shader.fragmentShader);
-
-      console.log("=== SHADER COMPILATION END ===");
-    };
-
-    // Set up onBeforeRender to update uniforms continuously during rendering
-    materialRef.current.onBeforeRender = (
-      renderer,
-      scene,
-      camera,
-      geometry,
-      material
-    ) => {
-      const shader = material.userData.shader;
-      if (shader) {
-        shader.uniforms.time.value = clockRef.current.getElapsedTime();
-        shader.uniforms.elevation.value = terrainParams.elevation;
-        shader.uniforms.noiseFrequency.value = terrainParams.frequency;
-        shader.uniforms.noiseSeed.value = terrainParams.seed;
-        shader.uniforms.noiseScale.value = terrainParams.scale;
-        shader.uniforms.noiseOctaves.value = terrainParams.octaves;
-        shader.uniforms.plateauHeight.value = terrainParams.plateauHeight;
-        shader.uniforms.plateauSmoothing.value = terrainParams.plateauSmoothing;
-      }
-    };
-
-    // Ensure material updates
-    materialRef.current.needsUpdate = true;
-  }, [materialKey]);
-
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -10, 0]}>
-      <planeGeometry args={[20, 30, 512, 512]} />
-      <meshStandardMaterial
-        key={materialKey}
-        ref={materialRef}
+    <mesh
+      ref={meshRef}
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -10, 0]}
+      geometry={terrainGeometry}
+    >
+      <meshPhysicalMaterial
         color={terrainParams.color}
         wireframe={false}
         flatShading={false}
         side={THREE.DoubleSide}
-        normalScale={[1, 1]}
       />
     </mesh>
   );

@@ -9,10 +9,10 @@ export default function App() {
       gl={{ antialias: true }}
       dpr={[1, 2]}
     >
-      <ambientLight intensity={0.7} />
+      <ambientLight intensity={0} />
       <directionalLight
         position={[5, 10, 5]}
-        intensity={1.5}
+        intensity={3}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-far={500}
         shadow-camera-left={-150}
