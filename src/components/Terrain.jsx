@@ -1,6 +1,11 @@
-import React, { useRef, useMemo } from "react";
+// src/components/Terrain.jsx
+import React, { useRef, useMemo, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
+import { computeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
 import { useControls } from "leva";
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 // Simplex noise implementation for JavaScript
 function permute(x) {
@@ -97,9 +102,10 @@ function plateauize(h, threshold, smoothing) {
   return low + (h - low) * smoothstep(0, 1, n);
 }
 
-export default function Terrain() {
+export default forwardRef(function Terrain(props, ref) {
   const meshRef = useRef();
 
+  // 1) Leva controls
   const terrainParams = useControls("Terrain", {
     elevation: { value: 7, min: 0, max: 150, step: 1 },
     frequency: { value: 0.004, min: 0.001, max: 0.05, step: 0.001 },
@@ -114,84 +120,69 @@ export default function Terrain() {
     baseHeight: { value: 5, min: 0, max: 20, step: 1 },
   });
 
+  // 2) Build & displace the plane, then accelerate it
   const terrainGeometry = useMemo(() => {
-    const geom = new THREE.PlaneGeometry(
-      terrainParams.size,
-      terrainParams.size,
-      terrainParams.segments,
-      terrainParams.segments
-    );
+    const {
+      size,
+      segments,
+      elevation,
+      frequency,
+      octaves,
+      seed,
+      scale,
+      plateauHeight,
+      plateauSmoothing,
+      baseHeight,
+    } = terrainParams;
 
+    const geom = new THREE.PlaneGeometry(size, size, segments, segments);
     const pos = geom.attributes.position.array;
-    const segs = terrainParams.segments;
+    const segs = segments;
     const count = segs + 1;
 
-    // build height map
-    const heightMap = Array.from({ length: count }, () => Array(count).fill(0));
-    for (let i = 0; i < count; i++) {
-      for (let j = 0; j < count; j++) {
-        const x = (i / segs) * terrainParams.size - terrainParams.size / 2;
-        const y = (j / segs) * terrainParams.size - terrainParams.size / 2;
-        const d =
-          fbm(
-            x,
-            y,
-            terrainParams.frequency,
-            terrainParams.octaves,
-            terrainParams.seed,
-            terrainParams.scale
-          ) * terrainParams.elevation;
-        const n =
-          plateauize(
-            d / terrainParams.elevation,
-            terrainParams.plateauHeight,
-            terrainParams.plateauSmoothing
-          ) * terrainParams.elevation;
-        heightMap[i][j] = Math.abs(n) + terrainParams.baseHeight;
-      }
-    }
-
-    // apply heights
+    // Directly displace each vertex
     for (let i = 0; i < count; i++) {
       for (let j = 0; j < count; j++) {
         const idx = 3 * (i * count + j);
-        pos[idx + 2] = heightMap[i][j];
+        const x = (i / segs) * size - size / 2;
+        const z = (j / segs) * size - size / 2;
+
+        const d = fbm(x, z, frequency, octaves, seed, scale) * elevation;
+        const n =
+          plateauize(d / elevation, plateauHeight, plateauSmoothing) *
+          elevation;
+        pos[idx + 2] = Math.abs(n) + baseHeight;
       }
     }
 
     geom.attributes.position.needsUpdate = true;
     geom.computeVertexNormals();
     geom.attributes.normal.needsUpdate = true;
+
+    //Build the BVH for accelerated raycasting
+    geom.computeBoundsTree();
+
     geom.computeBoundingBox();
     geom.computeBoundingSphere();
-
     return geom;
-  }, [
-    terrainParams.elevation,
-    terrainParams.frequency,
-    terrainParams.octaves,
-    terrainParams.seed,
-    terrainParams.scale,
-    terrainParams.plateauHeight,
-    terrainParams.plateauSmoothing,
-    terrainParams.segments,
-    terrainParams.size,
-    terrainParams.baseHeight,
-  ]);
+  }, [terrainParams]);
 
+  // 3) Expose the mesh instance to parent via ref
+  useImperativeHandle(ref, () => meshRef.current, []);
+
+  // 4) Render with Standard material
   return (
     <mesh
       ref={meshRef}
       rotation={[-Math.PI / 2, 0, 0]}
-      position={[0, -10, 0]}
       geometry={terrainGeometry}
+      position={[0, -10, 0]}
     >
-      <meshPhysicalMaterial
+      <meshStandardMaterial
         color={terrainParams.color}
-        wireframe={false}
         flatShading={false}
         side={THREE.DoubleSide}
       />
     </mesh>
   );
-}
+});

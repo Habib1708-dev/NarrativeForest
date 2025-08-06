@@ -1,15 +1,23 @@
+// src/Experience.jsx
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
 import Terrain from "./components/Terrain";
-import Tree from "./components/Tree";
+import Forest from "./components/Forest";
 import { useControls, folder } from "leva";
-import { useRef } from "react";
-import * as THREE from "three";
+import { useRef, useState } from "react";
+import Tree from "./components/Tree";
+import TreeTwo from "./components/TreeTwo";
 
 export default function Experience() {
   const skyRef = useRef();
+  const [terrainMesh, setTerrainMesh] = useState(null);
 
-  // Add controls for fog and sky
+  const terrainRefCallback = (mesh) => {
+    // mesh will be null on unmount; skip
+    if (mesh) setTerrainMesh(mesh);
+  };
+
+  // Fog & sky controls
   const { sunPosition, fogColor, fogNear, fogFar } = useControls({
     Atmosphere: folder({
       sunPosition: { value: [1, 0.3, 2], step: 0.1 },
@@ -23,14 +31,12 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Add fog for atmospheric depth */}
+      {/* Atmosphere */}
       <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
-
-      {/* Add Sky with sunset preset */}
       <Sky
         ref={skyRef}
         sunPosition={sunPosition}
-        inclination={0.1} // Low sun for sunset effect
+        inclination={0.1}
         azimuth={0.25}
         distance={450000}
         rayleigh={2}
@@ -39,30 +45,27 @@ export default function Experience() {
         mieDirectionalG={0.8}
       />
 
+      {/* Controls & Lights */}
       <OrbitControls
         makeDefault
-        // Remove restrictions on polar angle to allow complete freedom
-        // maxPolarAngle={Math.PI * 0.4} - removed this restriction
-        minDistance={1} // Allow getting closer
-        maxDistance={200} // Allow getting farther
+        minDistance={1}
+        maxDistance={200}
         target={[0, 0, 0]}
-        enableDamping={true}
+        enableDamping
         dampingFactor={0.05}
-        enablePan={true}
+        enablePan
         panSpeed={0.5}
-        // Additional settings for more freedom
-        screenSpacePanning={true}
+        screenSpacePanning
         rotateSpeed={0.5}
       />
-
-      {/* Adjust lights to match sunset atmosphere */}
-      <ambientLight intensity={0.4} color="#ffe0cc" />
+      <ambientLight intensity={1} color="#ffe0cc" />
       <directionalLight
         position={[10, 15, 10]}
         intensity={1.2}
         color="#ff9966"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
         shadow-camera-far={100}
         shadow-camera-left={-30}
         shadow-camera-right={30}
@@ -70,8 +73,12 @@ export default function Experience() {
         shadow-camera-bottom={-30}
       />
 
-      <Terrain />
-      <Tree position={[0, 0, 0]} rotation={[0, Math.PI / 4, 0]} scale={0.04} />
+      {/* 1) Tell Terrain to hand us its sampler (wrapped so it becomes state) */}
+      <Terrain ref={terrainRefCallback} />
+
+      {/* 2) Once state is a function, mount Forest */}
+      <Forest terrainMesh={terrainMesh} />
+      <Tree scale={[0.04, 0.04, 0.04]} position={[0, 0, 0]} />
     </>
   );
 }

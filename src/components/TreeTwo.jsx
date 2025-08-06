@@ -5,7 +5,7 @@ import { useControls } from "leva";
 import * as THREE from "three";
 
 const Tree = forwardRef(function Tree(props, ref) {
-  const { scene } = useGLTF("/models/tree/tree_aML.glb");
+  const { scene } = useGLTF("/models/tree/tree_a.glb");
   const treeRef = useRef();
   const originalMaterials = useRef(new Map());
 
@@ -79,6 +79,6 @@ const Tree = forwardRef(function Tree(props, ref) {
 });
 
 // Preload the model for better performance
-useGLTF.preload("/models/tree/tree_aML.glb");
+useGLTF.preload("/models/tree/tree_a.glb");
 
 export default Tree;
