@@ -178,11 +178,7 @@ export default forwardRef(function Terrain(props, ref) {
       geometry={terrainGeometry}
       position={[0, -10, 0]}
     >
-      <meshStandardMaterial
-        color={terrainParams.color}
-        flatShading={false}
-        side={THREE.DoubleSide}
-      />
+      <meshStandardMaterial color={terrainParams.color} flatShading={false} />
     </mesh>
   );
 });

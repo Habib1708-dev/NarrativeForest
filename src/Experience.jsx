@@ -4,9 +4,7 @@ import { OrbitControls, Sky } from "@react-three/drei";
 import Terrain from "./components/Terrain";
 import Forest from "./components/Forest";
 import { useControls, folder } from "leva";
-import { useRef, useState } from "react";
-import Tree from "./components/Tree";
-import TreeTwo from "./components/TreeTwo";
+import { useRef, useState, Suspense } from "react";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -73,12 +71,17 @@ export default function Experience() {
         shadow-camera-bottom={-30}
       />
 
-      {/* 1) Tell Terrain to hand us its sampler (wrapped so it becomes state) */}
-      <Terrain ref={terrainRefCallback} />
-
-      {/* 2) Once state is a function, mount Forest */}
-      <Forest terrainMesh={terrainMesh} />
-      <Tree scale={[0.04, 0.04, 0.04]} position={[0, 0, 0]} />
+      <Suspense fallback={null}>
+        {/* 1) Tell Terrain to hand us its sampler (wrapped so it becomes state) */}
+        <Terrain
+          ref={(m) => {
+            console.log("[Experience] got terrainMesh:", m);
+            setTerrainMesh(m);
+          }}
+        />
+        {/* 2) Once state is a function, mount Forest */}
+        <Forest terrainMesh={terrainMesh} />
+      </Suspense>
     </>
   );
 }
