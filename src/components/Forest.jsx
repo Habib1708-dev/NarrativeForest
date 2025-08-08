@@ -36,21 +36,29 @@ export default function Forest({ terrainMesh }) {
   // 1) Bake ALL transforms once (positions, rotations, scales with terrain Y)
   const allTransforms = useMemo(() => {
     if (!terrainMesh) return [];
-    terrainMesh.updateMatrixWorld();
+    terrainMesh.updateMatrixWorld(true);
 
     const prng = mulberry32(Math.floor(seed));
-    const down = new THREE.Vector3(0, -1, 0);
-    const originY = size; // cast from above world
     const arr = [];
+
+    // Reuse one Raycaster and vectors (three-mesh-bvh accelerates this)
+    const ray = new THREE.Raycaster();
+    ray.firstHitOnly = true;
+    const origin = new THREE.Vector3();
+    const down = new THREE.Vector3(0, -1, 0);
+
+    const originY = size; // cast from above world
 
     for (let i = 0; i < count; i++) {
       const x = prng() * size - size / 2;
       const z = prng() * size - size / 2;
       const scale = 0.02 + prng() * 0.02;
 
-      const origin = new THREE.Vector3(x, originY, z);
-      const ray = new THREE.Raycaster(origin, down, 0, originY * 2);
-      ray.firstHitOnly = true;
+      origin.set(x, originY, z);
+      ray.set(origin, down);
+      ray.near = 0;
+      ray.far = originY * 2;
+
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
       const terrainY = hit?.point.y ?? 0;
 
@@ -64,7 +72,6 @@ export default function Forest({ terrainMesh }) {
       });
     }
 
-    // console.log(`Baked ${arr.length} trees`);
     return arr;
   }, [terrainMesh, seed, size, count]);
 
