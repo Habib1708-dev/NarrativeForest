@@ -116,7 +116,7 @@ export default forwardRef(function Terrain(props, ref) {
     plateauHeight: { value: 0, min: 0, max: 1, step: 0.01 },
     plateauSmoothing: { value: 0.2, min: 0, max: 1, step: 0.01 },
     segments: { value: 256, min: 32, max: 512, step: 32 },
-    size: { value: 30, min: 10, max: 100, step: 5 },
+    size: { value: 20, min: 10, max: 100, step: 5 },
     baseHeight: { value: 5, min: 0, max: 20, step: 1 },
   });
 

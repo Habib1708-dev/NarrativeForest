@@ -22,8 +22,8 @@ export default function Forest({ terrainMesh }) {
     count: { value: 3500, min: 10, max: 20000, step: 10 },
     chunkSize: { value: 6, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
-      value: 1,
-      min: 1,
+      value: 0.2,
+      min: 0.2,
       max: 40,
       step: 1,
       label: "High LOD radius (chunks)",
