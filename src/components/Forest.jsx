@@ -6,21 +6,21 @@ import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 
 export default function Forest({ terrainMesh }) {
-  // Controls
+  // Controls (two LODs: high near, low as "medium" band, then culled)
   const {
     size,
     seed,
     count,
     chunkSize,
-    nearRadius,
-    midRadius,
-    viewRadius,
-    plantRadius, // NEW: spawn radius (meters)
+    nearRadius, // high LOD within this (in chunks)
+    midRadius, // low LOD within this (in chunks)
+    viewRadius, // > this -> off (in chunks)
+    plantRadius, // spawn radius (meters)
   } = useControls("Forest", {
     size: { value: 30, min: 10, max: 200, step: 5 },
     seed: { value: 1, min: 0, max: 100, step: 1 },
     count: { value: 3500, min: 10, max: 20000, step: 10 },
-    chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
+    chunkSize: { value: 6, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 1,
       min: 1,
@@ -29,14 +29,14 @@ export default function Forest({ terrainMesh }) {
       label: "High LOD radius (chunks)",
     },
     midRadius: {
-      value: 3,
+      value: 2,
       min: 1,
       max: 60,
       step: 1,
-      label: "Medium LOD radius (chunks)",
+      label: "Low LOD radius (chunks)",
     },
     viewRadius: {
-      value: 6,
+      value: 5,
       min: 2,
       max: 80,
       step: 1,
@@ -48,21 +48,18 @@ export default function Forest({ terrainMesh }) {
       max: 100,
       step: 1,
       label: "Plant radius (m)",
-    }, // NEW
+    },
   });
 
-  // Load LODs
+  // LOD assets (only two): High + Low (used as "medium" band)
   const highParts = useInstancedTree(
-    "/models/tree/PineTrees2/PineTree1Decimated4589.glb"
-  );
-  const medParts = useInstancedTree(
-    "/models/tree/PineTrees2/PineTree2MediumLODDecimated1668.glb"
+    "/models/tree/PineTrees2/PineTreeHighLOD6065.glb"
   );
   const lowParts = useInstancedTree(
     "/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"
   );
 
-  // 1) Bake transforms once
+  // 1) Bake all transforms once
   const allTransforms = useMemo(() => {
     if (!terrainMesh) return [];
     terrainMesh.updateMatrixWorld(true);
@@ -79,16 +76,17 @@ export default function Forest({ terrainMesh }) {
     const originY = bbox.max.y + 5;
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
-    // cap radius to stay within terrain bounds
+    // Clamp planting radius to terrain extents
     const R = Math.min(plantRadius, size * 0.5 - 0.001);
 
     for (let i = 0; i < count; i++) {
-      // Uniform disk sampling (centered at terrain origin)
+      // Uniform disk sampling
       const r = Math.sqrt(prng()) * R;
       const theta = prng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
+      // Small per-instance scale
       const scale = 0.003 + prng() * (0.006 - 0.003);
 
       origin.set(x, originY, z);
@@ -99,7 +97,7 @@ export default function Forest({ terrainMesh }) {
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
       const terrainY = hit?.point.y ?? 0;
 
-      // tiny bury so no floating
+      // Slight bury to avoid floating
       const adjustedY = terrainY - scale * 2.0;
 
       arr.push({
@@ -139,11 +137,12 @@ export default function Forest({ terrainMesh }) {
     return Array.from(map.values());
   }, [allTransforms, size, chunkSize]);
 
-  // 3) LOD selection
+  // 3) Chunk LOD modes (two bands): "high" (near), "med" (low model), "off"
   const { camera } = useThree();
-  const [chunkModes, setChunkModes] = useState({});
-  const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9));
-  const moveThreshold = Math.max(0.5, chunkSize * 0.5);
+  const [chunkModes, setChunkModes] = useState({}); // key -> "off" | "med" | "high"
+  const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9)); // force first update
+  const cam2 = useRef(new THREE.Vector3());
+  const moveThreshold = Math.max(0.5, chunkSize * 0.5); // world units
 
   useEffect(() => {
     setChunkModes({});
@@ -151,28 +150,27 @@ export default function Forest({ terrainMesh }) {
   }, [chunks, chunkSize, nearRadius, midRadius, viewRadius]);
 
   useFrame(() => {
-    const cx = camera.position.x,
-      cz = camera.position.z;
-    const dx = cx - lastCam.current.x,
-      dz = cz - lastCam.current.z;
-    if (dx * dx + dz * dz < moveThreshold * moveThreshold) return;
-    lastCam.current.set(cx, 0, cz);
+    cam2.current.set(camera.position.x, 0, camera.position.z);
+    const dx = cam2.current.x - lastCam.current.x;
+    const dz = cam2.current.z - lastCam.current.z;
+    if (dx * dx + dz * dz < moveThreshold * moveThreshold) return; // throttle
+    lastCam.current.copy(cam2.current);
 
     const halfDiag = Math.SQRT2 * (chunkSize / 2);
     const nearWorld = nearRadius * chunkSize;
     const midWorld = midRadius * chunkSize;
     const viewWorld = viewRadius * chunkSize;
 
-    const cam2 = new THREE.Vector3(cx, 0, cz);
     const nextModes = {};
     for (const c of chunks) {
-      const dist = c.center.distanceTo(cam2);
+      const dist = c.center.distanceTo(cam2.current);
       if (dist > viewWorld + halfDiag) nextModes[c.key] = "off";
       else if (dist <= nearWorld + halfDiag) nextModes[c.key] = "high";
       else if (dist <= midWorld + halfDiag) nextModes[c.key] = "med";
-      else nextModes[c.key] = "low";
+      else nextModes[c.key] = "off"; // no far ring
     }
 
+    // only set state if changed
     let changed = false;
     if (Object.keys(nextModes).length !== Object.keys(chunkModes).length)
       changed = true;
@@ -185,7 +183,8 @@ export default function Forest({ terrainMesh }) {
     if (changed) setChunkModes(nextModes);
   });
 
-  if (!highParts.length || !medParts.length || !lowParts.length) return null;
+  // 4) Render chunks (wait for GLBs)
+  if (!highParts.length || !lowParts.length) return null;
 
   return (
     <group>
@@ -195,77 +194,76 @@ export default function Forest({ terrainMesh }) {
           transforms={chunk.transforms}
           mode={chunkModes[chunk.key] ?? "off"}
           highParts={highParts}
-          medParts={medParts}
-          lowParts={lowParts}
+          medParts={lowParts} // use low model for the "med" band
         />
       ))}
     </group>
   );
 }
 
-function ChunkInstanced({ transforms, mode, highParts, medParts, lowParts }) {
+/**
+ * ChunkInstanced:
+ * - Precompute and write all instance matrices ONCE to both LOD sets.
+ * - On mode change, ONLY flip `.count` (no matrix re-writes).
+ */
+function ChunkInstanced({ transforms, mode, highParts, medParts }) {
   const capacity = transforms.length;
+
   const highRefs = useRef(highParts.map(() => React.createRef()));
   const medRefs = useRef(medParts.map(() => React.createRef()));
-  const lowRefs = useRef(lowParts.map(() => React.createRef()));
 
-  useEffect(() => {
-    [highRefs.current, medRefs.current, lowRefs.current].forEach((arr) =>
-      arr.forEach(
-        (r) =>
-          r.current && r.current.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-      )
-    );
-  }, []);
-
-  useEffect(() => {
+  // Precompute matrices once per transforms change
+  const matrices = useMemo(() => {
+    const list = new Array(transforms.length);
     const m4 = new THREE.Matrix4();
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
+    for (let i = 0; i < transforms.length; i++) {
+      const t = transforms[i];
+      p.fromArray(t.position);
+      q.setFromEuler(new THREE.Euler(0, t.rotation, 0));
+      s.setScalar(t.scale);
+      list[i] = m4.clone().compose(p, q, s);
+    }
+    return list;
+  }, [transforms]);
 
-    function writeAll(refArray) {
-      refArray.forEach((ref) => {
-        const mesh = ref.current;
+  // On mount / transforms change: write matrices ONCE to both LOD sets
+  useEffect(() => {
+    [highRefs.current, medRefs.current].forEach((arr) =>
+      arr.forEach((r) => {
+        const mesh = r.current;
         if (!mesh) return;
-        for (let i = 0; i < transforms.length; i++) {
-          const t = transforms[i];
-          p.fromArray(t.position);
-          q.setFromEuler(new THREE.Euler(0, t.rotation, 0));
-          s.setScalar(t.scale);
-          m4.compose(p, q, s);
-          mesh.setMatrixAt(i, m4);
-        }
-        mesh.count = transforms.length;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        for (let i = 0; i < matrices.length; i++)
+          mesh.setMatrixAt(i, matrices[i]);
+        mesh.count = 0; // visibility controlled by mode
         mesh.instanceMatrix.needsUpdate = true;
         mesh.frustumCulled = false;
-      });
-    }
-    function hideAll(refArray) {
+      })
+    );
+  }, [matrices]);
+
+  // On mode change: only flip counts
+  useEffect(() => {
+    function setCount(refArray, n) {
       refArray.forEach((ref) => {
         const mesh = ref.current;
-        if (mesh) mesh.count = 0;
+        if (mesh) mesh.count = n;
       });
     }
-
     if (mode === "high") {
-      writeAll(highRefs.current);
-      hideAll(medRefs.current);
-      hideAll(lowRefs.current);
+      setCount(highRefs.current, matrices.length);
+      setCount(medRefs.current, 0);
     } else if (mode === "med") {
-      writeAll(medRefs.current);
-      hideAll(highRefs.current);
-      hideAll(lowRefs.current);
-    } else if (mode === "low") {
-      writeAll(lowRefs.current);
-      hideAll(highRefs.current);
-      hideAll(medRefs.current);
+      setCount(highRefs.current, 0);
+      setCount(medRefs.current, matrices.length);
     } else {
-      hideAll(highRefs.current);
-      hideAll(medRefs.current);
-      hideAll(lowRefs.current);
+      setCount(highRefs.current, 0);
+      setCount(medRefs.current, 0);
     }
-  }, [mode, transforms]);
+  }, [mode, matrices.length]);
 
   return (
     <group>
@@ -289,20 +287,11 @@ function ChunkInstanced({ transforms, mode, highParts, medParts, lowParts }) {
           frustumCulled={false}
         />
       ))}
-      {lowParts.map((p, i) => (
-        <instancedMesh
-          key={`l-${i}`}
-          ref={lowRefs.current[i]}
-          args={[p.geometry, p.material, capacity]}
-          castShadow={false}
-          receiveShadow
-          frustumCulled={false}
-        />
-      ))}
     </group>
   );
 }
 
+// Simple seedable PRNG
 function mulberry32(seed) {
   let t = seed >>> 0;
   return () => {

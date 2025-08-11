@@ -1,13 +1,16 @@
-// src/components/InstancedTree.jsx
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 
+/**
+ * Loads a GLTF and returns an array of parts: [{ geometry, material }, ...]
+ * We BAKE each mesh's transform (incl. root scale) into its geometry so instancing
+ * uses the correct real-world size without relying on node transforms.
+ */
 export function useInstancedTree(url) {
   const { scene } = useGLTF(url);
 
   return useMemo(() => {
-    // Ensure world matrices are valid
     scene.updateMatrixWorld(true);
 
     const invRoot = new THREE.Matrix4().copy(scene.matrixWorld).invert();
@@ -16,21 +19,21 @@ export function useInstancedTree(url) {
     scene.traverse((child) => {
       if (!child.isMesh) return;
 
-      // Cloning the geometry and bake the node's full transform relative to the GLTF root
+      // Bake transform relative to GLTF root into a cloned geometry
       const geom = child.geometry.clone();
-      const localFromRoot = new THREE.Matrix4()
+      const baked = new THREE.Matrix4()
         .copy(invRoot)
-        .multiply(child.matrixWorld); // root^-1 * childWorld
-
-      geom.applyMatrix4(localFromRoot);
-      geom.computeVertexNormals(); // normals can change after baking
+        .multiply(child.matrixWorld);
+      geom.applyMatrix4(baked);
+      geom.computeVertexNormals();
       geom.computeBoundingSphere();
       geom.computeBoundingBox();
 
-      // Use the material as-is (OK for instancing);
       parts.push({
         geometry: geom,
-        material: child.material,
+        material: child.material, // share material (okay for instancing)
+        name: child.name,
+        materialName: child.material?.name || "", // <-- optional
       });
     });
 
@@ -38,7 +41,7 @@ export function useInstancedTree(url) {
   }, [scene]);
 }
 
-// Preload (public-relative paths)
-useGLTF.preload("/models/tree/PineTrees2/PineTree1Decimated4589.glb"); // High
+// Preload so Suspense batches fetches (paths are /public-relative)
+useGLTF.preload("/models/tree/PineTrees2/PineTreeHighLOD6065.glb"); // High
 useGLTF.preload("/models/tree/PineTrees2/PineTree2MediumLODDecimated1668.glb"); // Medium
 useGLTF.preload("/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"); // Low
