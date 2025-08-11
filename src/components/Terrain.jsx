@@ -1,15 +1,10 @@
 // src/components/Terrain.jsx
 import React, { useRef, useMemo, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import {
-  computeBoundsTree,
-  acceleratedRaycast,
-  disposeBoundsTree,
-} from "three-mesh-bvh";
+import { computeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
 import { useControls } from "leva";
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 // Simplex noise implementation for JavaScript
@@ -171,15 +166,6 @@ export default forwardRef(function Terrain(props, ref) {
     geom.computeBoundingSphere();
     return geom;
   }, [terrainParams]);
-
-  useEffect(() => {
-    const geom = terrainGeometry;
-    return () => {
-      // this runs before the next terrainGeometry is set, and on unmount
-      geom?.disposeBoundsTree?.();
-      geom?.dispose();
-    };
-  }, [terrainGeometry]);
 
   // 3) Expose the mesh instance to parent via ref
   useImperativeHandle(ref, () => meshRef.current, []);
