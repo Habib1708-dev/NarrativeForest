@@ -19,13 +19,13 @@ export default function Forest({ terrainMesh }) {
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
     seed: { value: 1, min: 0, max: 100, step: 1 },
-    count: { value: 1000, min: 10, max: 20000, step: 10 },
+    count: { value: 1300, min: 10, max: 20000, step: 10 },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 0.2,
       min: 0.01,
-      max: 40,
-      step: 1,
+      max: 10,
+      step: 0.01,
       label: "High LOD radius (chunks)",
     },
     midRadius: {
@@ -55,7 +55,7 @@ export default function Forest({ terrainMesh }) {
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
     tintColor: { value: "#0a0a0a", label: "Tint Color" }, // near-black
     tintIntensity: {
-      value: 1.0,
+      value: 0.8,
       min: 0,
       max: 1,
       step: 0.01,
@@ -126,7 +126,9 @@ export default function Forest({ terrainMesh }) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      const scale = 0.003 + prng() * (0.006 - 0.003);
+      // scale trees with a relative factor in [1.3, 1.9] around a base scale
+      const baseScale = 0.0045; // midpoint of previous 0.003..0.006
+      const scale = baseScale * (1.3 + prng() * 0.6);
 
       origin.set(x, originY, z);
       ray.set(origin, down);
