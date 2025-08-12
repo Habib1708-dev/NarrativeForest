@@ -6,24 +6,24 @@ import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 
 export default function Forest({ terrainMesh }) {
-  // Controls (two LODs: high near, low as "medium" band, then culled)
+  // i control LODs and planting
   const {
     size,
     seed,
     count,
     chunkSize,
-    nearRadius, // high LOD within this (in chunks)
-    midRadius, // low LOD within this (in chunks)
-    viewRadius, // > this -> off (in chunks)
-    plantRadius, // spawn radius (meters)
+    nearRadius,
+    midRadius,
+    viewRadius,
+    plantRadius,
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
     seed: { value: 1, min: 0, max: 100, step: 1 },
-    count: { value: 3000, min: 10, max: 20000, step: 10 },
+    count: { value: 1000, min: 10, max: 20000, step: 10 },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 0.2,
-      min: 0.2,
+      min: 0.01,
       max: 40,
       step: 1,
       label: "High LOD radius (chunks)",
@@ -51,7 +51,19 @@ export default function Forest({ terrainMesh }) {
     },
   });
 
-  // LOD assets (only two): High + Low (used as "medium" band)
+  // i control tinting
+  const { tintColor, tintIntensity } = useControls("Tree Tint", {
+    tintColor: { value: "#0a0a0a", label: "Tint Color" }, // near-black
+    tintIntensity: {
+      value: 1.0,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      label: "Intensity",
+    },
+  });
+
+  // i load the two LOD assets
   const highParts = useInstancedTree(
     "/models/tree/PineTrees2/PineTreeHighLOD6065.glb"
   );
@@ -59,7 +71,36 @@ export default function Forest({ terrainMesh }) {
     "/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"
   );
 
-  // 1) Bake all transforms once
+  // i apply the tint whenever parts load or controls change
+  useEffect(() => {
+    const target = new THREE.Color(tintColor);
+
+    const tintParts = (parts) => {
+      parts.forEach((p) => {
+        const m = p.material;
+        if (!m || !m.color) return;
+
+        // i stash the original color once so i can lerp from it every time
+        if (!m.userData._origColor) {
+          m.userData._origColor = m.color.clone();
+        }
+
+        // i start from the original, then lerp toward the target by intensity
+        m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
+
+        // i keep wood non-metal and fairly rough so dark looks natural
+        if (typeof m.metalness === "number") m.metalness = 0.0;
+        if (typeof m.roughness === "number")
+          m.roughness = Math.min(1, Math.max(0.8, m.roughness));
+        m.needsUpdate = true;
+      });
+    };
+
+    if (highParts.length) tintParts(highParts);
+    if (lowParts.length) tintParts(lowParts);
+  }, [highParts, lowParts, tintColor, tintIntensity]);
+
+  // i bake all transforms once
   const allTransforms = useMemo(() => {
     if (!terrainMesh) return [];
     terrainMesh.updateMatrixWorld(true);
@@ -76,17 +117,15 @@ export default function Forest({ terrainMesh }) {
     const originY = bbox.max.y + 5;
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
-    // Clamp planting radius to terrain extents
     const R = Math.min(plantRadius, size * 0.5 - 0.001);
 
     for (let i = 0; i < count; i++) {
-      // Uniform disk sampling
+      // i sample uniformly in a disk
       const r = Math.sqrt(prng()) * R;
       const theta = prng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      // Small per-instance scale
       const scale = 0.003 + prng() * (0.006 - 0.003);
 
       origin.set(x, originY, z);
@@ -97,7 +136,6 @@ export default function Forest({ terrainMesh }) {
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
       const terrainY = hit?.point.y ?? 0;
 
-      // Slight bury to avoid floating
       const adjustedY = terrainY - scale * 2.0;
 
       arr.push({
@@ -110,7 +148,7 @@ export default function Forest({ terrainMesh }) {
     return arr;
   }, [terrainMesh, seed, size, count, plantRadius]);
 
-  // 2) Partition into chunks
+  // i partition into chunks
   const chunks = useMemo(() => {
     if (allTransforms.length === 0) return [];
     const map = new Map();
@@ -137,12 +175,17 @@ export default function Forest({ terrainMesh }) {
     return Array.from(map.values());
   }, [allTransforms, size, chunkSize]);
 
-  // 3) Chunk LOD modes (two bands): "high" (near), "med" (low model), "off"
+  // i choose chunk LOD per camera distance
   const { camera } = useThree();
   const [chunkModes, setChunkModes] = useState({}); // key -> "off" | "med" | "high"
-  const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9)); // force first update
+  const modesRef = useRef(chunkModes); // i avoid stale state in useFrame
+  const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9));
   const cam2 = useRef(new THREE.Vector3());
-  const moveThreshold = Math.max(0.5, chunkSize * 0.5); // world units
+  const moveThreshold = Math.max(0.5, chunkSize * 0.5);
+
+  useEffect(() => {
+    modesRef.current = chunkModes;
+  }, [chunkModes]);
 
   useEffect(() => {
     setChunkModes({});
@@ -153,7 +196,7 @@ export default function Forest({ terrainMesh }) {
     cam2.current.set(camera.position.x, 0, camera.position.z);
     const dx = cam2.current.x - lastCam.current.x;
     const dz = cam2.current.z - lastCam.current.z;
-    if (dx * dx + dz * dz < moveThreshold * moveThreshold) return; // throttle
+    if (dx * dx + dz * dz < moveThreshold * moveThreshold) return;
     lastCam.current.copy(cam2.current);
 
     const halfDiag = Math.SQRT2 * (chunkSize / 2);
@@ -167,23 +210,27 @@ export default function Forest({ terrainMesh }) {
       if (dist > viewWorld + halfDiag) nextModes[c.key] = "off";
       else if (dist <= nearWorld + halfDiag) nextModes[c.key] = "high";
       else if (dist <= midWorld + halfDiag) nextModes[c.key] = "med";
-      else nextModes[c.key] = "off"; // no far ring
+      else nextModes[c.key] = "off";
     }
 
-    // only set state if changed
+    // i only update state when something actually changed
+    const curr = modesRef.current;
     let changed = false;
-    if (Object.keys(nextModes).length !== Object.keys(chunkModes).length)
+    if (Object.keys(nextModes).length !== Object.keys(curr).length)
       changed = true;
     else
       for (const k in nextModes)
-        if (chunkModes[k] !== nextModes[k]) {
+        if (curr[k] !== nextModes[k]) {
           changed = true;
           break;
         }
-    if (changed) setChunkModes(nextModes);
+    if (changed) {
+      setChunkModes(nextModes);
+      modesRef.current = nextModes;
+    }
   });
 
-  // 4) Render chunks (wait for GLBs)
+  // i wait for both LODs to be ready
   if (!highParts.length || !lowParts.length) return null;
 
   return (
@@ -194,25 +241,21 @@ export default function Forest({ terrainMesh }) {
           transforms={chunk.transforms}
           mode={chunkModes[chunk.key] ?? "off"}
           highParts={highParts}
-          medParts={lowParts} // use low model for the "med" band
+          medParts={lowParts}
         />
       ))}
     </group>
   );
 }
 
-/**
- * ChunkInstanced:
- * - Precompute and write all instance matrices ONCE to both LOD sets.
- * - On mode change, ONLY flip `.count` (no matrix re-writes).
- */
+// i render a chunk: i upload matrices once, then i only flip counts
 function ChunkInstanced({ transforms, mode, highParts, medParts }) {
   const capacity = transforms.length;
 
   const highRefs = useRef(highParts.map(() => React.createRef()));
   const medRefs = useRef(medParts.map(() => React.createRef()));
 
-  // Precompute matrices once per transforms change
+  // i precompute matrices
   const matrices = useMemo(() => {
     const list = new Array(transforms.length);
     const m4 = new THREE.Matrix4();
@@ -229,30 +272,27 @@ function ChunkInstanced({ transforms, mode, highParts, medParts }) {
     return list;
   }, [transforms]);
 
-  // On mount / transforms change: write matrices ONCE to both LOD sets
+  // i upload matrices once
   useEffect(() => {
     [highRefs.current, medRefs.current].forEach((arr) =>
       arr.forEach((r) => {
         const mesh = r.current;
         if (!mesh) return;
-        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        mesh.matrixAutoUpdate = false;
         for (let i = 0; i < matrices.length; i++)
           mesh.setMatrixAt(i, matrices[i]);
-        mesh.count = 0; // visibility controlled by mode
+        mesh.count = 0;
         mesh.instanceMatrix.needsUpdate = true;
         mesh.frustumCulled = false;
       })
     );
   }, [matrices]);
 
-  // On mode change: only flip counts
+  // i flip counts on mode change
   useEffect(() => {
-    function setCount(refArray, n) {
-      refArray.forEach((ref) => {
-        const mesh = ref.current;
-        if (mesh) mesh.count = n;
-      });
-    }
+    const setCount = (refs, n) =>
+      refs.forEach((ref) => ref.current && (ref.current.count = n));
     if (mode === "high") {
       setCount(highRefs.current, matrices.length);
       setCount(medRefs.current, 0);
@@ -291,7 +331,7 @@ function ChunkInstanced({ transforms, mode, highParts, medParts }) {
   );
 }
 
-// Simple seedable PRNG
+// simple seedable prng
 function mulberry32(seed) {
   let t = seed >>> 0;
   return () => {
