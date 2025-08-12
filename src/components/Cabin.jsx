@@ -51,7 +51,7 @@ export default function Cabin() {
       Transform: folder({
         positionX: { value: -1.8, min: -50, max: 50, step: 0.1 },
         positionY: { value: -4.8, min: -20, max: 20, step: 0.1 },
-        positionZ: { value: -2.6, min: -50, max: 50, step: 0.1 },
+        positionZ: { value: -2.7, min: -50, max: 50, step: 0.1 },
         rotationYDeg: {
           value: 180,
           min: -180,
@@ -68,9 +68,9 @@ export default function Cabin() {
         },
       }),
       Tint: folder({
-        tintColor: { value: "#ffffff", label: "Tint Color" },
+        tintColor: { value: "#808080", label: "Tint Color" },
         tintIntensity: {
-          value: 0.0,
+          value: 0.75,
           min: 0,
           max: 1,
           step: 0.01,
