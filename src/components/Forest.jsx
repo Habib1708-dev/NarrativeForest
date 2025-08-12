@@ -17,10 +17,10 @@ export default function Forest({ terrainMesh }) {
     viewRadius, // > this -> off (in chunks)
     plantRadius, // spawn radius (meters)
   } = useControls("Forest", {
-    size: { value: 30, min: 10, max: 200, step: 5 },
+    size: { value: 20, min: 10, max: 200, step: 5 },
     seed: { value: 1, min: 0, max: 100, step: 1 },
-    count: { value: 3500, min: 10, max: 20000, step: 10 },
-    chunkSize: { value: 6, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
+    count: { value: 3000, min: 10, max: 20000, step: 10 },
+    chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 0.2,
       min: 0.2,

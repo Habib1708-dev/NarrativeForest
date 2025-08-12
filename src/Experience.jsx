@@ -20,8 +20,8 @@ export default function Experience() {
   const { sunPosition, fogColor, fogNear, fogFar } = useControls({
     Atmosphere: folder({
       sunPosition: { value: [1, 0.3, 2], step: 0.1 },
-      fogColor: { value: "#ff9966" },
-      fogNear: { value: 10, min: 1, max: 50, step: 1 },
+      fogColor: { value: "#ffffffff" },
+      fogNear: { value: 0.001, min: 0.001, max: 50, step: 1 },
       fogFar: { value: 100, min: 50, max: 300, step: 5 },
     }),
   });
@@ -83,6 +83,7 @@ export default function Experience() {
         {/* 2) Once state is a function, mount Forest */}
         <Forest terrainMesh={terrainMesh} />
       </Suspense>
+
       <TestTree />
     </>
   );
