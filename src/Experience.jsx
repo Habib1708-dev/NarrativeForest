@@ -1,12 +1,13 @@
 // src/Experience.jsx
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
+import { useControls, folder } from "leva";
+import { useRef, useState, Suspense } from "react";
 import Terrain from "./components/Terrain";
 import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
-import { useControls, folder } from "leva";
-import { useRef, useState, Suspense } from "react";
+import Man from "./components/Man";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -84,6 +85,7 @@ export default function Experience() {
         {/* 2) Once state is a function, mount Forest */}
         <Forest terrainMesh={terrainMesh} />
         <Cabin />
+        <Man />
       </Suspense>
 
       <DebugTreeMaterials url="/models/cabin/Cabin.glb" label="Cabin" />
