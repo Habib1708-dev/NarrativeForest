@@ -88,7 +88,7 @@ export default function Experience() {
         <Man />
       </Suspense>
 
-      <DebugTreeMaterials url="/models/cabin/Cabin.glb" label="Cabin" />
+      <DebugTreeMaterials url="/models/man/man.glb" label="Man" />
     </>
   );
 }
