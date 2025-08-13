@@ -59,9 +59,9 @@ export default function Experience() {
         screenSpacePanning
         rotateSpeed={0.5}
       />
-      <ambientLight intensity={0.3} color="#ffffff" />
+      <ambientLight intensity={1.3} color="#ffffff" />
       <directionalLight
-        position={[10, 15, 10]}
+        position={[-10, 15, -10]}
         intensity={1}
         color="#ffffff"
         castShadow

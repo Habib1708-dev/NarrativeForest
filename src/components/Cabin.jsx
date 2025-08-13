@@ -46,6 +46,13 @@ export default function Cabin() {
     scale,
     tintColor,
     tintIntensity,
+    bulbEnabled,
+    bulbColor,
+    bulbIntensity,
+    bulbSize,
+    bulbX,
+    bulbY,
+    bulbZ,
   } = useControls({
     Cabin: folder({
       Transform: folder({
@@ -77,6 +84,27 @@ export default function Cabin() {
           label: "Intensity",
         },
       }),
+      "Bulb Light": folder({
+        bulbEnabled: { value: true, label: "Enabled" },
+        bulbColor: { value: "#ffd8a8", label: "Color" },
+        bulbIntensity: {
+          value: 0.06,
+          min: 0,
+          max: 2,
+          step: 0.01,
+          label: "Intensity",
+        },
+        bulbSize: {
+          value: 0.005,
+          min: 0.001,
+          max: 0.1,
+          step: 0.001,
+          label: "Size",
+        },
+        bulbX: { value: -1.308, min: -50, max: 50, step: 0.001, label: "X" },
+        bulbY: { value: -4.59, min: -50, max: 50, step: 0.01, label: "Y" },
+        bulbZ: { value: -2.9, min: -50, max: 50, step: 0.01, label: "Z" },
+      }),
     }),
   });
 
@@ -102,15 +130,50 @@ export default function Cabin() {
 
   if (!clonedScene) return null;
 
+  // Bulb position controlled via Leva (defaults near Man): [-1.3, -4.3, -2.9]
+  const bulbPosition = useMemo(
+    () => [bulbX, bulbY, bulbZ],
+    [bulbX, bulbY, bulbZ]
+  );
+
   return (
-    <group
-      position={position}
-      rotation={[0, rotationY, 0]}
-      scale={scale}
-      dispose={null}
-    >
-      <primitive object={clonedScene} />
-    </group>
+    <>
+      {/* Cabin model */}
+      <group
+        position={position}
+        rotation={[0, rotationY, 0]}
+        scale={scale}
+        dispose={null}
+      >
+        <primitive object={clonedScene} />
+      </group>
+
+      {/* Miniature light bulb near the Man (absolute/world position) */}
+      {bulbEnabled && (
+        <group position={bulbPosition}>
+          {/* Visible tiny bulb */}
+          <mesh scale={bulbSize} castShadow={false} receiveShadow={false}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshStandardMaterial
+              color={bulbColor}
+              emissive={bulbColor}
+              emissiveIntensity={1}
+              metalness={0}
+              roughness={0.3}
+              toneMapped={false}
+            />
+          </mesh>
+          {/* Actual light source */}
+          <pointLight
+            color={bulbColor}
+            intensity={bulbIntensity}
+            distance={2.5}
+            decay={2}
+            castShadow={false}
+          />
+        </group>
+      )}
+    </>
   );
 }
 
