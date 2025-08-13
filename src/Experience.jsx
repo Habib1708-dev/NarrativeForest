@@ -8,6 +8,7 @@ import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
+import Cat from "./components/Cat";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -86,6 +87,7 @@ export default function Experience() {
         <Forest terrainMesh={terrainMesh} />
         <Cabin />
         <Man />
+        <Cat />
       </Suspense>
 
       <DebugTreeMaterials url="/models/man/man.glb" label="Man" />
