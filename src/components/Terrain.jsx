@@ -112,7 +112,7 @@ export default forwardRef(function Terrain(props, ref) {
     octaves: { value: 8, min: 1, max: 8, step: 1 },
     seed: { value: 2.2, min: 0.1, max: 10, step: 0.1 },
     scale: { value: 5, min: 0.1, max: 5, step: 0.1 },
-    color: { value: "#4b7d23" },
+    color: { value: "#0a0a0a" },
     plateauHeight: { value: 0, min: 0, max: 1, step: 0.01 },
     plateauSmoothing: { value: 0.2, min: 0, max: 1, step: 0.01 },
     segments: { value: 256, min: 32, max: 512, step: 32 },
