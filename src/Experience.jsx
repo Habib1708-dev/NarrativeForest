@@ -9,6 +9,7 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
+import Skybox from "./components/Skybox";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -29,22 +30,29 @@ export default function Experience() {
     }),
   });
 
+  // Skybox controls
+  const { isNight, starDensity, starIntensity, twinkleSpeed } = useControls({
+    Skybox: folder({
+      isNight: { value: false, label: "Night Mode" },
+      starDensity: { value: 0.0025, min: 0.0005, max: 0.005, step: 0.0001 },
+      starIntensity: { value: 1.2, min: 0.2, max: 3, step: 0.1 },
+      twinkleSpeed: { value: 1.0, min: 0, max: 3, step: 0.05 },
+    }),
+  });
+
   return (
     <>
       <Perf position="top-left" />
 
       {/* Atmosphere */}
       <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
-      <Sky
-        ref={skyRef}
-        sunPosition={sunPosition}
-        inclination={0.1}
-        azimuth={0.25}
-        distance={450000}
-        rayleigh={2}
-        turbidity={10}
-        mieCoefficient={0.005}
-        mieDirectionalG={0.8}
+      <Skybox
+        night={isNight ? 1 : 0}
+        sunDir={sunPosition}
+        radius={500}
+        starDensity={starDensity}
+        starIntensity={starIntensity}
+        timeScale={twinkleSpeed}
       />
 
       {/* Controls & Lights */}

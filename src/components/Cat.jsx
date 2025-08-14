@@ -25,8 +25,16 @@ export default function Cat() {
     return () => action.fadeOut(0.2);
   }, [actions, names]);
 
-  // Leva transforms
-  const { positionX, positionY, positionZ, rotationYDeg, scale } = useControls({
+  // Leva transforms + appearance
+  const {
+    positionX,
+    positionY,
+    positionZ,
+    rotationYDeg,
+    scale,
+    tintColor,
+    tintIntensity,
+  } = useControls({
     Cat: folder({
       Transform: folder({
         positionX: { value: -1.305, min: -50, max: 50, step: 0.001 },
@@ -47,21 +55,84 @@ export default function Cat() {
           label: "Uniform Scale",
         },
       }),
+      Appearance: folder({
+        tintColor: { value: "#ffffff", label: "Tint Color" },
+        tintIntensity: {
+          value: 0.0,
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          label: "Tint Intensity",
+        },
+      }),
     }),
   });
 
-  // Shadow setup and basic hygiene
+  // Shadow setup, clone materials once, and stash original colors
+  const originalColors = useRef(new Map()); // key: material.uuid -> THREE.Color
   useEffect(() => {
     if (!cloned) return;
+
     cloned.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
         o.receiveShadow = true;
-        // Animated/skinned meshes should avoid frustum culling popping
         o.frustumCulled = false;
+
+        // If this mesh has a material or a material array, clone and record original colors
+        const recordColor = (mat) => {
+          if (!mat || !mat.color) return;
+          // Clone material so tinting this mesh doesn’t affect others
+          if (!originalColors.current.has(mat.uuid)) {
+            // Ensure the mesh owns its material instance
+            const clonedMat = mat.clone();
+            o.material = clonedMat;
+            originalColors.current.set(clonedMat.uuid, clonedMat.color.clone());
+          }
+        };
+
+        if (Array.isArray(o.material)) {
+          o.material = o.material.map((m) => {
+            if (!originalColors.current.has(m.uuid)) {
+              const cm = m.clone();
+              originalColors.current.set(cm.uuid, cm.color?.clone?.() ?? null);
+              return cm;
+            }
+            return m;
+          });
+        } else if (o.material) {
+          recordColor(o.material);
+        }
       }
     });
   }, [cloned]);
+
+  // Apply tint whenever color/intensity changes
+  useEffect(() => {
+    if (!cloned) return;
+
+    const target = new THREE.Color(tintColor);
+
+    cloned.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+
+      const applyToMat = (mat) => {
+        if (!mat || !mat.color) return;
+        const base = originalColors.current.get(mat.uuid);
+        if (!base) return;
+        // color = mix(base, target, intensity)
+        const mixed = base.clone().lerp(target, tintIntensity);
+        mat.color.copy(mixed);
+        mat.needsUpdate = true; // be safe
+      };
+
+      if (Array.isArray(o.material)) {
+        o.material.forEach(applyToMat);
+      } else {
+        applyToMat(o.material);
+      }
+    });
+  }, [cloned, tintColor, tintIntensity]);
 
   // Ensure play speed default
   useEffect(() => {
