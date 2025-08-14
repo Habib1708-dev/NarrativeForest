@@ -1,6 +1,6 @@
 // src/Experience.jsx
 import { Perf } from "r3f-perf";
-import { OrbitControls, Sky } from "@react-three/drei";
+import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { useRef, useState, Suspense } from "react";
 import Terrain from "./components/Terrain";
@@ -9,7 +9,6 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import Skybox from "./components/Skybox";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -20,23 +19,49 @@ export default function Experience() {
     if (mesh) setTerrainMesh(mesh);
   };
 
-  // Fog & sky controls
-  const { sunPosition, fogColor, fogNear, fogFar } = useControls({
+  // Fog, Sky, and Stars controls
+  const {
+    // Fog
+    fogColor,
+    fogNear,
+    fogFar,
+    // Sky
+    sunPosition,
+    rayleigh,
+    turbidity,
+    mieCoefficient,
+    mieDirectionalG,
+    // Stars
+    showStars,
+    starsRadius,
+    starsDepth,
+    starsCount,
+    starsFactor,
+    starsSaturation,
+    starsFade,
+    starsSpeed,
+  } = useControls({
     Atmosphere: folder({
-      sunPosition: { value: [1, 0.3, 2], step: 0.1 },
       fogColor: { value: "#ffffff" },
       fogNear: { value: 0.001, min: 0.001, max: 50, step: 1 },
       fogFar: { value: 100, min: 50, max: 300, step: 5 },
     }),
-  });
-
-  // Skybox controls
-  const { isNight, starDensity, starIntensity, twinkleSpeed } = useControls({
-    Skybox: folder({
-      isNight: { value: false, label: "Night Mode" },
-      starDensity: { value: 0.0025, min: 0.0005, max: 0.005, step: 0.0001 },
-      starIntensity: { value: 1.2, min: 0.2, max: 3, step: 0.1 },
-      twinkleSpeed: { value: 1.0, min: 0, max: 3, step: 0.05 },
+    Sky: folder({
+      sunPosition: { value: [0.0, -1.0, 0.0], step: 0.1 },
+      rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
+      turbidity: { value: 1.1, min: 0, max: 20, step: 0.1 },
+      mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
+      mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
+    }),
+    Stars: folder({
+      showStars: { value: false },
+      starsRadius: { value: 100, min: 10, max: 1000, step: 1 },
+      starsDepth: { value: 168, min: 1, max: 200, step: 1 },
+      starsCount: { value: 20000, min: 0, max: 20000, step: 100 },
+      starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
+      starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
+      starsFade: { value: true },
+      starsSpeed: { value: 0.8, min: 0, max: 10, step: 0.1 },
     }),
   });
 
@@ -46,14 +71,25 @@ export default function Experience() {
 
       {/* Atmosphere */}
       <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
-      <Skybox
-        night={isNight ? 1 : 0}
-        sunDir={sunPosition}
-        radius={500}
-        starDensity={starDensity}
-        starIntensity={starIntensity}
-        timeScale={twinkleSpeed}
+      <Sky
+        ref={skyRef}
+        sunPosition={sunPosition}
+        rayleigh={rayleigh}
+        turbidity={turbidity}
+        mieCoefficient={mieCoefficient}
+        mieDirectionalG={mieDirectionalG}
       />
+      {showStars && (
+        <Stars
+          radius={starsRadius}
+          depth={starsDepth}
+          count={starsCount}
+          factor={starsFactor}
+          saturation={starsSaturation}
+          fade={starsFade}
+          speed={starsSpeed}
+        />
+      )}
 
       {/* Controls & Lights */}
       <OrbitControls
@@ -68,10 +104,10 @@ export default function Experience() {
         screenSpacePanning
         rotateSpeed={0.5}
       />
-      <ambientLight intensity={1.3} color="#ffffff" />
+      <ambientLight intensity={0} color="#ffffff" />
       <directionalLight
         position={[-10, 15, -10]}
-        intensity={1}
+        intensity={0.2}
         color="#ffffff"
         castShadow
         shadow-mapSize-width={2048}
