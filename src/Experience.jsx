@@ -15,6 +15,7 @@ import Cat from "./components/Cat";
 export default function Experience() {
   const skyRef = useRef();
   const starsRef = useRef(null);
+  const starsBigRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
 
   const terrainRefCallback = (mesh) => {
@@ -43,6 +44,10 @@ export default function Experience() {
     starsSaturation,
     starsFade,
     starsSpeed,
+    // StarsBig (separate larger stars)
+    showStarsBig,
+    starsBigCount,
+    starsBigFactor,
     // Render/Lights
     exposure,
     dirLightIntensity,
@@ -55,14 +60,14 @@ export default function Experience() {
     Sky: folder({
       sunPosition: { value: [0.0, -1.0, 0.0], step: 0.1 },
       rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
-      turbidity: { value: 1.1, min: 0, max: 20, step: 0.1 },
+      turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
       mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
       mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
     }),
     Stars: folder({
       showStars: { value: true },
-      starsRadius: { value: 100, min: 10, max: 1000, step: 1 },
-      starsDepth: { value: 168, min: 1, max: 200, step: 1 },
+      starsRadius: { value: 360, min: 10, max: 1000, step: 1 },
+      starsDepth: { value: 2, min: 1, max: 200, step: 1 },
       starsCount: { value: 20000, min: 0, max: 20000, step: 100 },
       starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
       starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
@@ -71,6 +76,11 @@ export default function Experience() {
     }),
     Render: folder({
       exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
+    }),
+    StarsBig: folder({
+      showStarsBig: { value: true }, // was showTintedStars: true
+      starsBigCount: { value: 3720, min: 0, max: 10000, step: 10 }, // was tintedCount
+      starsBigFactor: { value: 6.2, min: 0.1, max: 20, step: 0.1 }, // was tintedFactor
     }),
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
@@ -82,16 +92,18 @@ export default function Experience() {
     gl.toneMappingExposure = exposure;
   }, [gl, exposure]);
 
+  // Keep both star sets non-additive to avoid leaf see-through glow
   useEffect(() => {
-    const pts = starsRef.current;
-    const mat = pts?.material;
-    if (!mat) return;
-    mat.transparent = false;
-    mat.blending = THREE.NormalBlending; // or THREE.NormalBlending
-    mat.depthTest = true;
-    mat.depthWrite = false;
-    mat.needsUpdate = true;
-  }, [showStars]);
+    [starsRef.current, starsBigRef.current].forEach((pts) => {
+      const mat = pts?.material;
+      if (!mat) return;
+      mat.transparent = false;
+      mat.blending = THREE.NormalBlending;
+      mat.depthTest = true;
+      mat.depthWrite = false;
+      mat.needsUpdate = true;
+    });
+  }, [showStars, showStarsBig]);
 
   return (
     <>
@@ -115,6 +127,18 @@ export default function Experience() {
           count={starsCount}
           factor={starsFactor}
           saturation={starsSaturation}
+          fade={starsFade}
+          speed={starsSpeed}
+        />
+      )}
+      {showStarsBig && (
+        <Stars
+          ref={starsBigRef}
+          radius={starsRadius}
+          depth={starsDepth}
+          count={starsBigCount}
+          factor={starsBigFactor}
+          saturation={0} // keep white; just larger points
           fade={starsFade}
           speed={starsSpeed}
         />
