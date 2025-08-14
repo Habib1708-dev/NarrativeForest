@@ -2,7 +2,9 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
-import { useRef, useState, Suspense } from "react";
+import { useRef, useState, Suspense, useEffect } from "react";
+import { useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import Terrain from "./components/Terrain";
 import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
@@ -12,6 +14,7 @@ import Cat from "./components/Cat";
 
 export default function Experience() {
   const skyRef = useRef();
+  const starsRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
 
   const terrainRefCallback = (mesh) => {
@@ -40,6 +43,9 @@ export default function Experience() {
     starsSaturation,
     starsFade,
     starsSpeed,
+    // Render/Lights
+    exposure,
+    dirLightIntensity,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#ffffff" },
@@ -54,16 +60,38 @@ export default function Experience() {
       mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
     }),
     Stars: folder({
-      showStars: { value: false },
+      showStars: { value: true },
       starsRadius: { value: 100, min: 10, max: 1000, step: 1 },
       starsDepth: { value: 168, min: 1, max: 200, step: 1 },
       starsCount: { value: 20000, min: 0, max: 20000, step: 100 },
       starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
       starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
-      starsFade: { value: true },
+      starsFade: { value: false },
       starsSpeed: { value: 0.8, min: 0, max: 10, step: 0.1 },
     }),
+    Render: folder({
+      exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
+    }),
+    Lights: folder({
+      dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
+    }),
   });
+
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    gl.toneMappingExposure = exposure;
+  }, [gl, exposure]);
+
+  useEffect(() => {
+    const pts = starsRef.current;
+    const mat = pts?.material;
+    if (!mat) return;
+    mat.transparent = false;
+    mat.blending = THREE.NormalBlending; // or THREE.NormalBlending
+    mat.depthTest = true;
+    mat.depthWrite = false;
+    mat.needsUpdate = true;
+  }, [showStars]);
 
   return (
     <>
@@ -81,6 +109,7 @@ export default function Experience() {
       />
       {showStars && (
         <Stars
+          ref={starsRef}
           radius={starsRadius}
           depth={starsDepth}
           count={starsCount}
@@ -107,7 +136,7 @@ export default function Experience() {
       <ambientLight intensity={0} color="#ffffff" />
       <directionalLight
         position={[-10, 15, -10]}
-        intensity={0.2}
+        intensity={dirLightIntensity}
         color="#ffffff"
         castShadow
         shadow-mapSize-width={2048}
