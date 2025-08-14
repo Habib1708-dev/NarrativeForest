@@ -187,7 +187,10 @@ export default function Experience() {
         <Cat />
       </Suspense>
 
-      <DebugTreeMaterials url="/models/man/man.glb" label="Man" />
+      <DebugTreeMaterials
+        url="/models/tree/Spruce/spruce.glb"
+        label="SpruceTree"
+      />
     </>
   );
 }
