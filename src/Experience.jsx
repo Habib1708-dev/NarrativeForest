@@ -11,7 +11,6 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import TestTree from "./components/TestTree";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -192,7 +191,6 @@ export default function Experience() {
         url="/models/tree/Spruce/spruce.glb"
         label="SpruceTree"
       />
-      <TestTree />
     </>
   );
 }
