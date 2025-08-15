@@ -11,6 +11,7 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
+import TestTree from "./components/TestTree";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -58,7 +59,7 @@ export default function Experience() {
       fogFar: { value: 100, min: 50, max: 300, step: 5 },
     }),
     Sky: folder({
-      sunPosition: { value: [0.0, -1.0, 0.0], step: 0.1 },
+      sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
       rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
       turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
       mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
@@ -191,6 +192,7 @@ export default function Experience() {
         url="/models/tree/Spruce/spruce.glb"
         label="SpruceTree"
       />
+      <TestTree />
     </>
   );
 }
