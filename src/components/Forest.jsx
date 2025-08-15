@@ -1,16 +1,18 @@
-// src/components/Forest.jsx
 import React, { useMemo, useEffect, useRef, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useControls } from "leva";
+import { useControls, folder } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
+import { useInstancedRocks } from "../hooks/InstancedRocks";
 
 export default function Forest({ terrainMesh }) {
-  // i control LODs and planting
+  // ---------------------------
+  // Controls
+  // ---------------------------
   const {
     size,
     seed,
-    count,
+    count, // trees
     chunkSize,
     nearRadius,
     midRadius,
@@ -19,7 +21,7 @@ export default function Forest({ terrainMesh }) {
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
     seed: { value: 1, min: 0, max: 100, step: 1 },
-    count: { value: 1300, min: 10, max: 20000, step: 10 },
+    count: { value: 1000, min: 10, max: 20000, step: 10, label: "Tree Count" },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 0.2,
@@ -51,9 +53,8 @@ export default function Forest({ terrainMesh }) {
     },
   });
 
-  // i control tinting
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
-    tintColor: { value: "#0a0a0a", label: "Tint Color" }, // near-black
+    tintColor: { value: "#0a0a0a", label: "Tint Color" },
     tintIntensity: {
       value: 0.8,
       min: 0,
@@ -63,51 +64,141 @@ export default function Forest({ terrainMesh }) {
     },
   });
 
-  // i load the two LOD assets
+  const { rockCount, rockScaleMin, rockScaleMax } = useControls("Rocks", {
+    rockCount: { value: 1000, min: 0, max: 10000, step: 10, label: "Count" },
+    // Lock rock scale range to [0.03, 0.11]
+    rockScaleMin: {
+      value: 0.03,
+      min: 0.03,
+      max: 0.11,
+      step: 0.001,
+      label: "Scale Min",
+    },
+    rockScaleMax: {
+      value: 0.101,
+      min: 0.03,
+      max: 0.11,
+      step: 0.001,
+      label: "Scale Max",
+    },
+  });
+
+  const { rockTintColor, rockTintIntensity } = useControls("Rock Tint", {
+    rockTintColor: { value: "#2a2a2a", label: "Tint Color" },
+    rockTintIntensity: {
+      value: 1,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      label: "Intensity",
+    },
+  });
+
+  // ---------------------------
+  // Assets
+  // ---------------------------
   const highParts = useInstancedTree(
     "/models/tree/PineTrees2/PineTreeHighLOD6065.glb"
   );
   const lowParts = useInstancedTree(
     "/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"
   );
+  const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 
-  // i apply the tint whenever parts load or controls change
+  // Tint trees
   useEffect(() => {
     const target = new THREE.Color(tintColor);
-
-    const tintParts = (parts) => {
+    const tint = (parts) => {
       parts.forEach((p) => {
         const m = p.material;
         if (!m || !m.color) return;
-
-        // i stash the original color once so i can lerp from it every time
-        if (!m.userData._origColor) {
-          m.userData._origColor = m.color.clone();
-        }
-
-        // i start from the original, then lerp toward the target by intensity
+        if (!m.userData._origColor) m.userData._origColor = m.color.clone();
         m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
-
-        // i keep wood non-metal and fairly rough so dark looks natural
         if (typeof m.metalness === "number") m.metalness = 0.0;
         if (typeof m.roughness === "number")
           m.roughness = Math.min(1, Math.max(0.8, m.roughness));
         m.needsUpdate = true;
       });
     };
-
-    if (highParts.length) tintParts(highParts);
-    if (lowParts.length) tintParts(lowParts);
+    if (highParts.length) tint(highParts);
+    if (lowParts.length) tint(lowParts);
   }, [highParts, lowParts, tintColor, tintIntensity]);
 
-  // i bake all transforms once
-  const allTransforms = useMemo(() => {
+  // Tint rocks
+  useEffect(() => {
+    const target = new THREE.Color(rockTintColor);
+    rockParts.forEach((p) => {
+      const m = p.material;
+      if (!m || !m.color) return;
+      if (!m.userData._origColor) m.userData._origColor = m.color.clone();
+      m.color.copy(m.userData._origColor).lerp(target, rockTintIntensity);
+      if (typeof m.metalness === "number") m.metalness = 0.0;
+      if (typeof m.roughness === "number")
+        m.roughness = Math.max(0.6, Math.min(1.0, m.roughness ?? 1.0));
+      m.needsUpdate = true;
+    });
+  }, [rockParts, rockTintColor, rockTintIntensity]);
+
+  // ---------------------------
+  // Placement helpers
+  // ---------------------------
+  const prng = useMemo(() => mulberry32(Math.floor(seed)), [seed]);
+
+  // Cabin AABB (XZ only)
+  const CABIN_X = -1.8,
+    CABIN_Z = -2.7,
+    CABIN_HALF = 0.3;
+  const insideCabinXZ = (x, z) =>
+    x >= CABIN_X - CABIN_HALF &&
+    x <= CABIN_X + CABIN_HALF &&
+    z >= CABIN_Z - CABIN_HALF &&
+    z <= CABIN_Z + CABIN_HALF;
+
+  // Spatial hash to prevent overlaps (works for both trees & rocks)
+  const makeHasher = (cellSize) => {
+    const map = new Map();
+    const key = (i, j) => `${i},${j}`;
+    const cell = (x, z) => [Math.floor(x / cellSize), Math.floor(z / cellSize)];
+    const add = (x, z, r) => {
+      const [ci, cj] = cell(x, z);
+      const k = key(ci, cj);
+      let arr = map.get(k);
+      if (!arr) {
+        arr = [];
+        map.set(k, arr);
+      }
+      arr.push({ x, z, r });
+    };
+    const canPlace = (x, z, r) => {
+      const [ci, cj] = cell(x, z);
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          const arr = map.get(key(ci + di, cj + dj));
+          if (!arr) continue;
+          for (const it of arr) {
+            const dx = x - it.x,
+              dz = z - it.z;
+            const rr = r + it.r;
+            if (dx * dx + dz * dz < rr * rr) return false;
+          }
+        }
+      }
+      return true;
+    };
+    return { add, canPlace };
+  };
+
+  // ---------------------------
+  // Trees: BVH raycast + cabin avoidance + tree-tree spacing
+  // ---------------------------
+  const treeTransforms = useMemo(() => {
     if (!terrainMesh) return [];
     terrainMesh.updateMatrixWorld(true);
 
-    const prng = mulberry32(Math.floor(seed));
-    const arr = [];
+    const effSize = terrainMesh.getTerrainSize?.() ?? size;
+    const R = Math.min(plantRadius, effSize * 0.5 - 0.001);
 
+    const arr = [];
     const ray = new THREE.Raycaster();
     ray.firstHitOnly = true;
     const origin = new THREE.Vector3();
@@ -117,18 +208,23 @@ export default function Forest({ terrainMesh }) {
     const originY = bbox.max.y + 5;
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
-    const R = Math.min(plantRadius, size * 0.5 - 0.001);
+    const TREE_RADIUS = 0.18; // footprint radius; tune as needed
+    const index = makeHasher(0.25);
 
-    for (let i = 0; i < count; i++) {
-      // i sample uniformly in a disk
+    let placed = 0,
+      attempts = 0,
+      maxAttempts = count * 20;
+    while (placed < count && attempts < maxAttempts) {
+      attempts++;
+
+      // uniform disk
       const r = Math.sqrt(prng()) * R;
       const theta = prng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      // scale trees with a relative factor in [1.3, 1.9] around a base scale
-      const baseScale = 0.0045; // midpoint of previous 0.003..0.006
-      const scale = baseScale * (1.3 + prng() * 0.6);
+      if (insideCabinXZ(x, z)) continue;
+      if (!index.canPlace(x, z, TREE_RADIUS)) continue;
 
       origin.set(x, originY, z);
       ray.set(origin, down);
@@ -136,8 +232,11 @@ export default function Forest({ terrainMesh }) {
       ray.far = rayFar;
 
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
-      const terrainY = hit?.point.y ?? 0;
+      if (!hit) continue;
 
+      const terrainY = hit.point.y;
+      const baseScale = 0.0045;
+      const scale = baseScale * (1.3 + prng() * 0.6);
       const adjustedY = terrainY - scale * 2.0;
 
       arr.push({
@@ -145,42 +244,167 @@ export default function Forest({ terrainMesh }) {
         rotation: prng() * Math.PI * 2,
         scale,
       });
-    }
 
+      index.add(x, z, TREE_RADIUS);
+      placed++;
+    }
     return arr;
   }, [terrainMesh, seed, size, count, plantRadius]);
 
-  // i partition into chunks
+  // ---------------------------
+  // Rocks: BVH raycast + cabin avoidance + no overlap with trees/rocks
+  // - Y yaw only (no X tilt)
+  // - Scale in [0.03, 0.11] (clamped)
+  // ---------------------------
+  const rockTransforms = useMemo(() => {
+    if (!terrainMesh || !rockParts.length) return [];
+    terrainMesh.updateMatrixWorld(true);
+
+    const effSize = terrainMesh.getTerrainSize?.() ?? size;
+    const R = Math.min(plantRadius, effSize * 0.5 - 0.001);
+
+    const arr = [];
+    const ray = new THREE.Raycaster();
+    ray.firstHitOnly = true;
+    const origin = new THREE.Vector3();
+    const down = new THREE.Vector3(0, -1, 0);
+
+    const bbox = new THREE.Box3().setFromObject(terrainMesh);
+    const originY = bbox.max.y + 5;
+    const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
+
+    // spatial hash seeded with trees
+    const index = makeHasher(0.2);
+    const TREE_RADIUS = 0.18;
+    for (const t of treeTransforms) {
+      index.add(t.position[0], t.position[2], TREE_RADIUS);
+    }
+
+    // per-part bottom offsets for ground contact
+    const bottomByPart = rockParts.map((rp) => {
+      const bb = rp.geometry.boundingBox || null;
+      return bb ? -bb.min.y : 0;
+    });
+
+    // guard against inverted range and clamp to [0.03, 0.11]
+    const RANGE_MIN = 0.03;
+    const RANGE_MAX = 0.11;
+    const sMinRaw = Math.min(rockScaleMin, rockScaleMax);
+    const sMaxRaw = Math.max(rockScaleMin, rockScaleMax);
+    const sMin = Math.max(RANGE_MIN, Math.min(sMinRaw, RANGE_MAX));
+    const sMax = Math.max(RANGE_MIN, Math.min(sMaxRaw, RANGE_MAX));
+
+    let placed = 0,
+      attempts = 0,
+      maxAttempts = rockCount * 30;
+    while (placed < rockCount && attempts < maxAttempts) {
+      attempts++;
+
+      const r = Math.sqrt(prng()) * R;
+      const theta = prng() * Math.PI * 2;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+
+      if (insideCabinXZ(x, z)) continue;
+
+      const scale = sMin + prng() * (sMax - sMin);
+      // footprint radius scales with size (tune factor)
+      const ROCK_RADIUS = 0.12 * (scale / Math.max(0.001, sMax));
+      if (!index.canPlace(x, z, ROCK_RADIUS)) continue;
+
+      origin.set(x, originY, z);
+      ray.set(origin, down);
+      ray.near = 0;
+      ray.far = rayFar;
+
+      const hit = ray.intersectObject(terrainMesh, false)[0] || null;
+      if (!hit) continue;
+
+      // choose submesh/part
+      const pick = Math.floor(prng() * Math.max(1, rockParts.length));
+
+      // base Y on terrain, then bottom-align and sink slightly with scale
+      let y = hit.point.y;
+      const bottomAlign = (bottomByPart[pick] || 0) * scale;
+      const sink = 0.4 * scale; // sink further, proportional to scale
+      y += bottomAlign - sink;
+
+      // rotations
+      const rotX = 0; // remove X-axis tilt
+      const rotY = prng() * Math.PI * 2;
+
+      arr.push({
+        position: [x, y, z],
+        rotation: [rotX, rotY],
+        scale,
+        pick,
+      });
+
+      index.add(x, z, ROCK_RADIUS);
+      placed++;
+    }
+
+    return arr;
+  }, [
+    terrainMesh,
+    rockParts,
+    seed,
+    size,
+    plantRadius,
+    rockCount,
+    rockScaleMin,
+    rockScaleMax,
+    treeTransforms,
+  ]);
+
+  // ---------------------------
+  // Chunking: trees & rocks
+  // Rocks will render only when the tree chunk is in HIGH LOD
+  // ---------------------------
   const chunks = useMemo(() => {
-    if (allTransforms.length === 0) return [];
+    if (!terrainMesh) return [];
+    const effSize = terrainMesh.getTerrainSize?.() ?? size;
+
     const map = new Map();
-    for (const t of allTransforms) {
-      const [x, , z] = t.position;
-      const cx = Math.floor((x + size / 2) / chunkSize);
-      const cz = Math.floor((z + size / 2) / chunkSize);
+    const bucket = (x, z) => {
+      const cx = Math.floor((x + effSize / 2) / chunkSize);
+      const cz = Math.floor((z + effSize / 2) / chunkSize);
       const key = `${cx},${cz}`;
       if (!map.has(key)) {
         map.set(key, {
           key,
           cx,
           cz,
-          transforms: [],
+          treeTransforms: [],
+          rockTransforms: [],
           center: new THREE.Vector3(
-            cx * chunkSize - size / 2 + chunkSize / 2,
+            cx * chunkSize - effSize / 2 + chunkSize / 2,
             0,
-            cz * chunkSize - size / 2 + chunkSize / 2
+            cz * chunkSize - effSize / 2 + chunkSize / 2
           ),
         });
       }
-      map.get(key).transforms.push(t);
-    }
-    return Array.from(map.values());
-  }, [allTransforms, size, chunkSize]);
+      return map.get(key);
+    };
 
-  // i choose chunk LOD per camera distance
+    for (const t of treeTransforms) {
+      const [x, , z] = t.position;
+      bucket(x, z).treeTransforms.push(t);
+    }
+    for (const r of rockTransforms) {
+      const [x, , z] = r.position;
+      bucket(x, z).rockTransforms.push(r);
+    }
+
+    return Array.from(map.values());
+  }, [terrainMesh, size, chunkSize, treeTransforms, rockTransforms]);
+
+  // ---------------------------
+  // LOD selection (tree-driven)
+  // ---------------------------
   const { camera } = useThree();
   const [chunkModes, setChunkModes] = useState({}); // key -> "off" | "med" | "high"
-  const modesRef = useRef(chunkModes); // i avoid stale state in useFrame
+  const modesRef = useRef(chunkModes);
   const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9));
   const cam2 = useRef(new THREE.Vector3());
   const moveThreshold = Math.max(0.5, chunkSize * 0.5);
@@ -215,7 +439,6 @@ export default function Forest({ terrainMesh }) {
       else nextModes[c.key] = "off";
     }
 
-    // i only update state when something actually changed
     const curr = modesRef.current;
     let changed = false;
     if (Object.keys(nextModes).length !== Object.keys(curr).length)
@@ -226,104 +449,200 @@ export default function Forest({ terrainMesh }) {
           changed = true;
           break;
         }
+
     if (changed) {
       setChunkModes(nextModes);
       modesRef.current = nextModes;
     }
   });
 
-  // i wait for both LODs to be ready
-  if (!highParts.length || !lowParts.length) return null;
+  // Wait for assets
+  if (!highParts.length || !lowParts.length || !rockParts.length) return null;
 
   return (
     <group>
       {chunks.map((chunk) => (
         <ChunkInstanced
           key={chunk.key}
-          transforms={chunk.transforms}
           mode={chunkModes[chunk.key] ?? "off"}
-          highParts={highParts}
-          medParts={lowParts}
+          // trees
+          treeTransforms={chunk.treeTransforms}
+          treeHighParts={highParts}
+          treeMedParts={lowParts}
+          // rocks
+          rockTransforms={chunk.rockTransforms}
+          rockParts={rockParts}
         />
       ))}
     </group>
   );
 }
 
-// i render a chunk: i upload matrices once, then i only flip counts
-function ChunkInstanced({ transforms, mode, highParts, medParts }) {
-  const capacity = transforms.length;
+// ------------------------------------
+// Chunk renderer with TREES + ROCKS
+// - Trees: high/med via mode
+// - Rocks: render ONLY when mode === "high"
+// ------------------------------------
+function ChunkInstanced({
+  mode,
+  treeTransforms,
+  treeHighParts,
+  treeMedParts,
+  rockTransforms,
+  rockParts,
+}) {
+  const treeCapacity = treeTransforms.length;
 
-  const highRefs = useRef(highParts.map(() => React.createRef()));
-  const medRefs = useRef(medParts.map(() => React.createRef()));
+  const treeHighRefs = useRef(treeHighParts.map(() => React.createRef()));
+  const treeMedRefs = useRef(treeMedParts.map(() => React.createRef()));
+  const rockRefs = useRef(rockParts.map(() => React.createRef()));
 
-  // i precompute matrices
-  const matrices = useMemo(() => {
-    const list = new Array(transforms.length);
+  // Trees matrices (yaw only)
+  const treeMatrices = useMemo(() => {
+    const list = new Array(treeTransforms.length);
     const m4 = new THREE.Matrix4();
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
-    for (let i = 0; i < transforms.length; i++) {
-      const t = transforms[i];
+    for (let i = 0; i < treeTransforms.length; i++) {
+      const t = treeTransforms[i];
       p.fromArray(t.position);
       q.setFromEuler(new THREE.Euler(0, t.rotation, 0));
       s.setScalar(t.scale);
       list[i] = m4.clone().compose(p, q, s);
     }
     return list;
-  }, [transforms]);
+  }, [treeTransforms]);
 
-  // i upload matrices once
+  // Rocks matrices PER PART (rotX + rotY)
+  const rockMatricesByPart = useMemo(() => {
+    const lists = rockParts.map(() => []);
+    if (!rockTransforms.length || !rockParts.length) return lists;
+    const m4 = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+
+    for (let i = 0; i < rockTransforms.length; i++) {
+      const t = rockTransforms[i];
+      const partIndex = Math.max(
+        0,
+        Math.min(rockParts.length - 1, t.pick || 0)
+      );
+
+      p.fromArray(t.position);
+      const rx = t.rotation[0],
+        ry = t.rotation[1];
+      q.setFromEuler(new THREE.Euler(rx, ry, 0));
+      s.set(t.scale, t.scale, t.scale);
+
+      lists[partIndex].push(m4.clone().compose(p, q, s));
+    }
+    return lists;
+  }, [rockTransforms, rockParts]);
+
+  // Upload matrices once
   useEffect(() => {
-    [highRefs.current, medRefs.current].forEach((arr) =>
-      arr.forEach((r) => {
-        const mesh = r.current;
-        if (!mesh) return;
-        mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-        mesh.matrixAutoUpdate = false;
-        for (let i = 0; i < matrices.length; i++)
-          mesh.setMatrixAt(i, matrices[i]);
-        mesh.count = 0;
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.frustumCulled = false;
-      })
+    [treeHighRefs.current, treeMedRefs.current, rockRefs.current].forEach(
+      (arr) =>
+        arr.forEach((r) => {
+          const mesh = r.current;
+          if (!mesh) return;
+          mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+          mesh.matrixAutoUpdate = false;
+          mesh.frustumCulled = false;
+        })
     );
-  }, [matrices]);
 
-  // i flip counts on mode change
+    // Trees high
+    treeHighRefs.current.forEach((r) => {
+      const mesh = r.current;
+      if (!mesh) return;
+      for (let i = 0; i < treeMatrices.length; i++)
+        mesh.setMatrixAt(i, treeMatrices[i]);
+      mesh.count = 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+
+    // Trees med
+    treeMedRefs.current.forEach((r) => {
+      const mesh = r.current;
+      if (!mesh) return;
+      for (let i = 0; i < treeMatrices.length; i++)
+        mesh.setMatrixAt(i, treeMatrices[i]);
+      mesh.count = 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+
+    // Rocks (per part)
+    rockRefs.current.forEach((r, iPart) => {
+      const mesh = r.current;
+      if (!mesh) return;
+      const mats = rockMatricesByPart[iPart] || [];
+      for (let i = 0; i < mats.length; i++) mesh.setMatrixAt(i, mats[i]);
+      mesh.count = 0; // will flip on mode
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+  }, [treeMatrices, rockMatricesByPart]);
+
+  // Flip counts per LOD mode
   useEffect(() => {
     const setCount = (refs, n) =>
       refs.forEach((ref) => ref.current && (ref.current.count = n));
+
     if (mode === "high") {
-      setCount(highRefs.current, matrices.length);
-      setCount(medRefs.current, 0);
+      setCount(treeHighRefs.current, treeMatrices.length);
+      setCount(treeMedRefs.current, 0);
+      // rocks only in high
+      rockRefs.current.forEach((ref, iPart) => {
+        if (ref.current)
+          ref.current.count = rockMatricesByPart[iPart]?.length || 0;
+      });
     } else if (mode === "med") {
-      setCount(highRefs.current, 0);
-      setCount(medRefs.current, matrices.length);
+      setCount(treeHighRefs.current, 0);
+      setCount(treeMedRefs.current, treeMatrices.length);
+      // hide rocks
+      setCount(rockRefs.current, 0);
     } else {
-      setCount(highRefs.current, 0);
-      setCount(medRefs.current, 0);
+      // off
+      setCount(treeHighRefs.current, 0);
+      setCount(treeMedRefs.current, 0);
+      setCount(rockRefs.current, 0);
     }
-  }, [mode, matrices.length]);
+  }, [mode, treeMatrices.length, rockMatricesByPart]);
 
   return (
     <group>
-      {highParts.map((p, i) => (
+      {/* Trees: High LOD */}
+      {treeHighParts.map((p, i) => (
         <instancedMesh
-          key={`h-${i}`}
-          ref={highRefs.current[i]}
-          args={[p.geometry, p.material, capacity]}
+          key={`th-${i}`}
+          ref={treeHighRefs.current[i]}
+          args={[p.geometry, p.material, treeCapacity]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}
         />
       ))}
-      {medParts.map((p, i) => (
+
+      {/* Trees: Medium/Low LOD */}
+      {treeMedParts.map((p, i) => (
         <instancedMesh
-          key={`m-${i}`}
-          ref={medRefs.current[i]}
-          args={[p.geometry, p.material, capacity]}
+          key={`tm-${i}`}
+          ref={treeMedRefs.current[i]}
+          args={[p.geometry, p.material, treeCapacity]}
+          castShadow={false}
+          receiveShadow
+          frustumCulled={false}
+        />
+      ))}
+
+      {/* Rocks: render only if mode === "high" (count flips in effect above) */}
+      {rockParts.map((p, i) => (
+        <instancedMesh
+          key={`rk-${i}`}
+          ref={rockRefs.current[i]}
+          args={[p.geometry, p.material, rockTransforms.length]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}

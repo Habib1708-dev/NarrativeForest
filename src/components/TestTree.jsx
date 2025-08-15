@@ -4,13 +4,13 @@ import { useControls } from "leva";
 
 export default function TestTree() {
   // Load the tree model
-  const { scene } = useGLTF("/models/rocks/MossRock.glb");
+  const { scene } = useGLTF("/models/plants/Grass.glb");
 
   // Controls for testing different properties
   const { position, rotation, scale } = useControls("Test Tree", {
     position: { value: [0, 0, 0], step: 0.1 },
     rotation: { value: [0, 0, 0], step: 0.1 },
-    scale: { value: 0.05, min: 0.005, max: 0.02, step: 0.001 },
+    scale: { value: 0.5, min: 0.005, max: 3, step: 0.001 },
   });
 
   return (
@@ -24,4 +24,4 @@ export default function TestTree() {
 }
 
 // Preload the model for better performance
-useGLTF.preload("/models/rocks/MossRock.glb");
+useGLTF.preload("/models/plants/Grass.glb");

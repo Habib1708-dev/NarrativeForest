@@ -1,17 +1,16 @@
-// src/hooks/InstancedRocks.jsx
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 
 /**
- * Loads a GLB of rocks and returns an array of parts:
+ * Loads a GLB of grass and returns an array of parts:
  *   [{ geometry, material, name, materialName }, ...]
  * Each mesh's world transform is baked into a cloned geometry so that
  * instancing uses the correct size/orientation without per-mesh transforms.
  *
  * Clean version: no console logging.
  */
-export function useInstancedRocks(url) {
+export function useInstancedGrass(url) {
   const { scene } = useGLTF(url);
 
   return useMemo(() => {
@@ -23,22 +22,19 @@ export function useInstancedRocks(url) {
     scene.traverse((child) => {
       if (!child.isMesh) return;
 
-      // InstancedMesh expects a single material
       const mats = Array.isArray(child.material)
         ? child.material
         : [child.material];
       const mat = mats[0];
 
-      // Bake child world transform (relative to root) into a cloned geometry
       const geom = child.geometry.clone();
-      // With (bake rotation + scale only):
-      const bakedNoPos = new THREE.Matrix4()
+      const baked = new THREE.Matrix4()
         .copy(invRoot)
-        .multiply(new THREE.Matrix4().extractRotation(child.matrixWorld));
-      geom.applyMatrix4(bakedNoPos);
+        .multiply(child.matrixWorld);
+      geom.applyMatrix4(baked);
       geom.computeVertexNormals();
       geom.computeBoundingSphere();
-      geom.computeBoundingBox(); // needed for bottom offsets
+      geom.computeBoundingBox(); // for bottom-align (optional)
 
       parts.push({
         geometry: geom,
@@ -52,5 +48,5 @@ export function useInstancedRocks(url) {
   }, [scene, url]);
 }
 
-// Optionally preload your rocks model (paths are /public-relative)
-useGLTF.preload("/models/rocks/MossRock.glb");
+// App loads from /public, not an absolute disk path:
+useGLTF.preload("/models/plants/Grass.glb");
