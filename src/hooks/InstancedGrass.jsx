@@ -3,12 +3,10 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 
 /**
- * Loads a GLB of grass and returns an array of parts:
+ * Loads a GLB of grass clumps and returns an array of parts:
  *   [{ geometry, material, name, materialName }, ...]
- * Each mesh's world transform is baked into a cloned geometry so that
- * instancing uses the correct size/orientation without per-mesh transforms.
- *
- * Clean version: no console logging.
+ * Bake rotation/scale (but not translation) relative to the root into
+ * a cloned geometry so instancing works with per-instance matrices.
  */
 export function useInstancedGrass(url) {
   const { scene } = useGLTF(url);
@@ -28,13 +26,14 @@ export function useInstancedGrass(url) {
       const mat = mats[0];
 
       const geom = child.geometry.clone();
-      const baked = new THREE.Matrix4()
+      // Bake rotation (and scale) relative to root, but not position
+      const bakedNoPos = new THREE.Matrix4()
         .copy(invRoot)
-        .multiply(child.matrixWorld);
-      geom.applyMatrix4(baked);
+        .multiply(new THREE.Matrix4().extractRotation(child.matrixWorld));
+      geom.applyMatrix4(bakedNoPos);
       geom.computeVertexNormals();
       geom.computeBoundingSphere();
-      geom.computeBoundingBox(); // for bottom-align (optional)
+      geom.computeBoundingBox();
 
       parts.push({
         geometry: geom,
@@ -48,5 +47,5 @@ export function useInstancedGrass(url) {
   }, [scene, url]);
 }
 
-// App loads from /public, not an absolute disk path:
+// Preload the model (paths are /public-relative)
 useGLTF.preload("/models/plants/Grass.glb");
