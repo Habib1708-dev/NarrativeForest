@@ -1,315 +1,264 @@
 // src/fog/PseudoHeightFog.jsx
 import * as THREE from "three";
-import { useEffect, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import React, { useLayoutEffect, useMemo, useRef, useEffect } from "react";
+import { useThree, useFrame } from "@react-three/fiber";
 
-/**
- * Faraz-style "pseudo height fog":
- * - Overrides the built-in fog shader chunk (fog_fragment) the way the demo describes:
- *   overriding Three.js' ShaderChunk to add a height-based + distance fog with animated noise.
- * - We still attach uniforms per-material via onBeforeCompile so values are dynamic via React.
- * - Skips ShaderMaterial and PointsMaterial (stars stay crisp).
- *
- * Notes:
- * - Keep <fog/> on the scene so USE_FOG is defined.
- * - Safe to keep alongside your UnifiedForwardFog — give each its own enable toggle.
- */
+// Noise chunk (matches the referenced repo)
+const Noise = `
+//
+// Description : Array and textureless GLSL 2D/3D/4D simplex
+//               noise functions.
+//      Author : Ian McEwan, Ashima Arts.
+//  Maintainer : stegu
+//     Lastmod : 20201014 (stegu)
+//     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+//               Distributed under the MIT License. See LICENSE file.
+//               https://github.com/ashima/webgl-noise
+//               https://github.com/stegu/webgl-noise
+//
+vec3 mod289(vec3 x) {
+  return x - floor(x * (1.0 / 289.0)) * 289.0;
+}
+vec4 mod289(vec4 x) {
+  return x - floor(x * (1.0 / 289.0)) * 289.0;
+}
+
+vec4 permute(vec4 x) {
+  return mod289(((x*34.0)+1.0)*x);
+}
+vec4 taylorInvSqrt(vec4 r)
+{
+return 1.79284291400159 - 0.85373472095314 * r;
+}
+float snoise(vec3 v)
+{
+const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+// First corner
+vec3 i  = floor(v + dot(v, C.yyy) );
+vec3 x0 =   v - i + dot(i, C.xxx) ;
+// Other corners
+vec3 g = step(x0.yzx, x0.xyz);
+vec3 l = 1.0 - g;
+vec3 i1 = min( g.xyz, l.zxy );
+vec3 i2 = max( g.xyz, l.zxy );
+//   x0 = x0 - 0.0 + 0.0 * C.xxx;
+//   x1 = x0 - i1  + 1.0 * C.xxx;
+//   x2 = x0 - i2  + 2.0 * C.xxx;
+//   x3 = x0 - 1.0 + 3.0 * C.xxx;
+vec3 x1 = x0 - i1 + C.xxx;
+vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+// Permutations
+i = mod289(i);
+vec4 p = permute( permute( permute(
+          i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+        + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+        + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+// Gradients: 7x7 points over a square, mapped onto an octahedron.
+// The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)
+float n_ = 0.142857142857; // 1.0/7.0
+vec3  ns = n_ * D.wyz - D.xzx;
+vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+vec4 x_ = floor(j * ns.z);
+vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+vec4 x = x_ *ns.x + ns.yyyy;
+vec4 y = y_ *ns.x + ns.yyyy;
+vec4 h = 1.0 - abs(x) - abs(y);
+vec4 b0 = vec4( x.xy, y.xy );
+vec4 b1 = vec4( x.zw, y.zw );
+//vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;
+//vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;
+vec4 s0 = floor(b0)*2.0 + 1.0;
+vec4 s1 = floor(b1)*2.0 + 1.0;
+vec4 sh = -step(h, vec4(0.0));
+vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+vec3 p0 = vec3(a0.xy,h.x);
+vec3 p1 = vec3(a0.zw,h.y);
+vec3 p2 = vec3(a1.xy,h.z);
+vec3 p3 = vec3(a1.zw,h.w);
+//Normalise gradients
+vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+p0 *= norm.x;
+p1 *= norm.y;
+p2 *= norm.z;
+p3 *= norm.w;
+// Mix final noise value
+vec4 m = max(0.5 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+m = m * m;
+return 105.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1),
+                             dot(p2,x2), dot(p3,x3) ) );
+}
+float FBM(vec3 p) {
+float value = 0.0;
+float amplitude = 0.5;
+float frequency = 0.0;
+for (int i = 0; i < 6; ++i) {
+ value += amplitude * snoise(p);
+ p *= 2.0;
+ amplitude *= 0.5;
+}
+return value;
+}
+`;
+
 export default function PseudoHeightFog({
-  enabled = true,
-
-  // Visual
-  color = "#9aa4aa",
-  density = 0.35, // base multiplier
-  extinction = 1.0, // Beer-Lambert coefficient
-
-  // Height band (your terrain sits around y=-10)
-  fogHeight = -10.0, // base of fog layer
-  fadeStart = 0.0, // start fading out above base
-  fadeEnd = 14.0, // fully disappears above this (world Y)
-
-  // Force far meshes to vanish into fog (fit 20×20 world)
-  distFadeStart = 10.0,
-  distFadeEnd = 18.0,
-
-  // Motion / “volumetric” feel (animated noise)
-  noiseScale = 0.18, // bigger -> lumpier
-  noiseIntensity = 0.6, // 0..1
-  wind = [0.02, 0.0, 0.03], // world-space drift
-  octaves = 4,
-  persistence = 0.55,
-
-  // Lighting kick (subtle)
-  lightDir = [-0.5, 0.8, -0.4],
-  lightIntensity = 0.25,
-  anisotropy = 0.2,
+  color = 0xffffff,
+  density = 0.1,
+  speed = 1,
+  distortion = 1,
+  direction = [1, 0, 0],
+  scale = [1, 1, 1],
+  position = [0, 0, 0],
+  ...props
 }) {
-  const { scene } = useThree();
-  const patched = useRef(new WeakMap());
-  const tRef = useRef(0);
+  // Patch ShaderChunks (same logic as the reference)
+  useLayoutEffect(() => {
+    THREE.ShaderChunk.fog_fragment = `
+    #ifdef USE_FOG
+      vec3 size = uFogScale;
+      float fogFactor = 1. - sdBox(vWorldPosition + uFogPosition, size);
+      fogFactor = pow(fogFactor, 0.5);
 
-  // Shared defaults cached each frame
-  const cache = useRef({
-    color3: new THREE.Color(color),
-    density,
-    extinction,
-    fogHeight,
-    fadeStart,
-    fadeEnd,
-    distFadeStart,
-    distFadeEnd,
-    noiseScale,
-    noiseIntensity,
-    octaves: Math.max(1, Math.min(8, Math.floor(octaves))),
-    persistence,
-    wind: new THREE.Vector3().fromArray(wind),
-    lightDir: new THREE.Vector3().fromArray(lightDir).normalize(),
-    lightIntensity,
-    anisotropy: THREE.MathUtils.clamp(anisotropy, -0.9, 0.9),
-  });
+      vec3 fogOrigin = cameraPosition;
+      vec3 fogDirection = normalize(vWorldPosition - fogOrigin);
+      float fogDepth = distance(vWorldPosition, fogOrigin);
+      float expFactor = (1.0 - exp(-fogDensity * fogDensity * fogDepth * fogDepth));
 
-  // Keep cache in sync with props
-  useEffect(() => {
-    cache.current.color3.set(color);
-  }, [color]);
-  useEffect(() => {
-    cache.current.density = density;
-  }, [density]);
-  useEffect(() => {
-    cache.current.extinction = extinction;
-  }, [extinction]);
-  useEffect(() => {
-    cache.current.fogHeight = fogHeight;
-  }, [fogHeight]);
-  useEffect(() => {
-    cache.current.fadeStart = fadeStart;
-  }, [fadeStart]);
-  useEffect(() => {
-    cache.current.fadeEnd = fadeEnd;
-  }, [fadeEnd]);
-  useEffect(() => {
-    cache.current.distFadeStart = distFadeStart;
-  }, [distFadeStart]);
-  useEffect(() => {
-    cache.current.distFadeEnd = distFadeEnd;
-  }, [distFadeEnd]);
-  useEffect(() => {
-    cache.current.noiseScale = noiseScale;
-  }, [noiseScale]);
-  useEffect(() => {
-    cache.current.noiseIntensity = noiseIntensity;
-  }, [noiseIntensity]);
-  useEffect(() => {
-    cache.current.octaves = Math.max(1, Math.min(8, Math.floor(octaves)));
-  }, [octaves]);
-  useEffect(() => {
-    cache.current.persistence = persistence;
-  }, [persistence]);
-  useEffect(() => {
-    cache.current.wind.fromArray(wind);
-  }, [wind]);
-  useEffect(() => {
-    cache.current.lightDir.fromArray(lightDir).normalize();
-  }, [lightDir]);
-  useEffect(() => {
-    cache.current.lightIntensity = lightIntensity;
-  }, [lightIntensity]);
-  useEffect(() => {
-    cache.current.anisotropy = THREE.MathUtils.clamp(anisotropy, -0.9, 0.9);
-  }, [anisotropy]);
+      vec3 noiseSampleCoord = (vWorldPosition * 0.025);
+      float n = FBM(noiseSampleCoord + FBM(noiseSampleCoord + (uFogDirection * uFogTime * 0.025 * uFogSpeed))) * 0.5 + 0.5;
+      n = 1. - (n * uFogDistortion);
+      
+      fogFactor *= expFactor * n;
+      fogFactor = clamp(fogFactor * fogDensity * 5., 0., 1.);
 
-  // GLSL helpers (fast value noise + FBM)
-  const NOISE_GLSL = `
-    float hash3(vec3 p){
-      p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
-      p *= 17.0;
-      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-    }
-    float valueNoise3(vec3 p){
-      vec3 i = floor(p);
-      vec3 f = fract(p);
-      f = f*f*(3.0 - 2.0*f);
-      float n000 = hash3(i + vec3(0,0,0));
-      float n100 = hash3(i + vec3(1,0,0));
-      float n010 = hash3(i + vec3(0,1,0));
-      float n110 = hash3(i + vec3(1,1,0));
-      float n001 = hash3(i + vec3(0,0,1));
-      float n101 = hash3(i + vec3(1,0,1));
-      float n011 = hash3(i + vec3(0,1,1));
-      float n111 = hash3(i + vec3(1,1,1));
-      float nx00 = mix(n000, n100, f.x);
-      float nx10 = mix(n010, n110, f.x);
-      float nx01 = mix(n001, n101, f.x);
-      float nx11 = mix(n011, n111, f.x);
-      float nxy0 = mix(nx00, nx10, f.y);
-      float nxy1 = mix(nx01, nx11, f.y);
-      return mix(nxy0, nxy1, f.z);
-    }
-    float fbm3(vec3 p, int oct, float pers){
-      float s = 0.0;
-      float a = 0.5;
-      float amp = 0.5;
-      for(int i=0;i<8;i++){
-        if(i>=oct) break;
-        s += valueNoise3(p * a) * amp;
-        a *= 2.0;
-        amp *= pers;
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+    #endif`;
+
+    THREE.ShaderChunk.fog_pars_fragment = `
+      uniform float uFogTime;
+      uniform float uFogDistortion;
+      uniform float uFogSpeed;
+      uniform vec3 uFogDirection;
+      uniform vec3 uFogScale;
+      uniform vec3 uFogPosition;
+
+      uniform vec3 fogColor;
+      varying vec3 vWorldPosition;
+      uniform float fogDensity;
+
+      float custom_map(float value, float min1, float max1, float min2, float max2) {
+        return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
       }
-      return s;
-    }
-    float henyeyGreenstein(float mu, float g){
-      float g2 = g*g;
-      float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
-      return (1.0 - g2) / (4.0 * 3.14159265 * denom);
-    }
-  `;
+      
+      float sdBox( vec3 p, vec3 b ) {
+        vec3 q = abs(p) - b;
+        return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+      }
 
-  // Inject per-material
-  const patch = (mat) => {
-    if (!enabled || !mat || patched.current.has(mat)) return;
-    if (mat.isShaderMaterial) return;
-    if (mat.isPointsMaterial) return;
+      ${Noise}
+      `;
 
-    mat.fog = true; // ensure USE_FOG path
+    THREE.ShaderChunk.fog_pars_vertex = `
+      varying vec3 vWorldPosition;
+    `;
+    THREE.ShaderChunk.fog_vertex = `
+      vWorldPosition = worldPosition.xyz;
+    `;
+  }, []);
 
-    mat.onBeforeCompile = (shader) => {
-      // uniforms for this material (bound every frame)
-      shader.uniforms.uPHF_Color = { value: cache.current.color3.clone() };
-      shader.uniforms.uPHF_Density = { value: cache.current.density };
-      shader.uniforms.uPHF_Extinction = { value: cache.current.extinction };
-      shader.uniforms.uPHF_Height = { value: cache.current.fogHeight };
-      shader.uniforms.uPHF_FadeStart = { value: cache.current.fadeStart };
-      shader.uniforms.uPHF_FadeEnd = { value: cache.current.fadeEnd };
-      shader.uniforms.uPHF_DistStart = { value: cache.current.distFadeStart };
-      shader.uniforms.uPHF_DistEnd = { value: cache.current.distFadeEnd };
-      shader.uniforms.uPHF_NoiseScale = { value: cache.current.noiseScale };
-      shader.uniforms.uPHF_NoiseIntensity = {
-        value: cache.current.noiseIntensity,
-      };
-      shader.uniforms.uPHF_Octaves = { value: cache.current.octaves };
-      shader.uniforms.uPHF_Persistence = { value: cache.current.persistence };
-      shader.uniforms.uPHF_Wind = { value: cache.current.wind.clone() };
-      shader.uniforms.uPHF_Time = { value: tRef.current };
-      shader.uniforms.uPHF_LightDir = { value: cache.current.lightDir.clone() };
-      shader.uniforms.uPHF_LightIntensity = {
-        value: cache.current.lightIntensity,
-      };
-      shader.uniforms.uPHF_Anisotropy = { value: cache.current.anisotropy };
+  const args = useMemo(() => [color, density], [color, density]);
+  const shaders = useRef([]);
+  const scene = useThree((s) => s.scene);
 
-      // vertex: capture world position
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-           varying vec3 vPHF_WorldPos;`
-        )
-        .replace(
-          "#include <worldpos_vertex>",
-          `#include <worldpos_vertex>
-           vPHF_WorldPos = worldPosition.xyz;`
+  useEffect(() => {
+    shaders.current.forEach((s) => (s.uniforms.uFogSpeed.value = speed));
+  }, [speed]);
+
+  useEffect(() => {
+    shaders.current.forEach(
+      (s) => (s.uniforms.uFogDistortion.value = distortion)
+    );
+  }, [distortion]);
+
+  useEffect(() => {
+    shaders.current.forEach((s) => (s.uniforms.fogDensity.value = density));
+  }, [density]);
+
+  useEffect(() => {
+    shaders.current.forEach((s) => {
+      if (Array.isArray(direction) && direction.length >= 3) {
+        s.uniforms.uFogDirection.value = new THREE.Vector3().fromArray(
+          direction
         );
-
-      // fragment: add our uniforms + noise; override fog mix
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-           varying vec3 vPHF_WorldPos;
-           uniform vec3  uPHF_Color;
-           uniform float uPHF_Density;
-           uniform float uPHF_Extinction;
-           uniform float uPHF_Height;
-           uniform float uPHF_FadeStart;
-           uniform float uPHF_FadeEnd;
-           uniform float uPHF_DistStart;
-           uniform float uPHF_DistEnd;
-           uniform float uPHF_NoiseScale;
-           uniform float uPHF_NoiseIntensity;
-           uniform int   uPHF_Octaves;
-           uniform float uPHF_Persistence;
-           uniform vec3  uPHF_Wind;
-           uniform float uPHF_Time;
-           uniform vec3  uPHF_LightDir;
-           uniform float uPHF_LightIntensity;
-           uniform float uPHF_Anisotropy;
-           ${NOISE_GLSL}`
-        )
-        .replace(
-          "#include <fog_fragment>",
-          `#ifdef USE_FOG
-            // Vector from camera -> fragment
-            vec3  V = vPHF_WorldPos - cameraPosition;
-            float d = length(V);
-
-            // Height fade (top cutoff)
-            float yRel = vPHF_WorldPos.y - uPHF_Height;
-            float hMask = 1.0 - smoothstep(uPHF_FadeStart, uPHF_FadeEnd, yRel);
-            hMask = clamp(hMask, 0.0, 1.0);
-
-            // Animated noise (gives soft "volume" feel)
-            vec3 q = vPHF_WorldPos * uPHF_NoiseScale + uPHF_Wind * uPHF_Time;
-            float n = fbm3(q, uPHF_Octaves, uPHF_Persistence);
-            float noisy = mix(1.0, n, clamp(uPHF_NoiseIntensity, 0.0, 1.0));
-
-            // Exponential fog (Beer-Lambert)
-            float sigma = max(1e-6, uPHF_Extinction * uPHF_Density * noisy);
-            float trans = exp(-sigma * d);
-
-            // Force distant geometry to vanish fully
-            float df = smoothstep(uPHF_DistStart, uPHF_DistEnd, d);
-            trans = mix(trans, 0.0, df);
-
-            // Phase-like forward scatter (very mild)
-            float mu = dot(normalize(V), -normalize(uPHF_LightDir));
-            float phase = henyeyGreenstein(mu, uPHF_Anisotropy);
-            vec3 fogCol = uPHF_Color * mix(1.0, (0.4 + 1.6*phase), uPHF_LightIntensity);
-
-            float fogFactor = (1.0 - trans) * hMask;
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, fogCol, clamp(fogFactor, 0.0, 1.0));
-          #endif`
-        );
-
-      patched.current.set(mat, shader.uniforms);
-    };
-
-    mat.needsUpdate = true;
-  };
-
-  useFrame((_, dt) => {
-    if (!enabled) return;
-    tRef.current += dt;
-    scene.traverse((o) => {
-      if (!o.isMesh) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of mats) patch(m);
+      } else if (direction instanceof THREE.Vector3) {
+        s.uniforms.uFogDirection.value = direction;
+      }
     });
-    // push updated uniform values each frame
-    patched.current.forEach((u, m) => {
-      if (!m || !u) return;
-      u.uPHF_Color?.value.copy(cache.current.color3);
-      if (u.uPHF_Density) u.uPHF_Density.value = cache.current.density;
-      if (u.uPHF_Extinction) u.uPHF_Extinction.value = cache.current.extinction;
-      if (u.uPHF_Height) u.uPHF_Height.value = cache.current.fogHeight;
-      if (u.uPHF_FadeStart) u.uPHF_FadeStart.value = cache.current.fadeStart;
-      if (u.uPHF_FadeEnd) u.uPHF_FadeEnd.value = cache.current.fadeEnd;
-      if (u.uPHF_DistStart)
-        u.uPHF_DistStart.value = cache.current.distFadeStart;
-      if (u.uPHF_DistEnd) u.uPHF_DistEnd.value = cache.current.distFadeEnd;
-      if (u.uPHF_NoiseScale) u.uPHF_NoiseScale.value = cache.current.noiseScale;
-      if (u.uPHF_NoiseIntensity)
-        u.uPHF_NoiseIntensity.value = cache.current.noiseIntensity;
-      if (u.uPHF_Octaves) u.uPHF_Octaves.value = cache.current.octaves;
-      if (u.uPHF_Persistence)
-        u.uPHF_Persistence.value = cache.current.persistence;
-      u.uPHF_Wind?.value.copy(cache.current.wind);
-      u.uPHF_LightDir?.value.copy(cache.current.lightDir);
-      if (u.uPHF_LightIntensity)
-        u.uPHF_LightIntensity.value = cache.current.lightIntensity;
-      if (u.uPHF_Anisotropy) u.uPHF_Anisotropy.value = cache.current.anisotropy;
-      if (u.uPHF_Time) u.uPHF_Time.value = tRef.current;
+  }, [direction]);
+
+  useEffect(() => {
+    shaders.current.forEach((s) => {
+      if (Array.isArray(scale) && scale.length >= 3) {
+        s.uniforms.uFogScale.value = new THREE.Vector3().fromArray(scale);
+      } else if (scale instanceof THREE.Vector3) {
+        s.uniforms.uFogScale.value = scale;
+      }
     });
+  }, [scale]);
+
+  useEffect(() => {
+    shaders.current.forEach((s) => {
+      if (Array.isArray(position) && position.length >= 3) {
+        s.uniforms.uFogPosition.value = new THREE.Vector3().fromArray(position);
+      } else if (position instanceof THREE.Vector3) {
+        s.uniforms.uFogPosition.value = position;
+      }
+    });
+  }, [position]);
+
+  useFrame(({ clock }) => {
+    shaders.current.forEach(
+      (s) => (s.uniforms.uFogTime.value = clock.elapsedTime)
+    );
   });
 
-  useEffect(() => () => (patched.current = new WeakMap()), []);
+  // Hook materials once to inject uniforms (as in the reference)
+  useEffect(() => {
+    scene.traverse((obj) => {
+      // @ts-ignore
+      if (obj.material) {
+        const m = obj;
+        m.material.onBeforeCompile = (s) => {
+          s.uniforms.uFogTime = { value: 0 };
+          s.uniforms.uFogSpeed = { value: speed };
+          s.uniforms.uFogDistortion = { value: distortion };
+          s.uniforms.uFogDirection = {
+            value: new THREE.Vector3().fromArray(
+              Array.isArray(direction)
+                ? direction
+                : [direction.x, direction.y, direction.z]
+            ),
+          };
+          s.uniforms.uFogScale = {
+            value: new THREE.Vector3().fromArray(
+              Array.isArray(scale) ? scale : [scale.x, scale.y, scale.z]
+            ),
+          };
+          s.uniforms.uFogPosition = {
+            value: new THREE.Vector3().fromArray(
+              Array.isArray(position)
+                ? position
+                : [position.x, position.y, position.z]
+            ),
+          };
+          shaders.current.push(s);
+        };
+      }
+    });
+  }, []);
 
-  return null;
+  // NOTE: must be used with attach="fog"
+  return <fogExp2 args={args} {...props} />;
 }
