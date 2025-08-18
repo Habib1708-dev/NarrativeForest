@@ -50,6 +50,9 @@ const VolumetricFogShader = {
     skyStart: { value: 0.15 },
     skyEnd: { value: 0.07 },
     skyUpFadePow: { value: 6.0 },
+
+    // adaptive sky steps (fraction of steps)
+    skyStepsMul: { value: 0.4 },
   },
 
   vertexShader: /* glsl */ `
@@ -99,6 +102,7 @@ const VolumetricFogShader = {
     uniform float skyStart;
     uniform float skyEnd;
     uniform float skyUpFadePow;
+  uniform float skyStepsMul;
 
     // ---- helpers ----
     vec3 worldPosFromDepth(vec2 uv, float ndcDepth){
@@ -184,7 +188,7 @@ const VolumetricFogShader = {
         return;
       }
 
-      int N = steps;
+  int N = steps;
       float stepLen = maxT / float(N);
       float t = 0.0; // NO JITTER
 
@@ -195,6 +199,23 @@ const VolumetricFogShader = {
       float mu = dot(rayDir, -normalize(lightDir));
       float phase = henyeyGreenstein(mu, anisotropy);
       float lightBoost = mix(1.0, (0.4 + 1.6*phase), lightIntensity);
+
+      // Adaptive steps for sky rays
+      if(isSky){
+        N = max(1, int(float(steps) * clamp(skyStepsMul, 0.1, 1.0)));
+        stepLen = maxT / float(N);
+      }
+
+      // Early skip if ray heads upward and starts above fog slab
+      if(isSky){
+        if(rayDir.y >= 0.0){
+          float fogTop = baseHeight + (1.0 / max(0.0001, heightFalloff));
+          if(camPos.y > fogTop){
+            gl_FragColor = base;
+            return;
+          }
+        }
+      }
 
       for(int i=0;i<256;i++){
         if(i>=N) break;
@@ -262,6 +283,9 @@ export default function VolumetricFogPass({
   skyEnd = 0.95,
   skyUpFadePow = 2.0,
   enabled = true,
+  // performance controls
+  resolutionScale = 0.75,
+  skyStepsMul = 0.4,
 }) {
   const { gl, scene, camera, size } = useThree();
   const composer = useRef();
@@ -282,7 +306,16 @@ export default function VolumetricFogPass({
     if (!enabled) return;
 
     // RT with a depthTexture for the shader to read scene depth
-    rt.current = new THREE.WebGLRenderTarget(size.width, size.height, {
+    const w = Math.max(
+      1,
+      Math.round(size.width * Math.max(0.25, Math.min(1, resolutionScale)))
+    );
+    const h = Math.max(
+      1,
+      Math.round(size.height * Math.max(0.25, Math.min(1, resolutionScale)))
+    );
+
+    rt.current = new THREE.WebGLRenderTarget(w, h, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
@@ -290,9 +323,9 @@ export default function VolumetricFogPass({
       stencilBuffer: false,
     });
     rt.current.depthTexture = new THREE.DepthTexture(
-      size.width,
-      size.height,
-      THREE.UnsignedIntType
+      w,
+      h,
+      THREE.UnsignedShortType
     );
 
     composer.current = new EffectComposer(gl, rt.current);
@@ -309,7 +342,16 @@ export default function VolumetricFogPass({
       rt.current = undefined;
       pass.current = undefined;
     };
-  }, [gl, scene, camera, size.width, size.height, shader, enabled]);
+  }, [
+    gl,
+    scene,
+    camera,
+    size.width,
+    size.height,
+    shader,
+    enabled,
+    resolutionScale,
+  ]);
 
   // Keep uniforms synced
   useEffect(() => {
@@ -339,6 +381,7 @@ export default function VolumetricFogPass({
     u.skyStart.value = skyStart;
     u.skyEnd.value = skyEnd;
     u.skyUpFadePow.value = skyUpFadePow;
+    u.skyStepsMul.value = skyStepsMul;
   }, [
     color,
     globalDensity,
@@ -361,14 +404,27 @@ export default function VolumetricFogPass({
     skyStart,
     skyEnd,
     skyUpFadePow,
+    skyStepsMul,
   ]);
 
   // Resize handling
   useEffect(() => {
     if (!composer.current || !rt.current) return;
-    composer.current.setSize(size.width, size.height);
-    rt.current.setSize(size.width, size.height);
-  }, [size]);
+    const w = Math.max(
+      1,
+      Math.round(size.width * Math.max(0.25, Math.min(1, resolutionScale)))
+    );
+    const h = Math.max(
+      1,
+      Math.round(size.height * Math.max(0.25, Math.min(1, resolutionScale)))
+    );
+    composer.current.setSize(w, h);
+    rt.current.setSize(w, h);
+    if (rt.current.depthTexture) {
+      rt.current.depthTexture.image.width = w;
+      rt.current.depthTexture.image.height = h;
+    }
+  }, [size, resolutionScale]);
 
   // Per-frame camera updates & time
   useFrame(() => {

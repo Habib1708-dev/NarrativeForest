@@ -11,7 +11,7 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import VolumetricFogPass from "./post/VolumetricFogPass";
+import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -19,13 +19,8 @@ export default function Experience() {
   const starsBigRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
 
-  const terrainRefCallback = (mesh) => {
-    if (mesh) setTerrainMesh(mesh);
-  };
-
-  // Fog, Sky, and Stars controls
   const {
-    // Fog
+    // Built-in scene fog (kept just to enable USE_FOG in built-in materials)
     fogColor,
     fogNear,
     fogFar,
@@ -46,41 +41,29 @@ export default function Experience() {
     starsSaturation,
     starsFade,
     starsSpeed,
-    // StarsBig (separate larger stars)
+    // Big stars
     showStarsBig,
     starsBigCount,
     starsBigFactor,
     // Render/Lights
     exposure,
     dirLightIntensity,
-    // Volumetric Fog (post)
-    vEnabled,
-    vColor,
-    vDensity,
-    vExtinction,
-    vBaseHeight,
-    vHeightFalloff,
-    vNoiseScale,
-    vNoiseIntensity,
-    vOctaves,
-    vPersistence,
-    vWindX,
-    vWindY,
-    vWindZ,
-    vSteps,
-    vMaxDepthMul,
-    vJitter,
-    vLightDirX,
-    vLightDirY,
-    vLightDirZ,
-    vLightIntensity,
-    vAnisotropy,
-    vAffectSky,
-    // Sky-blend extras
-    vSkyMaxDistanceMul,
-    vSkyStart,
-    vSkyEnd,
-    vSkyUpFadePow,
+    // Unified fog controls
+    fEnabled,
+    fColor,
+    fDensity,
+    fExtinction,
+    fFogHeight,
+    fFadeStart,
+    fFadeEnd,
+    fDistStart,
+    fDistEnd,
+    fLightDirX,
+    fLightDirY,
+    fLightDirZ,
+    fLightIntensity,
+    fAnisotropy,
+    fSkyRadius,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -117,35 +100,23 @@ export default function Experience() {
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
     }),
-    "Volumetric Fog": folder({
-      vEnabled: { value: true },
-      vColor: { value: "#98a0a5" },
-      vDensity: { value: 0.45, min: 0.0, max: 2.0, step: 0.01 },
-      vExtinction: { value: 1.2, min: 0.1, max: 4.0, step: 0.01 },
-      vBaseHeight: { value: 0.0, min: -5.0, max: 10.0, step: 0.1 },
-      vHeightFalloff: { value: 1.1, min: 0.1, max: 4.0, step: 0.01 },
-      vNoiseScale: { value: 0.12, min: 0.02, max: 0.6, step: 0.005 },
-      vNoiseIntensity: { value: 0.85, min: 0.0, max: 1.0, step: 0.01 },
-      vOctaves: { value: 4, min: 1, max: 8, step: 1 },
-      vPersistence: { value: 0.55, min: 0.2, max: 0.9, step: 0.01 },
-      vWindX: { value: 0.03, min: -0.2, max: 0.2, step: 0.001 },
-      vWindY: { value: 0.0, min: -0.2, max: 0.2, step: 0.001 },
-      vWindZ: { value: 0.06, min: -0.2, max: 0.2, step: 0.001 },
-      vSteps: { value: 48, min: 16, max: 160, step: 1 },
-      vMaxDepthMul: { value: 1.0, min: 0.2, max: 2.0, step: 0.01 },
-      // Jitter kept in UI for completeness, but shader ignores it now.
-      vJitter: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
-      vLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
-      vLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
-      vLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
-      vLightIntensity: { value: 0.4, min: 0.0, max: 2.0, step: 0.01 },
-      vAnisotropy: { value: 0.35, min: -0.8, max: 0.8, step: 0.01 },
-      vAffectSky: { value: true },
-      // New sky-blend controls (fog fades to fully-visible sky)
-      vSkyMaxDistanceMul: { value: 0.1, min: 0.1, max: 2.0, step: 0.01 },
-      vSkyStart: { value: 0.15, min: 0.0, max: 1.0, step: 0.01 },
-      vSkyEnd: { value: 0.07, min: 0.0, max: 1.0, step: 0.01 },
-      vSkyUpFadePow: { value: 6.0, min: 0.0, max: 6.0, step: 0.1 },
+    "Unified Fog": folder({
+      fEnabled: { value: true },
+      fColor: { value: "#98a0a5" },
+      fDensity: { value: 0.45, min: 0.0, max: 3.0, step: 0.01 },
+      fExtinction: { value: 1.2, min: 0.1, max: 5.0, step: 0.01 },
+      fFogHeight: { value: 0.0, min: -20.0, max: 40.0, step: 0.1 },
+      fFadeStart: { value: 8.0, min: 0.0, max: 200.0, step: 0.1 },
+      fFadeEnd: { value: 20.0, min: 0.0, max: 300.0, step: 0.1 },
+      // Distance fade: force objects to vanish into fog
+      fDistStart: { value: 60.0, min: 0.0, max: 500.0, step: 1.0 },
+      fDistEnd: { value: 120.0, min: 0.0, max: 1000.0, step: 1.0 },
+      fLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
+      fLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
+      fLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
+      fLightIntensity: { value: 0.35, min: 0.0, max: 2.0, step: 0.01 },
+      fAnisotropy: { value: 0.3, min: -0.8, max: 0.8, step: 0.01 },
+      fSkyRadius: { value: 800, min: 100, max: 4000, step: 10 },
     }),
   });
 
@@ -154,7 +125,6 @@ export default function Experience() {
     gl.toneMappingExposure = exposure;
   }, [gl, exposure]);
 
-  // Keep both star sets non-additive to avoid leaf see-through glow
   useEffect(() => {
     [starsRef.current, starsBigRef.current].forEach((pts) => {
       const mat = pts?.material;
@@ -171,7 +141,7 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Scene fog (you can disable if you prefer post-only) */}
+      {/* Keep built-in fog so USE_FOG is defined (Forward injection relies on it) */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
@@ -212,7 +182,7 @@ export default function Experience() {
         />
       )}
 
-      {/* Controls & Lights */}
+      {/* Camera controls & lights */}
       <OrbitControls
         makeDefault
         minDistance={1}
@@ -253,30 +223,21 @@ export default function Experience() {
         <Cat />
       </Suspense>
 
-      <VolumetricFogPass
-        enabled={vEnabled}
-        color={vColor}
-        globalDensity={vDensity}
-        extinction={vExtinction}
-        baseHeight={vBaseHeight}
-        heightFalloff={vHeightFalloff}
-        noiseScale={vNoiseScale}
-        noiseIntensity={vNoiseIntensity}
-        octaves={vOctaves}
-        persistence={vPersistence}
-        wind={[vWindX, vWindY, vWindZ]}
-        steps={vSteps}
-        maxDistanceMul={vMaxDepthMul}
-        jitter={vJitter} // ignored internally; kept for compatibility
-        lightDir={[vLightDirX, vLightDirY, vLightDirZ]}
-        lightIntensity={vLightIntensity}
-        anisotropy={vAnisotropy}
-        affectSky={vAffectSky}
-        // new sky-blend props
-        skyMaxDistanceMul={vSkyMaxDistanceMul}
-        skyStart={vSkyStart}
-        skyEnd={vSkyEnd}
-        skyUpFadePow={vSkyUpFadePow}
+      {/* Unified fog (patch geometry + sky volume) */}
+      <UnifiedForwardFog
+        enabled={fEnabled}
+        color={fColor}
+        density={fDensity}
+        extinction={fExtinction}
+        fogHeight={fFogHeight}
+        fadeStart={fFadeStart}
+        fadeEnd={fFadeEnd}
+        distFadeStart={fDistStart}
+        distFadeEnd={fDistEnd}
+        lightDir={[fLightDirX, fLightDirY, fLightDirZ]}
+        lightIntensity={fLightIntensity}
+        anisotropy={fAnisotropy}
+        skyRadius={fSkyRadius}
       />
 
       <DebugTreeMaterials
