@@ -29,6 +29,8 @@ export default function Experience() {
     fogColor,
     fogNear,
     fogFar,
+    fogMode,
+    fogDensity,
     // Sky
     sunPosition,
     rayleigh,
@@ -53,9 +55,12 @@ export default function Experience() {
     dirLightIntensity,
   } = useControls({
     Atmosphere: folder({
-      fogColor: { value: "#ffffff" },
-      fogNear: { value: 0.001, min: 0.001, max: 50, step: 1 },
-      fogFar: { value: 100, min: 50, max: 300, step: 5 },
+      fogColor: { value: "#585858" },
+      fogMode: { value: "linear", options: ["linear", "exp2"] },
+      // linear: use near/far; exp2: use density (higher = thicker)
+      fogNear: { value: 4, min: 0, max: 50, step: 1 },
+      fogFar: { value: 10, min: 3, max: 30, step: 3 },
+      fogDensity: { value: 0.02, min: 0.0, max: 0.8, step: 0.001 },
     }),
     Sky: folder({
       sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
@@ -109,8 +114,13 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Atmosphere */}
-      <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
+      {/* Atmosphere: support linear Fog (near/far) or FogExp2 (density) */}
+      {fogMode === "exp2" ? (
+        // FogExp2 takes (color, density) where density controls intensity
+        <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
+      ) : (
+        <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
+      )}
       <Sky
         ref={skyRef}
         sunPosition={sunPosition}
