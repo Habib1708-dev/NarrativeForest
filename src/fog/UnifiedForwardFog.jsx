@@ -12,24 +12,24 @@ import { useEffect, useMemo, useRef } from "react";
  */
 export default function UnifiedForwardFog({
   enabled = true,
-
+  // Defaults updated per user request
   color = "#98a0a5",
-  density = 1.21, // global density multiplier
-  extinction = 0.19, // Beer-Lambert coefficient
+  density = 1.96, // global density multiplier
+  extinction = 0.1, // Beer-Lambert coefficient
 
-  fogHeight = 40.0, // world-Y base of fog layer
-  fadeStart = 8.0, // starts fading above base
-  fadeEnd = 20.0, // fully gone above this
+  fogHeight = -3.9, // world-Y base of fog layer
+  fadeStart = 3.9, // starts fading above base
+  fadeEnd = 41.3, // fully gone above this
 
   // Force far objects to fully vanish into fog
-  distFadeStart = 60.0, // start forcing to full fog
+  distFadeStart = 0.0, // start forcing to full fog
   distFadeEnd = 92.0, // fully fogged by here
 
-  lightDir = [-0.69, 0.8, -0.4],
+  lightDir = [-0.5, 0.8, -0.4],
   lightIntensity = 0.0,
-  anisotropy = 0.8,
+  anisotropy = 0.0,
 
-  skyRadius = 940, // camera-centered sky dome size
+  skyRadius = 100, // camera-centered sky dome size
 }) {
   const { scene, camera } = useThree();
   const patched = useRef(new Map());

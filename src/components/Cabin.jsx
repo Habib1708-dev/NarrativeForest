@@ -88,7 +88,7 @@ export default function Cabin() {
         bulbEnabled: { value: true, label: "Enabled" },
         bulbColor: { value: "#ffd8a8", label: "Color" },
         bulbIntensity: {
-          value: 0.06,
+          value: 0.1,
           min: 0,
           max: 2,
           step: 0.01,
