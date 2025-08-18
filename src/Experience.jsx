@@ -11,6 +11,7 @@ import Cabin from "./components/Cabin";
 import DebugTreeMaterials from "./debug/DebugTreeMaterials";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
+import VolumetricFogPass from "./post/VolumetricFogPass";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -19,7 +20,6 @@ export default function Experience() {
   const [terrainMesh, setTerrainMesh] = useState(null);
 
   const terrainRefCallback = (mesh) => {
-    // mesh will be null on unmount; skip
     if (mesh) setTerrainMesh(mesh);
   };
 
@@ -53,14 +53,41 @@ export default function Experience() {
     // Render/Lights
     exposure,
     dirLightIntensity,
+    // Volumetric Fog (post)
+    vEnabled,
+    vColor,
+    vDensity,
+    vExtinction,
+    vBaseHeight,
+    vHeightFalloff,
+    vNoiseScale,
+    vNoiseIntensity,
+    vOctaves,
+    vPersistence,
+    vWindX,
+    vWindY,
+    vWindZ,
+    vSteps,
+    vMaxDepthMul,
+    vJitter,
+    vLightDirX,
+    vLightDirY,
+    vLightDirZ,
+    vLightIntensity,
+    vAnisotropy,
+    vAffectSky,
+    // Sky-blend extras
+    vSkyMaxDistanceMul,
+    vSkyStart,
+    vSkyEnd,
+    vSkyUpFadePow,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
       fogMode: { value: "linear", options: ["linear", "exp2"] },
-      // linear: use near/far; exp2: use density (higher = thicker)
       fogNear: { value: 4, min: 0, max: 50, step: 1 },
       fogFar: { value: 10, min: 3, max: 30, step: 3 },
-      fogDensity: { value: 0.02, min: 0.0, max: 0.8, step: 0.001 },
+      fogDensity: { value: 0.3, min: 0.0, max: 0.8, step: 0.001 },
     }),
     Sky: folder({
       sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
@@ -83,12 +110,42 @@ export default function Experience() {
       exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
     }),
     StarsBig: folder({
-      showStarsBig: { value: true }, // was showTintedStars: true
-      starsBigCount: { value: 3720, min: 0, max: 10000, step: 10 }, // was tintedCount
-      starsBigFactor: { value: 6.2, min: 0.1, max: 20, step: 0.1 }, // was tintedFactor
+      showStarsBig: { value: true },
+      starsBigCount: { value: 3720, min: 0, max: 10000, step: 10 },
+      starsBigFactor: { value: 6.2, min: 0.1, max: 20, step: 0.1 },
     }),
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
+    }),
+    "Volumetric Fog": folder({
+      vEnabled: { value: true },
+      vColor: { value: "#98a0a5" },
+      vDensity: { value: 0.45, min: 0.0, max: 2.0, step: 0.01 },
+      vExtinction: { value: 1.2, min: 0.1, max: 4.0, step: 0.01 },
+      vBaseHeight: { value: 0.0, min: -5.0, max: 10.0, step: 0.1 },
+      vHeightFalloff: { value: 1.1, min: 0.1, max: 4.0, step: 0.01 },
+      vNoiseScale: { value: 0.12, min: 0.02, max: 0.6, step: 0.005 },
+      vNoiseIntensity: { value: 0.85, min: 0.0, max: 1.0, step: 0.01 },
+      vOctaves: { value: 4, min: 1, max: 8, step: 1 },
+      vPersistence: { value: 0.55, min: 0.2, max: 0.9, step: 0.01 },
+      vWindX: { value: 0.03, min: -0.2, max: 0.2, step: 0.001 },
+      vWindY: { value: 0.0, min: -0.2, max: 0.2, step: 0.001 },
+      vWindZ: { value: 0.06, min: -0.2, max: 0.2, step: 0.001 },
+      vSteps: { value: 48, min: 16, max: 160, step: 1 },
+      vMaxDepthMul: { value: 1.0, min: 0.2, max: 2.0, step: 0.01 },
+      // Jitter kept in UI for completeness, but shader ignores it now.
+      vJitter: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
+      vLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
+      vLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
+      vLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
+      vLightIntensity: { value: 0.4, min: 0.0, max: 2.0, step: 0.01 },
+      vAnisotropy: { value: 0.35, min: -0.8, max: 0.8, step: 0.01 },
+      vAffectSky: { value: true },
+      // New sky-blend controls (fog fades to fully-visible sky)
+      vSkyMaxDistanceMul: { value: 0.1, min: 0.1, max: 2.0, step: 0.01 },
+      vSkyStart: { value: 0.15, min: 0.0, max: 1.0, step: 0.01 },
+      vSkyEnd: { value: 0.07, min: 0.0, max: 1.0, step: 0.01 },
+      vSkyUpFadePow: { value: 6.0, min: 0.0, max: 6.0, step: 0.1 },
     }),
   });
 
@@ -114,13 +171,13 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Atmosphere: support linear Fog (near/far) or FogExp2 (density) */}
+      {/* Scene fog (you can disable if you prefer post-only) */}
       {fogMode === "exp2" ? (
-        // FogExp2 takes (color, density) where density controls intensity
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
+
       <Sky
         ref={skyRef}
         sunPosition={sunPosition}
@@ -129,6 +186,7 @@ export default function Experience() {
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
       />
+
       {showStars && (
         <Stars
           ref={starsRef}
@@ -148,7 +206,7 @@ export default function Experience() {
           depth={starsDepth}
           count={starsBigCount}
           factor={starsBigFactor}
-          saturation={0} // keep white; just larger points
+          saturation={0}
           fade={starsFade}
           speed={starsSpeed}
         />
@@ -183,19 +241,43 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        {/* 1) Tell Terrain to hand us its sampler (wrapped so it becomes state) */}
         <Terrain
           ref={(m) => {
             console.log("[Experience] got terrainMesh:", m);
             setTerrainMesh(m);
           }}
         />
-        {/* 2) Once state is a function, mount Forest */}
         <Forest terrainMesh={terrainMesh} />
         <Cabin />
         <Man />
         <Cat />
       </Suspense>
+
+      <VolumetricFogPass
+        enabled={vEnabled}
+        color={vColor}
+        globalDensity={vDensity}
+        extinction={vExtinction}
+        baseHeight={vBaseHeight}
+        heightFalloff={vHeightFalloff}
+        noiseScale={vNoiseScale}
+        noiseIntensity={vNoiseIntensity}
+        octaves={vOctaves}
+        persistence={vPersistence}
+        wind={[vWindX, vWindY, vWindZ]}
+        steps={vSteps}
+        maxDistanceMul={vMaxDepthMul}
+        jitter={vJitter} // ignored internally; kept for compatibility
+        lightDir={[vLightDirX, vLightDirY, vLightDirZ]}
+        lightIntensity={vLightIntensity}
+        anisotropy={vAnisotropy}
+        affectSky={vAffectSky}
+        // new sky-blend props
+        skyMaxDistanceMul={vSkyMaxDistanceMul}
+        skyStart={vSkyStart}
+        skyEnd={vSkyEnd}
+        skyUpFadePow={vSkyUpFadePow}
+      />
 
       <DebugTreeMaterials
         url="/models/tree/Spruce/spruce.glb"
