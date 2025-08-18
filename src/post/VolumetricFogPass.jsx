@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import { EffectComposer, RenderPass, ShaderPass } from "three-stdlib";
 
-// Volumetric, animated cloud-fog with sky-blend and NO jitter
+// Volumetric, STATIC cloud-fog with sky-blend and NO jitter (animation removed)
 const VolumetricFogShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -24,7 +24,7 @@ const VolumetricFogShader = {
     baseHeight: { value: 0.0 },
     heightFalloff: { value: 1.2 },
 
-    // noise
+    // noise (static; no time animation)
     noiseScale: { value: 0.12 },
     noiseIntensity: { value: 0.85 },
     octaves: { value: 4 },
@@ -82,8 +82,7 @@ const VolumetricFogShader = {
     uniform float noiseIntensity;
     uniform int octaves;
     uniform float persistence;
-    uniform vec3 wind;
-    uniform float time;
+  // animation removed: wind/time not used
 
     uniform int steps;
     uniform float maxDistanceMul;
@@ -204,8 +203,8 @@ const VolumetricFogShader = {
         // Height-based density
         float h = clamp(1.0 - max(0.0, (p.y - baseHeight)) * heightFalloff, 0.0, 1.0);
 
-        // Animated FBM noise
-        vec3 q = p * noiseScale + wind * time;
+  // Static FBM noise (no animation)
+  vec3 q = p * noiseScale;
         float n = fbm(q);
 
         float density = globalDensity * h * mix(1.0, n, noiseIntensity);
@@ -249,7 +248,7 @@ export default function VolumetricFogPass({
   noiseIntensity = 0.85,
   octaves = 4,
   persistence = 0.55,
-  wind = [0.03, 0.0, 0.06],
+  wind = [0.0, 0.0, 0.0], // unused; kept for API compatibility
   steps = 48,
   maxDistanceMul = 1.0,
   jitter = 0.0, // kept for prop compatibility
@@ -268,7 +267,8 @@ export default function VolumetricFogPass({
   const composer = useRef();
   const rt = useRef();
   const pass = useRef();
-  const clock = useRef(new THREE.Clock());
+  // animation clock removed (no time-based animation)
+  const clock = useRef({ getDelta: () => 0 });
 
   const shader = useMemo(() => {
     const s = {
@@ -324,7 +324,8 @@ export default function VolumetricFogPass({
     u.noiseIntensity.value = noiseIntensity;
     u.octaves.value = Math.max(1, Math.min(8, Math.floor(octaves)));
     u.persistence.value = persistence;
-    u.wind.value.fromArray(wind);
+    // wind ignored (static noise)
+    u.wind.value.set(0, 0, 0);
     u.steps.value = Math.max(8, Math.min(256, Math.floor(steps)));
     u.maxDistanceMul.value = maxDistanceMul;
     u.jitter.value = jitter; // not used, but safe to keep
@@ -378,7 +379,7 @@ export default function VolumetricFogPass({
     u.projectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
     u.viewMatrixInverse.value.copy(camera.matrixWorld);
     u.camPos.value.copy(camera.position);
-    u.time.value += clock.current.getDelta();
+    // no time progression; keep value constant
 
     composer.current.render();
   }, 1);
