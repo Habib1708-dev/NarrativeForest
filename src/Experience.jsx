@@ -11,7 +11,6 @@ import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
-import PseudoHeightFog from "./fog/PseudoHeightFog";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -64,15 +63,6 @@ export default function Experience() {
     fLightIntensity,
     fAnisotropy,
     fSkyRadius,
-
-    // PseudoHeightFog controls (exactly as in the reference repo)
-    Fog_enbled,
-    Fog_color,
-    Fog_density,
-    Fog_speed,
-    Fog_distortion,
-    Fog_scale,
-    Fog_position,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -127,34 +117,6 @@ export default function Experience() {
       fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
       fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
     }),
-    // PseudoHeightFog controls — EXACT names/labels/limits as the repo
-    Fog: folder({
-      Fog_enbled: { label: "Enable", value: true },
-      Fog_color: { label: "Color", value: "#ffffff" },
-      Fog_density: { label: "Density", min: 0, max: 1, step: 0.01, value: 0.3 },
-      Fog_speed: { label: "Speed", min: 0, max: 10, step: 0.1, value: 1.7 },
-      Fog_distortion: {
-        label: "Distortion",
-        min: 0,
-        max: 2,
-        step: 0.01,
-        value: 1.3,
-      },
-      Fog_scale: {
-        label: "Scale",
-        min: 0,
-        max: 100,
-        step: 1,
-        value: [100, 2.5, 100],
-      },
-      Fog_position: {
-        label: "Position",
-        min: 0,
-        max: 100,
-        step: 1,
-        value: [0, 0, 0],
-      },
-    }),
   });
 
   const gl = useThree((s) => s.gl);
@@ -178,18 +140,8 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Attach PseudoHeightFog when enabled; else use the chosen built-in fog */}
-      {Fog_enbled ? (
-        <PseudoHeightFog
-          attach="fog"
-          color={Fog_color}
-          scale={Fog_scale}
-          position={Fog_position}
-          speed={Fog_speed}
-          distortion={Fog_distortion}
-          density={Fog_density}
-        />
-      ) : fogMode === "exp2" ? (
+      {/* Built-in scene fog */}
+      {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
