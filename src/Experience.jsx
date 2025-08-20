@@ -10,7 +10,7 @@ import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import CombinedFog from "./fog/CombinedFog"; // ⬅️ NEW
+import CombinedFog from "./fog/CombinedFog"; // ⬅️ has noiseBoost/near/far/animFar
 
 export default function Experience() {
   const skyRef = useRef();
@@ -61,7 +61,7 @@ export default function Experience() {
     cLightIntensity,
     cAnisotropy,
     cSkyRadius,
-    // CombinedFog – culled noise layer
+    // CombinedFog – culled noise layer (existing)
     nEnabled,
     nDir,
     nSpeed,
@@ -71,6 +71,11 @@ export default function Experience() {
     nBoxCenter,
     nBoxHalf,
     nMaxDist,
+    // CombinedFog – NEW: near-only shaping + far LOD + separate gain
+    nBoost,
+    nNear,
+    nFar,
+    nAnimFar,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -159,6 +164,36 @@ export default function Experience() {
         max: 80,
         step: 1,
         label: "Max Camera Dist",
+      },
+
+      // NEW: separate gain + near-only shaping + far LOD
+      nBoost: {
+        value: 2.25,
+        min: 0.0,
+        max: 6.0,
+        step: 0.01,
+        label: "Noise Boost",
+      },
+      nNear: {
+        value: 0.0,
+        min: 0.0,
+        max: 50.0,
+        step: 0.1,
+        label: "Near Start",
+      },
+      nFar: {
+        value: 16.0,
+        min: 0.0,
+        max: 100.0,
+        step: 0.1,
+        label: "Near End",
+      },
+      nAnimFar: {
+        value: 10.0,
+        min: 0.0,
+        max: 200.0,
+        step: 0.1,
+        label: "Freeze Anim ≥",
       },
     }),
   });
@@ -290,6 +325,11 @@ export default function Experience() {
         noiseBoxCenter={nBoxCenter}
         noiseBoxHalfSize={nBoxHalf}
         noiseMaxDistance={nMaxDist}
+        // NEW props
+        noiseBoost={nBoost}
+        noiseNear={nNear}
+        noiseFar={nFar}
+        noiseAnimFar={nAnimFar}
       />
     </>
   );

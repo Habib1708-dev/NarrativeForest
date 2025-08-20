@@ -67,12 +67,17 @@ export default function CombinedFog({
   noiseInfluence = 1.14,
 
   // Cull / scope the animated noise fog
-  // Box over your terrain (20x20x4) centered ~[-8..-6]Y:
   noiseBoxCenter = [0, -5, 0],
   noiseBoxHalfSize = [10, 2, 10],
-  noiseMaxDistance = 10, // don't compute noise for fragments farther than this from camera
+  noiseMaxDistance = 10,
+
+  // NEW: separate thickness, near shaping, and far LOD
+  noiseBoost = 2.25, // multiplies only noise fog
+  noiseNear = 0.0, // start of near boost range
+  noiseFar = 16.0, // end of near boost range (falloff to 0)
+  noiseAnimFar = 10.0, // beyond this, freeze time & use cheaper noise
 }) {
-  const { scene, camera } = useThree();
+  const { scene } = useThree();
   const patched = useRef(new WeakSet());
   const group = useRef();
 
@@ -108,6 +113,12 @@ export default function CombinedFog({
       uNoiseBoxCenter: { value: new THREE.Vector3().fromArray(noiseBoxCenter) },
       uNoiseBoxHalf: { value: new THREE.Vector3().fromArray(noiseBoxHalfSize) },
       uNoiseMaxDist: { value: noiseMaxDistance },
+
+      // NEW uniforms
+      uNoiseBoost: { value: noiseBoost },
+      uNoiseNear: { value: noiseNear },
+      uNoiseFar: { value: noiseFar },
+      uNoiseAnimFar: { value: noiseAnimFar },
     };
   }, []);
 
@@ -137,6 +148,12 @@ export default function CombinedFog({
     uniforms.uNoiseBoxCenter.value.fromArray(noiseBoxCenter);
     uniforms.uNoiseBoxHalf.value.fromArray(noiseBoxHalfSize);
     uniforms.uNoiseMaxDist.value = noiseMaxDistance;
+
+    // NEW updates
+    uniforms.uNoiseBoost.value = noiseBoost;
+    uniforms.uNoiseNear.value = noiseNear;
+    uniforms.uNoiseFar.value = noiseFar;
+    uniforms.uNoiseAnimFar.value = noiseAnimFar;
   }, [
     enabled,
     color,
@@ -161,6 +178,12 @@ export default function CombinedFog({
     noiseBoxCenter,
     noiseBoxHalfSize,
     noiseMaxDistance,
+
+    // NEW deps
+    noiseBoost,
+    noiseNear,
+    noiseFar,
+    noiseAnimFar,
   ]);
 
   // GLSL common with early-outs + distance cull + 3-octave noise
@@ -190,6 +213,12 @@ uniform vec3  uNoiseBoxCenter;
 uniform vec3  uNoiseBoxHalf;
 uniform float uNoiseMaxDist;
 
+// NEW uniforms
+uniform float uNoiseBoost;
+uniform float uNoiseNear;
+uniform float uNoiseFar;
+uniform float uNoiseAnimFar;
+
 float henyeyGreenstein(float mu, float g){
   float g2 = g*g;
   float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
@@ -202,6 +231,18 @@ ${Noise}
 bool insideBox(vec3 p, vec3 c, vec3 h){
   vec3 d = abs(p - c);
   return (d.x <= h.x && d.y <= h.y && d.z <= h.z);
+}
+
+// Ray-box intersect; returns [t0,t1] param range if hit (slab method)
+bool rayBox(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float t0, out float t1){
+  vec3 inv = 1.0 / rd;
+  vec3 tmin = (bmin - ro) * inv;
+  vec3 tmax = (bmax - ro) * inv;
+  vec3 t1v = min(tmin, tmax);
+  vec3 t2v = max(tmin, tmax);
+  t0 = max(max(t1v.x, t1v.y), t1v.z);
+  t1 = min(min(t2v.x, t2v.y), t2v.z);
+  return t1 >= max(t0, 0.0);
 }
 
 void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
@@ -235,19 +276,46 @@ void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fo
 
   float finalFog = baseFog;
 
-  // Animated noise — early-out unless:
-  //   1) enabled
-  //   2) fragment is INSIDE the terrain box
-  //   3) fragment is not too far from camera
+  // Animated noise — only if enabled, inside box, and within camera distance
   if(uEnableNoiseFog > 0.5){
     if(d <= uNoiseMaxDist && insideBox(fragWorld, uNoiseBoxCenter, uNoiseBoxHalf)){
-      // world-anchored coords, advected by wind dir
-      vec3 coord = fragWorld * uNoiseFreq + uNoiseDir * (uFogTime * uNoiseSpeed);
-      float n = fbm3(coord) * 0.5 + 0.5; // 0..1
+      // --- Volumetric-ish thickness (ray length inside fog box up to the fragment) ---
+      vec3 ro = camPos;
+      vec3 rd = normalize(V);
+      vec3 bmin = uNoiseBoxCenter - uNoiseBoxHalf;
+      vec3 bmax = uNoiseBoxCenter + uNoiseBoxHalf;
+      float t0, t1;
+      float thicknessWeight = 0.0;
+      if (rayBox(ro, rd, bmin, bmax, t0, t1)) {
+        float tEnter = max(t0, 0.0);
+        float tExit  = min(t1, d);
+        float seg = max(tExit - tEnter, 0.0);
+        // normalize by a typical thickness: box height
+        float refLen = max(2.0 * uNoiseBoxHalf.y, 1e-3);
+        thicknessWeight = clamp(seg / refLen, 0.0, 1.0);
+      }
+
+      // --- Near weight: full near, fades by uNoiseFar ---
+      float nearW = 1.0 - smoothstep(uNoiseNear, uNoiseFar, d);
+
+      // --- Cheap LOD: stop animation & use cheaper noise when far ---
+      float tPhase = (d <= uNoiseAnimFar) ? uFogTime : 0.0;
+
+      vec3 coord = fragWorld * uNoiseFreq + uNoiseDir * (tPhase * uNoiseSpeed);
+
+      // 2 quality levels: fbm near, single octave far — blended by nearW
+      float nNear = fbm3(coord) * 0.5 + 0.5; // 0..1 (3 octaves)
+      float nFar  = snoise(coord) * 0.5 + 0.5; // 0..1 (1 octave)
+      float n = mix(nFar, nNear, nearW);
+
+      // Shape to “misty” and apply your distortion
       float shaped = 1.0 - (n * uNoiseDistortion);
       shaped = clamp(shaped, 0.0, 1.0);
 
-      float noiseFog = (1.0 - trans) * shaped * uNoiseInfluence;
+      // Final noise fog — separate gain via uNoiseBoost
+      float noiseFog = (1.0 - trans) * shaped * uNoiseInfluence
+                     * thicknessWeight * nearW * uNoiseBoost;
+
       finalFog += noiseFog;
     }
   }
