@@ -1,10 +1,11 @@
+// src/fog/CombinedFog.jsx
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 
-// Ashima noise (3D) + FBM
+// --- Compact 3D noise + 3-octave FBM (cheap) ---
 const Noise = `
-//
+// Ashima 3D simplex
 vec3 mod289(vec3 x){return x - floor(x * (1.0 / 289.0)) * 289.0;}
 vec4 mod289(vec4 x){return x - floor(x * (1.0 / 289.0)) * 289.0;}
 vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
@@ -17,9 +18,9 @@ float snoise(vec3 v){
   vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
   float n_=0.142857142857; vec3 ns=n_*D.wyz-D.xzx;
   vec4 j=p-49.0*floor(p*ns.z*ns.z); vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);
-  vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y);
+  vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=vec4(1.0)-abs(x)-abs(y);
   vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);
-  vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0));
+  vec4 s0=floor(b0)*2.0+vec4(1.0); vec4 s1=floor(b1)*2.0+vec4(1.0); vec4 sh=-step(h,vec4(0.0));
   vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
   vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y); vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);
   vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
@@ -27,10 +28,13 @@ float snoise(vec3 v){
   vec4 m=max(0.5-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m*=m;
   return 105.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
 }
-float FBM(vec3 p){
+// 3-octave FBM (fast)
+float fbm3(vec3 p){
   float v=0.0; float a=0.5;
-  for(int i=0;i<6;++i){ v+=a*snoise(p); p*=2.0; a*=0.5; }
-  return v;
+  v += a * snoise(p); p *= 2.0; a *= 0.5;
+  v += a * snoise(p); p *= 2.0; a *= 0.5;
+  v += a * snoise(p);
+  return v; // ~ -1..1
 }
 `;
 
@@ -38,7 +42,7 @@ export default function CombinedFog({
   // Master
   enabled = true,
 
-  // Base extinction fog
+  // Base extinction fog (matches your previous defaults)
   color = "#c1c1c1",
   density = 1.96,
   extinction = 0.1,
@@ -54,15 +58,19 @@ export default function CombinedFog({
   // Sky dome
   skyRadius = 100,
 
-  // Noise layer
-  enableNoiseFog = true, // Set to true by default
-  noiseSpeed = 2.75, // Changed from 1.0
-  noiseDistortion = 0.66, // Changed from 1.0
-  noiseDirection = [-0.19, -0.18, -0.69], // Changed from [1, 0, 0]
-  noiseScale = [20, 4, 20], // Changed from [1, 1, 1]
-  noisePosition = [0, 0, 0], // Same as before
-  noiseFrequency = 0.04,
-  noiseInfluence = 0.85,
+  // Animated local noise fog (culled)
+  enableNoiseFog = true,
+  noiseDirection = [-2.19, -4.18, -2.69],
+  noiseSpeed = 0.2,
+  noiseFrequency = 0.01,
+  noiseDistortion = 0.74,
+  noiseInfluence = 1.14,
+
+  // Cull / scope the animated noise fog
+  // Box over your terrain (20x20x4) centered ~[-8..-6]Y:
+  noiseBoxCenter = [0, -5, 0],
+  noiseBoxHalfSize = [10, 2, 10],
+  noiseMaxDistance = 10, // don't compute noise for fragments farther than this from camera
 }) {
   const { scene, camera } = useThree();
   const patched = useRef(new WeakSet());
@@ -70,9 +78,7 @@ export default function CombinedFog({
 
   // Shared uniforms
   const uniforms = useMemo(() => {
-    const fogColor = new THREE.Color(color);
-    fogColor.convertSRGBToLinear();
-
+    const fogColor = new THREE.Color(color).convertSRGBToLinear();
     return {
       // master
       uEnabled: { value: enabled ? 1.0 : 0.0 },
@@ -90,18 +96,20 @@ export default function CombinedFog({
       uLightIntensity: { value: lightIntensity },
       uAnisotropy: { value: THREE.MathUtils.clamp(anisotropy, -0.9, 0.9) },
 
-      // noise
+      // noise (animated, culled)
       uFogTime: { value: 0 },
-      uFogSpeed: { value: noiseSpeed },
-      uFogDistortion: { value: noiseDistortion },
-      uFogDirection: { value: new THREE.Vector3().fromArray(noiseDirection) },
-      uFogScale: { value: new THREE.Vector3().fromArray(noiseScale) },
-      uFogPosition: { value: new THREE.Vector3().fromArray(noisePosition) },
-      uEnableNoiseFog: { value: enableNoiseFog ? 1 : 0 },
+      uEnableNoiseFog: { value: enableNoiseFog ? 1.0 : 0.0 },
+      uNoiseDir: { value: new THREE.Vector3().fromArray(noiseDirection) },
+      uNoiseSpeed: { value: noiseSpeed },
       uNoiseFreq: { value: noiseFrequency },
+      uNoiseDistortion: { value: noiseDistortion },
       uNoiseInfluence: { value: noiseInfluence },
+
+      uNoiseBoxCenter: { value: new THREE.Vector3().fromArray(noiseBoxCenter) },
+      uNoiseBoxHalf: { value: new THREE.Vector3().fromArray(noiseBoxHalfSize) },
+      uNoiseMaxDist: { value: noiseMaxDistance },
     };
-  }, []); // values updated below
+  }, []);
 
   // Live updates
   useEffect(() => {
@@ -119,14 +127,16 @@ export default function CombinedFog({
     uniforms.uLightIntensity.value = lightIntensity;
     uniforms.uAnisotropy.value = THREE.MathUtils.clamp(anisotropy, -0.9, 0.9);
 
-    uniforms.uFogSpeed.value = noiseSpeed;
-    uniforms.uFogDistortion.value = noiseDistortion;
-    uniforms.uFogDirection.value.fromArray(noiseDirection);
-    uniforms.uFogScale.value.fromArray(noiseScale);
-    uniforms.uFogPosition.value.fromArray(noisePosition);
-    uniforms.uEnableNoiseFog.value = enableNoiseFog ? 1 : 0;
+    uniforms.uEnableNoiseFog.value = enableNoiseFog ? 1.0 : 0.0;
+    uniforms.uNoiseDir.value.fromArray(noiseDirection);
+    uniforms.uNoiseSpeed.value = noiseSpeed;
     uniforms.uNoiseFreq.value = noiseFrequency;
+    uniforms.uNoiseDistortion.value = noiseDistortion;
     uniforms.uNoiseInfluence.value = noiseInfluence;
+
+    uniforms.uNoiseBoxCenter.value.fromArray(noiseBoxCenter);
+    uniforms.uNoiseBoxHalf.value.fromArray(noiseBoxHalfSize);
+    uniforms.uNoiseMaxDist.value = noiseMaxDistance;
   }, [
     enabled,
     color,
@@ -140,17 +150,20 @@ export default function CombinedFog({
     lightDir,
     lightIntensity,
     anisotropy,
-    noiseSpeed,
-    noiseDistortion,
-    noiseDirection,
-    noiseScale,
-    noisePosition,
+
     enableNoiseFog,
+    noiseDirection,
+    noiseSpeed,
     noiseFrequency,
+    noiseDistortion,
     noiseInfluence,
+
+    noiseBoxCenter,
+    noiseBoxHalfSize,
+    noiseMaxDistance,
   ]);
 
-  // GLSL common
+  // GLSL common with early-outs + distance cull + 3-octave noise
   const GLSL_COMMON = `
 uniform float uEnabled;
 uniform vec3  uFogColor;
@@ -165,16 +178,17 @@ uniform vec3  uLightDir;
 uniform float uLightIntensity;
 uniform float uAnisotropy;
 
-// Noise
 uniform float uFogTime;
-uniform float uFogSpeed;
-uniform float uFogDistortion;
-uniform vec3  uFogDirection;
-uniform vec3  uFogScale;
-uniform vec3  uFogPosition;
 uniform float uEnableNoiseFog;
+uniform vec3  uNoiseDir;
+uniform float uNoiseSpeed;
 uniform float uNoiseFreq;
+uniform float uNoiseDistortion;
 uniform float uNoiseInfluence;
+
+uniform vec3  uNoiseBoxCenter;
+uniform vec3  uNoiseBoxHalf;
+uniform float uNoiseMaxDist;
 
 float henyeyGreenstein(float mu, float g){
   float g2 = g*g;
@@ -184,16 +198,17 @@ float henyeyGreenstein(float mu, float g){
 
 ${Noise}
 
-float sdBox(vec3 p, vec3 b){
-  vec3 q = abs(p) - b;
-  return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+// fast AABB test (inside box?)
+bool insideBox(vec3 p, vec3 c, vec3 h){
+  vec3 d = abs(p - c);
+  return (d.x <= h.x && d.y <= h.y && d.z <= h.z);
 }
 
 void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
   vec3 V = fragWorld - camPos;
   float d = length(V);
 
-  // Height top fade
+  // Height fade
   float yRel = fragWorld.y - uFogHeight;
   float heightMask = 1.0 - smoothstep(uFadeStart, uFadeEnd, yRel);
   heightMask = clamp(heightMask, 0.0, 1.0);
@@ -208,43 +223,50 @@ void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fo
 
   float baseFog = (1.0 - trans) * heightMask;
 
-  // Phase / forward scatter tint
+  // Phase (skip math when intensity is ~0)
   vec3 viewDir = normalize(V);
-  float mu = dot(viewDir, -normalize(uLightDir));
-  float phase = henyeyGreenstein(mu, uAnisotropy);
-  fogCol = uFogColor * mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
+  float phaseMix = 1.0;
+  if(uLightIntensity > 0.001){
+    float mu = dot(viewDir, -normalize(uLightDir));
+    float phase = henyeyGreenstein(mu, uAnisotropy);
+    phaseMix = mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
+  }
+  fogCol = uFogColor * phaseMix;
 
   float finalFog = baseFog;
 
-  // Local noise fog (animated)
-if(uEnableNoiseFog > 0.5){
-  float mask = 1.0 - sdBox(fragWorld - uFogPosition, uFogScale);
-  mask = pow(max(mask, 0.0), 0.5);
+  // Animated noise — early-out unless:
+  //   1) enabled
+  //   2) fragment is INSIDE the terrain box
+  //   3) fragment is not too far from camera
+  if(uEnableNoiseFog > 0.5){
+    if(d <= uNoiseMaxDist && insideBox(fragWorld, uNoiseBoxCenter, uNoiseBoxHalf)){
+      // world-anchored coords, advected by wind dir
+      vec3 coord = fragWorld * uNoiseFreq + uNoiseDir * (uFogTime * uNoiseSpeed);
+      float n = fbm3(coord) * 0.5 + 0.5; // 0..1
+      float shaped = 1.0 - (n * uNoiseDistortion);
+      shaped = clamp(shaped, 0.0, 1.0);
 
-  vec3 coord = fragWorld * 0.025;
-  float n = FBM(coord + FBM(coord + (uFogDirection * uFogTime * 0.025 * uFogSpeed))) * 0.5 + 0.5;
-  n = 1.0 - (n * uFogDistortion);
-
-  // Apply stronger effect with additive blending
-  float noiseFog = mask * (1.0 - trans) * n * (uDensity * 2.5); // Increased multiplier
-  finalFog = finalFog + noiseFog; // Add instead of max() for visible effect
-}
+      float noiseFog = (1.0 - trans) * shaped * uNoiseInfluence;
+      finalFog += noiseFog;
+    }
+  }
 
   fogFactor = clamp(finalFog * uEnabled, 0.0, 1.0);
 }
 `;
 
+  // Patch built-in materials once per material
   const patchMaterial = (mat) => {
     if (!mat || patched.current.has(mat)) return;
     if (mat.isShaderMaterial) return;
-    if (mat.isPointsMaterial) return;
+    if (mat.isPointsMaterial) return; // keep stars crisp
 
     mat.fog = true;
     const prev = mat.onBeforeCompile;
 
     mat.onBeforeCompile = (shader) => {
       if (prev) prev(shader);
-
       shader.uniforms = { ...shader.uniforms, ...uniforms };
 
       shader.vertexShader = shader.vertexShader
@@ -280,21 +302,26 @@ if(uEnableNoiseFog > 0.5){
     mat.needsUpdate = true;
   };
 
+  // Scan a few frames to catch late-loaded meshes, then stop
+  const scanFramesLeft = useRef(180);
   useFrame(({ clock }) => {
     uniforms.uFogTime.value = clock.getElapsedTime();
 
     if (!enabled) return;
 
-    scene.traverse((obj) => {
-      if (!obj.isMesh) return;
-      const list = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of list) patchMaterial(m);
-    });
-
-    if (group.current) group.current.position.copy(camera.position);
+    if (scanFramesLeft.current > 0) {
+      scene.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const list = Array.isArray(obj.material)
+          ? obj.material
+          : [obj.material];
+        for (const m of list) patchMaterial(m);
+      });
+      scanFramesLeft.current--;
+    }
   });
 
-  // Sky dome draws only fog contribution
+  // Sky dome: uses same eval but noise won’t run (outside box & far away)
   return (
     <group ref={group}>
       <mesh frustumCulled={false}>
