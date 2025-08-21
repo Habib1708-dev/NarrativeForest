@@ -11,36 +11,24 @@ import * as THREE from "three";
  * - Leva controls: position (x,y,z), size, opacity.
  * - Default: 5 particles, group positioned at (-2, -5, -2).
  */
-export default function FogParticles({ count = 5, occluder = null }) {
+export default function FogParticles({
+  count = 5,
+  occluder = null,
+  positions = null,
+}) {
   // Controls
-  const {
-    x,
-    y,
-    z,
-    size,
-    opacity,
-    falloff,
-    scaleFalloffWithSize,
-    rotationSpeedZ,
-  } = useControls(
-    "Fog Particles",
-    {
-      Position: folder(
-        {
-          x: { value: -2, min: -50, max: 50, step: 0.1 },
-          y: { value: -5, min: -50, max: 50, step: 0.1 },
-          z: { value: -4, min: -50, max: 50, step: 0.1 },
-        },
-        { collapsed: false }
-      ),
-      size: { value: 2.7, min: 0.1, max: 20, step: 0.1 },
-      opacity: { value: 0.21, min: 0.0, max: 1.0, step: 0.01 },
-      falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
-      scaleFalloffWithSize: { value: true },
-      rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
-    },
-    { collapsed: false }
-  );
+  const { size, opacity, falloff, scaleFalloffWithSize, rotationSpeedZ } =
+    useControls(
+      "Fog Particles",
+      {
+        size: { value: 4, min: 0.1, max: 20, step: 0.1 },
+        opacity: { value: 0.5, min: 0.0, max: 1.0, step: 0.01 },
+        falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
+        scaleFalloffWithSize: { value: true },
+        rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
+      },
+      { collapsed: false }
+    );
 
   const tex = useTexture("/textures/fog/fog.png");
   const groupRef = useRef();
@@ -159,6 +147,15 @@ export default function FogParticles({ count = 5, occluder = null }) {
     });
   }, [count]);
 
+  // Use provided absolute positions if given; otherwise fall back to local offsets around [x,y,z]
+  const instances = useMemo(() => {
+    if (positions && positions.length > 0) {
+      // Ignore local offsets; 1:1 mapping to provided positions
+      return positions.map((p, i) => ({ position: p, scaleJitter: 1 }));
+    }
+    return offsets;
+  }, [positions, offsets]);
+
   // Soft-particle shader (billboarded quads)
   const vertexShader = /* glsl */ `
     varying vec2 vUv;
@@ -211,14 +208,15 @@ export default function FogParticles({ count = 5, occluder = null }) {
   const fallback = !rt || !occluder;
 
   return (
-    <group ref={groupRef} position={[x, y, z]}>
-      {offsets.map(({ position, scaleJitter }, i) => {
+    <group ref={groupRef} position={[0, 0, 0]}>
+      {instances.map(({ position, scaleJitter }, i) => {
         const s = size * scaleJitter;
+        const sunkPos = [position[0], position[1] - s / 3, position[2]];
         if (fallback) {
           return (
             <sprite
               key={i}
-              position={position}
+              position={sunkPos}
               scale={[s, s, 1]}
               ref={(el) => (spriteRefs.current[i] = el)}
             >
@@ -236,7 +234,7 @@ export default function FogParticles({ count = 5, occluder = null }) {
           );
         }
         return (
-          <Billboard key={i} position={position} follow={true}>
+          <Billboard key={i} position={sunkPos} follow={true}>
             <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial

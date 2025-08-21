@@ -18,6 +18,7 @@ export default function Experience() {
   const starsRef = useRef(null);
   const starsWrapRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
+  const [fogPositions, setFogPositions] = useState([]);
 
   // --- LAYERED RENDER SETUP ---
   const skyCamRef = useRef(null); // secondary camera for sky/stars
@@ -180,6 +181,72 @@ export default function Experience() {
     });
   }, [showStars]);
 
+  // Generate grid-based fog positions across the terrain: 2x2 cells, particles at centers and edge midpoints
+  useEffect(() => {
+    if (!terrainMesh) return;
+    const geom = terrainMesh.geometry;
+    if (!geom || !geom.boundingBox) geom?.computeBoundingBox?.();
+    const bb = geom.boundingBox;
+    if (!bb) return;
+
+    // Terrain is a Plane rotated -90deg on X and positioned at [0, -10, 0]
+    // Use local-space grid (x,y) then cast downward in world to meet surface.
+    const raycaster = new THREE.Raycaster();
+    const down = new THREE.Vector3(0, -1, 0);
+    const positions = [];
+
+    const cell = 2; // 2x2 units per cell
+    const minLocalX = bb.min.x;
+    const maxLocalX = bb.max.x;
+    const minLocalY = bb.min.y; // geometry Y maps to world Z after -90deg X rotation
+    const maxLocalY = bb.max.y;
+
+    const sizeX = maxLocalX - minLocalX;
+    const sizeY = maxLocalY - minLocalY;
+    const nx = Math.max(1, Math.floor(sizeX / cell));
+    const ny = Math.max(1, Math.floor(sizeY / cell));
+
+    const castAtLocal = (lx, ly) => {
+      const localOrigin = new THREE.Vector3(lx, ly, 200); // high above plane; local z -> world y
+      const origin = localOrigin.applyMatrix4(terrainMesh.matrixWorld);
+      raycaster.set(origin, down);
+      const hits = raycaster.intersectObject(terrainMesh, true);
+      if (hits && hits.length > 0) {
+        const p = hits[0].point.clone();
+        positions.push([p.x, p.y, p.z]);
+      }
+    };
+
+    // 1) Cell centers
+    for (let i = 0; i < nx; i++) {
+      const cx = minLocalX + (i + 0.5) * cell;
+      for (let j = 0; j < ny; j++) {
+        const cy = minLocalY + (j + 0.5) * cell;
+        castAtLocal(cx, cy);
+      }
+    }
+
+    // 2) Vertical edge midpoints (edges parallel to local Y), k from 0..nx (grid lines), j cells along Y
+    for (let k = 0; k <= nx; k++) {
+      const ex = minLocalX + k * cell;
+      for (let j = 0; j < ny; j++) {
+        const ey = minLocalY + (j + 0.5) * cell; // midpoint along cell height
+        castAtLocal(ex, ey);
+      }
+    }
+
+    // 3) Horizontal edge midpoints (edges parallel to local X), l from 0..ny, i cells along X
+    for (let l = 0; l <= ny; l++) {
+      const ey = minLocalY + l * cell;
+      for (let i = 0; i < nx; i++) {
+        const ex = minLocalX + (i + 0.5) * cell; // midpoint along cell width
+        castAtLocal(ex, ey);
+      }
+    }
+
+    setFogPositions(positions);
+  }, [terrainMesh]);
+
   return (
     <>
       <Perf position="top-left" />
@@ -260,9 +327,10 @@ export default function Experience() {
         <Cabin />
         <Man />
         <Cat />
-        {/* Fog sprites stay on LAYER 0 so they respect the world far=8 */}
+        {/* Scatter 30 fog particles across the terrain */}
         <FogParticles
-          count={5}
+          count={fogPositions.length}
+          positions={fogPositions}
           occluder={terrainMesh}
           fogColor={fColor}
           fogDensity={fDensity}
