@@ -1,15 +1,17 @@
+// App.jsx
 import { Canvas } from "@react-three/fiber";
 import Experience from "./Experience";
 
 export default function App() {
   return (
     <Canvas
-      // Camera placed per request: x=-1.3, y=-4.5, z=-4.5
-      camera={{ position: [-1.8, -4.8, -5], fov: 50 }}
+      // World camera (OrbitControls drives this)
+      camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.1, far: 8 }}
       shadows
       gl={{ antialias: true }}
       dpr={[1, 2]}
     >
+      {/* Keep if you need; otherwise remove to avoid double lights */}
       <ambientLight intensity={0} />
       <directionalLight
         position={[5, 10, 5]}

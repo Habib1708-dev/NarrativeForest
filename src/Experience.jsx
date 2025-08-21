@@ -3,7 +3,7 @@ import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { useRef, useState, Suspense, useEffect } from "react";
-import { useThree } from "@react-three/fiber";
+import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import Terrain from "./components/Terrain";
 import Forest from "./components/Forest";
@@ -16,22 +16,64 @@ import FogParticles from "./components/FogParticles";
 export default function Experience() {
   const skyRef = useRef();
   const starsRef = useRef(null);
+  const starsWrapRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
 
+  // --- LAYERED RENDER SETUP ---
+  const skyCamRef = useRef(null); // secondary camera for sky/stars
+  const { gl, scene, camera, size } = useThree();
+  const SKY_FAR = 5000; // big far for background pass
+
+  useEffect(() => {
+    // Ensure the world camera renders ONLY layer 0
+    camera.layers.enable(0);
+    camera.layers.disable(1);
+    camera.updateProjectionMatrix();
+
+    // We control clears manually
+    gl.autoClear = false;
+  }, [camera, gl]);
+
+  // (moved below useControls to avoid TDZ on showStars)
+
+  // Render SKY LAYER (1) first with skyCam, then let R3F do the world pass (layer 0)
+  useFrame((state) => {
+    const skyCam = skyCamRef.current;
+    if (!skyCam) return;
+
+    // Copy the world-camera pose & intrinsics
+    skyCam.position.copy(state.camera.position);
+    skyCam.quaternion.copy(state.camera.quaternion);
+    skyCam.fov = state.camera.fov;
+    skyCam.aspect = state.camera.aspect;
+    skyCam.near = state.camera.near;
+    skyCam.far = SKY_FAR;
+    skyCam.updateProjectionMatrix();
+
+    // Draw background (layer 1)
+    skyCam.layers.set(1);
+    state.gl.clear(true, true, true); // clear color+depth
+    state.gl.render(state.scene, skyCam);
+
+    // Clear only depth, keep color; default R3F world render will run next
+    state.gl.clearDepth();
+
+    // Make sure world cam is on layer 0 (just in case)
+    state.camera.layers.set(0);
+  }, -1);
+  // ----------------------------
+
   const {
-    // Built-in scene fog (kept so USE_FOG is defined)
     fogColor,
     fogNear,
     fogFar,
     fogMode,
     fogDensity,
-    // Sky
     sunPosition,
     rayleigh,
     turbidity,
     mieCoefficient,
     mieDirectionalG,
-    // Stars
     showStars,
     starsRadius,
     starsDepth,
@@ -40,10 +82,8 @@ export default function Experience() {
     starsSaturation,
     starsFade,
     starsSpeed,
-    // Render/Lights
     exposure,
     dirLightIntensity,
-    // Unified fog controls
     fEnabled,
     fColor,
     fDensity,
@@ -82,7 +122,6 @@ export default function Experience() {
       starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
       starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
       starsFade: { value: false },
-      // Make stars static by default
       starsSpeed: { value: 0, min: 0, max: 10, step: 0.1 },
     }),
     Render: folder({
@@ -110,11 +149,25 @@ export default function Experience() {
     }),
   });
 
-  const gl = useThree((s) => s.gl);
+  // Imperatively set Stars (and optionally Sky) and any internal children to layer 1
+  useEffect(() => {
+    const setLayersRecursive = (obj, idx) => {
+      if (!obj) return;
+      obj.layers?.set(idx);
+      if (obj.children) obj.children.forEach((c) => setLayersRecursive(c, idx));
+    };
+    if (showStars) {
+      setLayersRecursive(starsRef.current, 1);
+      setLayersRecursive(skyRef.current, 1); // optional: also move <Sky /> to layer 1
+      setLayersRecursive(starsWrapRef.current, 1);
+    }
+  }, [showStars]);
+
   useEffect(() => {
     gl.toneMappingExposure = exposure;
   }, [gl, exposure]);
 
+  // Keep stars' material stable
   useEffect(() => {
     [starsRef.current].forEach((pts) => {
       const mat = pts?.material;
@@ -131,7 +184,13 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Built-in scene fog */}
+      {/* Secondary camera used only for the SKY pass (layer 1) */}
+      <perspectiveCamera
+        ref={skyCamRef}
+        args={[50, size.width / size.height, 0.1, SKY_FAR]}
+      />
+
+      {/* Built-in scene fog just to define USE_FOG for standard materials */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
@@ -147,24 +206,26 @@ export default function Experience() {
         mieDirectionalG={mieDirectionalG}
       />
 
+      {/* SKY LAYER (1): Stars go here so they render in the background pass */}
       {showStars && (
-        <Stars
-          ref={starsRef}
-          radius={starsRadius}
-          depth={starsDepth}
-          count={starsCount}
-          factor={starsFactor}
-          saturation={starsSaturation}
-          fade={starsFade}
-          speed={starsSpeed}
-        />
+        <group ref={starsWrapRef}>
+          <Stars
+            ref={starsRef}
+            radius={starsRadius}
+            depth={starsDepth}
+            count={starsCount}
+            factor={starsFactor}
+            saturation={starsSaturation}
+            fade={starsFade}
+            speed={starsSpeed}
+          />
+        </group>
       )}
 
       <OrbitControls
         makeDefault
         minDistance={1}
         maxDistance={200}
-        // Look toward the characters (midpoint of Man and Cat default positions)
         target={[-1.25, -4.45, -2.9]}
         enableDamping
         dampingFactor={0.05}
@@ -192,7 +253,6 @@ export default function Experience() {
       <Suspense fallback={null}>
         <Terrain
           ref={(m) => {
-            console.log("[Experience] got terrainMesh:", m);
             setTerrainMesh(m);
           }}
         />
@@ -200,7 +260,7 @@ export default function Experience() {
         <Cabin />
         <Man />
         <Cat />
-        {/* Fog particles with soft intersection against terrain; match unified fog color/density */}
+        {/* Fog sprites stay on LAYER 0 so they respect the world far=8 */}
         <FogParticles
           count={5}
           occluder={terrainMesh}
@@ -209,7 +269,7 @@ export default function Experience() {
         />
       </Suspense>
 
-      {/* Unified forward fog (stable & cheap large-scale fade) */}
+      {/* Unified forward fog: patch world materials (all layers), sky-dome on layer 1 */}
       <UnifiedForwardFog
         enabled={fEnabled}
         color={fColor}
@@ -224,6 +284,7 @@ export default function Experience() {
         lightIntensity={fLightIntensity}
         anisotropy={fAnisotropy}
         skyRadius={fSkyRadius}
+        layer={1} // <— sky dome draws in the sky pass
       />
     </>
   );
