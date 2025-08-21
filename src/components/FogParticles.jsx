@@ -29,15 +29,15 @@ export default function FogParticles({ count = 5, occluder = null }) {
         {
           x: { value: -2, min: -50, max: 50, step: 0.1 },
           y: { value: -5, min: -50, max: 50, step: 0.1 },
-          z: { value: -2, min: -50, max: 50, step: 0.1 },
+          z: { value: -4, min: -50, max: 50, step: 0.1 },
         },
         { collapsed: false }
       ),
-      size: { value: 2.5, min: 0.1, max: 20, step: 0.1 },
-      opacity: { value: 0.25, min: 0.0, max: 1.0, step: 0.01 },
+      size: { value: 2.7, min: 0.1, max: 20, step: 0.1 },
+      opacity: { value: 0.21, min: 0.0, max: 1.0, step: 0.01 },
       falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
       scaleFalloffWithSize: { value: true },
-      rotationSpeedZ: { value: 0.5, min: -5, max: 5, step: 0.01 },
+      rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
     },
     { collapsed: false }
   );
