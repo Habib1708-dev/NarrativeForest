@@ -220,8 +220,8 @@ export default function Experience() {
         <Cabin />
         <Man />
         <Cat />
-  {/* Basic fog particle sprites */}
-  <FogParticles count={5} />
+        {/* Fog particles with soft intersection against terrain */}
+        <FogParticles count={5} occluder={terrainMesh} />
       </Suspense>
 
       {/* Unified forward fog (stable & cheap large-scale fade) */}

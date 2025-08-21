@@ -1,198 +1,234 @@
 // src/components/FogParticles.jsx
-import { useMemo, useRef, useEffect } from "react";
-import { useThree, useFrame } from "@react-three/fiber";
-import { useTexture, useFBO } from "@react-three/drei";
+import { useMemo, useRef, useEffect, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useTexture, Billboard } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import * as THREE from "three";
 
-export default function FogParticles({ count = 5 }) {
-  const { x, y, z, size, opacity, softness, enabled } = useControls(
+/**
+ * FogParticles
+ * - Simple billboarded fog sprites using a soft fog texture.
+ * - Leva controls: position (x,y,z), size, opacity.
+ * - Default: 5 particles, group positioned at (-2, -5, -2).
+ */
+export default function FogParticles({ count = 5, occluder = null }) {
+  // Controls
+  const { x, y, z, size, opacity, falloff, scaleFalloffWithSize } = useControls(
     "Fog Particles",
     {
-      Position: folder({
-        x: { value: -2, min: -50, max: 50, step: 0.1 },
-        y: { value: -5, min: -50, max: 50, step: 0.1 },
-        z: { value: -2, min: -50, max: 50, step: 0.1 },
-      }),
-      size: { value: 2.5, min: 0.2, max: 20, step: 0.1 },
-      opacity: { value: 0.25, min: 0, max: 1, step: 0.01 },
-      softness: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
-      enabled: { value: true },
-    }
+      Position: folder(
+        {
+          x: { value: -2, min: -50, max: 50, step: 0.1 },
+          y: { value: -5, min: -50, max: 50, step: 0.1 },
+          z: { value: -2, min: -50, max: 50, step: 0.1 },
+        },
+        { collapsed: false }
+      ),
+      size: { value: 2.5, min: 0.1, max: 20, step: 0.1 },
+      opacity: { value: 0.25, min: 0.0, max: 1.0, step: 0.01 },
+      falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
+      scaleFalloffWithSize: { value: true },
+    },
+    { collapsed: false }
   );
 
+  const tex = useTexture("/textures/fog/fog.png");
   const groupRef = useRef();
-  const meshRef = useRef();
+  const { gl, size: viewport, camera } = useThree();
 
-  const map = useTexture("/textures/fog/fog.png");
-  const { gl, camera, size: vpSize, scene } = useThree();
-  const dpr = gl.getPixelRatio();
+  // Depth prepass setup
+  const [rt, setRt] = useState(null);
+  const depthScene = useMemo(() => new THREE.Scene(), []);
+  const depthMat = useMemo(
+    () => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }),
+    []
+  );
+  const depthMeshRef = useRef(null);
+  if (!depthMeshRef.current)
+    depthMeshRef.current = new THREE.Mesh(undefined, depthMat);
+  // Ensure only our mesh is in the depth scene
+  useEffect(() => {
+    depthScene.clear();
+    depthScene.add(depthMeshRef.current);
+  }, [depthScene]);
+
+  // Create render target with depth texture
+  useEffect(() => {
+    const depthTexture = new THREE.DepthTexture(
+      viewport.width,
+      viewport.height
+    );
+    depthTexture.type = gl.capabilities.isWebGL2
+      ? THREE.UnsignedIntType
+      : THREE.UnsignedShortType;
+    depthTexture.format = THREE.DepthFormat;
+    const target = new THREE.WebGLRenderTarget(
+      viewport.width,
+      viewport.height,
+      {
+        depthTexture,
+        depthBuffer: true,
+        stencilBuffer: false,
+      }
+    );
+    target.texture.minFilter = THREE.LinearFilter;
+    target.texture.magFilter = THREE.LinearFilter;
+    target.texture.generateMipmaps = false;
+    setRt(target);
+    return () => {
+      target.dispose();
+      depthTexture.dispose?.();
+    };
+  }, [gl, viewport.width, viewport.height]);
+
+  // Keep RT size in sync with canvas size
+  useEffect(() => {
+    if (!rt) return;
+    rt.setSize(viewport.width, viewport.height);
+  }, [rt, viewport.width, viewport.height]);
 
   useEffect(() => {
-    map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
-    map.flipY = false;
-    map.colorSpace = THREE.SRGBColorSpace;
-    map.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy?.() ?? 1);
-    map.needsUpdate = true;
-  }, [map, gl]);
+    if (!tex) return;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy?.() ?? 1);
+    tex.needsUpdate = true;
+  }, [tex, gl]);
 
-  // Depth FBO (correct signature)
-  const depthFBO = useFBO(
-    Math.round(vpSize.width * dpr),
-    Math.round(vpSize.height * dpr),
-    { depth: true, stencilBuffer: false, samples: 0, generateMipmaps: false }
-  );
+  // Update depth mesh to mirror occluder (e.g., Terrain)
+  useFrame(() => {
+    if (!occluder || !rt) return;
+    const dm = depthMeshRef.current;
+    if (!dm) return;
+    // Mirror transform and geometry
+    dm.geometry = occluder.geometry;
+    dm.position.copy(occluder.position);
+    dm.quaternion.copy(occluder.quaternion);
+    dm.scale.copy(occluder.scale);
+    dm.updateMatrixWorld();
+    // Render into depth RT
+    const prevTarget = gl.getRenderTarget();
+    gl.setRenderTarget(rt);
+    gl.clearDepth();
+    gl.clear(true, true, true);
+    gl.render(depthScene, camera);
+    gl.setRenderTarget(prevTarget);
+  }, 0);
 
-  // Offsets/rotations so the cards aren’t coplanar
-  const OFFSETS = useMemo(() => {
-    const r = (s) => ((Math.sin(s * 12.9898) * 43758.5453) % 1) * 2 - 1;
-    return new Array(count).fill(0).map((_, i) => ({
-      pos: new THREE.Vector3(
-        r(i + 0.13) * 1.2,
-        r(i + 1.37) * 0.6,
-        r(i + 2.71) * 1.2
-      ),
-      rot: new THREE.Euler(
-        r(i + 5.19) * 0.08,
-        r(i + 7.77) * 1.4,
-        r(i + 9.33) * 0.08
-      ),
-      scaleJitter: 1 + r(i + 3.33) * 0.25,
-    }));
+  // Stable small offsets so all sprites aren't perfectly overlapping
+  const offsets = useMemo(() => {
+    const rnd = (s) => {
+      const x = Math.sin(s * 12.9898) * 43758.5453;
+      return (x - Math.floor(x)) * 2 - 1; // [-1,1]
+    };
+    return new Array(count).fill(0).map((_, i) => {
+      const ox = rnd(i + 0.13) * 1.2;
+      const oy = rnd(i + 1.37) * 0.6;
+      const oz = rnd(i + 2.71) * 1.2;
+      const scaleJitter = 1 + rnd(i + 3.33) * 0.25; // +/-25%
+      return { position: [ox, oy, oz], scaleJitter };
+    });
   }, [count]);
 
-  const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+  // Soft-particle shader (billboarded quads)
+  const vertexShader = /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
 
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        uniforms: {
-          map: { value: map },
-          tDepth: { value: null },
-          cameraNear: { value: camera.near },
-          cameraFar: { value: camera.far },
-          baseOpacity: { value: opacity },
-          softness: { value: softness },
-        },
-        // ❌ Do NOT redeclare `attribute vec3 position;` or `attribute vec2 uv;`
-        vertexShader: /* glsl */ `
-          varying vec2 vUv;
-          varying float vViewZ;
-          varying vec4 vClipPos;
+  const fragmentShader = /* glsl */ `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D map;
+    uniform sampler2D depthTex;
+    uniform vec2 resolution;
+    uniform float opacity;
+    uniform float near;
+    uniform float far;
+    uniform float falloff;
+    uniform float sizeFactor;
 
-          void main() {
-            vUv = uv;
+    float linearizeDepth(float z) {
+      // z is depth buffer value in [0,1]
+      return (2.0 * near * far) / (far + near - z * (far - near));
+    }
 
-            // Build world matrix with instancing when present
-            mat4 modelMat = modelMatrix;
-            #ifdef USE_INSTANCING
-              modelMat = modelMatrix * instanceMatrix;
-            #endif
+    void main() {
+      vec4 c = texture2D(map, vUv);
+      if (c.a <= 0.001) discard;
 
-            vec4 worldPos = modelMat * vec4(position, 1.0);
-            vec4 viewPos  = viewMatrix * worldPos;
+      // Screen-space UV for sampling scene depth
+      vec2 screenUV = gl_FragCoord.xy / resolution;
+      float sceneZ = texture2D(depthTex, screenUV).x; // non-linear
+      float particleZ = gl_FragCoord.z;
 
-            vViewZ = -viewPos.z;
-            vClipPos = projectionMatrix * viewPos;
-            gl_Position = vClipPos;
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          #include <packing>
-          precision highp float;
+      float sceneLin = linearizeDepth(sceneZ);
+      float particleLin = linearizeDepth(particleZ);
+      float delta = sceneLin - particleLin; // >0 when scene is behind particle
 
-          uniform sampler2D map;
-          uniform sampler2D tDepth;
-          uniform float cameraNear;
-          uniform float cameraFar;
-          uniform float baseOpacity;
-          uniform float softness;
+      // Effective falloff scaled by particle size if requested
+      float eff = max(1e-4, falloff * sizeFactor);
+      float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
 
-          varying vec2 vUv;
-          varying float vViewZ;
-          varying vec4 vClipPos;
+      gl_FragColor = vec4(c.rgb, c.a * opacity * soft);
+      if (gl_FragColor.a < 0.001) discard;
+    }
+  `;
 
-          float getViewZ(const in float depth) {
-            return -perspectiveDepthToViewZ(depth, cameraNear, cameraFar);
-          }
-
-          void main() {
-            vec4 tex = texture2D(map, vUv);
-            float alpha = tex.a;
-
-            vec2 ndc = vClipPos.xy / vClipPos.w;
-            vec2 suv = ndc * 0.5 + 0.5;
-
-            float sceneDepth = texture2D(tDepth, suv).x;
-            float sceneViewZ = getViewZ(sceneDepth);
-
-            float dz = sceneViewZ - vViewZ;
-            float soft = smoothstep(0.0, softness, dz);
-
-            alpha *= soft * baseOpacity;
-            if (alpha <= 0.001) discard;
-
-            gl_FragColor = vec4(tex.rgb, alpha);
-          }
-        `,
-        transparent: true,
-        depthWrite: false,
-        depthTest: true,
-        blending: THREE.NormalBlending,
-        side: THREE.DoubleSide,
-        toneMapped: false,
-      }),
-    [map, camera.near, camera.far, opacity, softness]
-  );
-
-  useEffect(() => {
-    material.uniforms.baseOpacity.value = opacity;
-    material.uniforms.softness.value = softness;
-  }, [material, opacity, softness]);
-
-  // Place instances around [x,y,z]
-  useEffect(() => {
-    const inst = meshRef.current;
-    if (!inst) return;
-
-    const base = new THREE.Vector3(x, y, z);
-    const dummy = new THREE.Object3D();
-
-    OFFSETS.forEach((o, i) => {
-      dummy.position.copy(base).add(o.pos);
-      dummy.rotation.copy(o.rot);
-      const s = size * o.scaleJitter;
-      dummy.scale.set(s, s, s);
-      dummy.updateMatrix();
-      inst.setMatrixAt(i, dummy.matrix);
-    });
-    inst.instanceMatrix.needsUpdate = true;
-  }, [x, y, z, size, OFFSETS]);
-
-  // Depth prepass each frame (hide fog while capturing)
-  useFrame(() => {
-    if (!enabled) return;
-
-    const g = groupRef.current;
-    if (g) g.visible = false;
-
-    gl.setRenderTarget(depthFBO);
-    gl.clear();
-    gl.render(scene, camera);
-    gl.setRenderTarget(null);
-
-    if (g) g.visible = true;
-
-    material.uniforms.tDepth.value = depthFBO.depthTexture;
-    material.uniforms.cameraNear.value = camera.near;
-    material.uniforms.cameraFar.value = camera.far;
-  });
-
-  if (!enabled) return null;
+  // If depth RT missing or occluder not available yet, fallback to sprites
+  const fallback = !rt || !occluder;
 
   return (
-    <group ref={groupRef}>
-      <instancedMesh ref={meshRef} args={[geometry, material, count]} />
+    <group ref={groupRef} position={[x, y, z]}>
+      {offsets.map(({ position, scaleJitter }, i) => {
+        const s = size * scaleJitter;
+        if (fallback) {
+          return (
+            <sprite key={i} position={position} scale={[s, s, 1]}>
+              <spriteMaterial
+                attach="material"
+                map={tex}
+                depthWrite={false}
+                depthTest={true}
+                transparent
+                opacity={opacity}
+                color={0xffffff}
+                blending={THREE.NormalBlending}
+              />
+            </sprite>
+          );
+        }
+        return (
+          <Billboard key={i} position={position} follow={true}>
+            <mesh scale={[s, s, 1]}>
+              <planeGeometry args={[1, 1, 1, 1]} />
+              <shaderMaterial
+                transparent
+                depthWrite={false}
+                depthTest={true}
+                blending={THREE.NormalBlending}
+                vertexShader={vertexShader}
+                fragmentShader={fragmentShader}
+                uniforms={{
+                  map: { value: tex },
+                  depthTex: { value: rt.depthTexture },
+                  resolution: {
+                    value: new THREE.Vector2(viewport.width, viewport.height),
+                  },
+                  opacity: { value: opacity },
+                  near: { value: camera.near },
+                  far: { value: camera.far },
+                  falloff: { value: falloff },
+                  sizeFactor: { value: scaleFalloffWithSize ? s : 1.0 },
+                }}
+              />
+            </mesh>
+          </Billboard>
+        );
+      })}
     </group>
   );
 }
