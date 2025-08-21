@@ -13,7 +13,16 @@ import * as THREE from "three";
  */
 export default function FogParticles({ count = 5, occluder = null }) {
   // Controls
-  const { x, y, z, size, opacity, falloff, scaleFalloffWithSize } = useControls(
+  const {
+    x,
+    y,
+    z,
+    size,
+    opacity,
+    falloff,
+    scaleFalloffWithSize,
+    rotationSpeedZ,
+  } = useControls(
     "Fog Particles",
     {
       Position: folder(
@@ -28,12 +37,16 @@ export default function FogParticles({ count = 5, occluder = null }) {
       opacity: { value: 0.25, min: 0.0, max: 1.0, step: 0.01 },
       falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
       scaleFalloffWithSize: { value: true },
+      rotationSpeedZ: { value: 0.5, min: -5, max: 5, step: 0.01 },
     },
     { collapsed: false }
   );
 
   const tex = useTexture("/textures/fog/fog.png");
   const groupRef = useRef();
+  const meshRefs = useRef([]);
+  const spriteRefs = useRef([]);
+  const angleRef = useRef(0);
   const { gl, size: viewport, camera } = useThree();
 
   // Depth prepass setup
@@ -115,6 +128,22 @@ export default function FogParticles({ count = 5, occluder = null }) {
     gl.setRenderTarget(prevTarget);
   }, 0);
 
+  // Rotate particles around their local Z axis (twist) only
+  useFrame((_, dt) => {
+    angleRef.current += rotationSpeedZ * dt;
+    const angle = angleRef.current;
+    // Billboard meshes (shader quads)
+    meshRefs.current.forEach((m) => {
+      if (m) m.rotation.z = angle;
+    });
+    // Sprite fallback (rotate material texture)
+    spriteRefs.current.forEach((s) => {
+      if (!s) return;
+      const mat = s.material;
+      if (mat) mat.rotation = angle;
+    });
+  });
+
   // Stable small offsets so all sprites aren't perfectly overlapping
   const offsets = useMemo(() => {
     const rnd = (s) => {
@@ -187,7 +216,12 @@ export default function FogParticles({ count = 5, occluder = null }) {
         const s = size * scaleJitter;
         if (fallback) {
           return (
-            <sprite key={i} position={position} scale={[s, s, 1]}>
+            <sprite
+              key={i}
+              position={position}
+              scale={[s, s, 1]}
+              ref={(el) => (spriteRefs.current[i] = el)}
+            >
               <spriteMaterial
                 attach="material"
                 map={tex}
@@ -203,7 +237,7 @@ export default function FogParticles({ count = 5, occluder = null }) {
         }
         return (
           <Billboard key={i} position={position} follow={true}>
-            <mesh scale={[s, s, 1]}>
+            <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial
                 transparent
