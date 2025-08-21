@@ -16,7 +16,6 @@ import FogParticles from "./components/FogParticles";
 export default function Experience() {
   const skyRef = useRef();
   const starsRef = useRef(null);
-  const starsBigRef = useRef(null);
   const [terrainMesh, setTerrainMesh] = useState(null);
 
   const {
@@ -41,10 +40,6 @@ export default function Experience() {
     starsSaturation,
     starsFade,
     starsSpeed,
-    // Big stars
-    showStarsBig,
-    starsBigCount,
-    starsBigFactor,
     // Render/Lights
     exposure,
     dirLightIntensity,
@@ -87,15 +82,11 @@ export default function Experience() {
       starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
       starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
       starsFade: { value: false },
-      starsSpeed: { value: 0.8, min: 0, max: 10, step: 0.1 },
+      // Make stars static by default
+      starsSpeed: { value: 0, min: 0, max: 10, step: 0.1 },
     }),
     Render: folder({
       exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
-    }),
-    StarsBig: folder({
-      showStarsBig: { value: true },
-      starsBigCount: { value: 3720, min: 0, max: 10000, step: 10 },
-      starsBigFactor: { value: 6.2, min: 0.1, max: 20, step: 0.1 },
     }),
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
@@ -125,7 +116,7 @@ export default function Experience() {
   }, [gl, exposure]);
 
   useEffect(() => {
-    [starsRef.current, starsBigRef.current].forEach((pts) => {
+    [starsRef.current].forEach((pts) => {
       const mat = pts?.material;
       if (!mat) return;
       mat.transparent = false;
@@ -134,7 +125,7 @@ export default function Experience() {
       mat.depthWrite = false;
       mat.needsUpdate = true;
     });
-  }, [showStars, showStarsBig]);
+  }, [showStars]);
 
   return (
     <>
@@ -164,18 +155,6 @@ export default function Experience() {
           count={starsCount}
           factor={starsFactor}
           saturation={starsSaturation}
-          fade={starsFade}
-          speed={starsSpeed}
-        />
-      )}
-      {showStarsBig && (
-        <Stars
-          ref={starsBigRef}
-          radius={starsRadius}
-          depth={starsDepth}
-          count={starsBigCount}
-          factor={starsBigFactor}
-          saturation={0}
           fade={starsFade}
           speed={starsSpeed}
         />
