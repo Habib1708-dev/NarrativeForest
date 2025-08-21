@@ -10,7 +10,8 @@ import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import CombinedFog from "./fog/CombinedFog"; // ⬅️ has noiseBoost/near/far/animFar
+import UnifiedForwardFog from "./fog/UnifiedForwardFog";
+import FogParticles from "./components/FogParticles";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -47,35 +48,22 @@ export default function Experience() {
     // Render/Lights
     exposure,
     dirLightIntensity,
-    // CombinedFog – base extinction fog
-    cEnabled,
-    cColor,
-    cDensity,
-    cExtinction,
-    cFogHeight,
-    cFadeStart,
-    cFadeEnd,
-    cDistStart,
-    cDistEnd,
-    cLightDir,
-    cLightIntensity,
-    cAnisotropy,
-    cSkyRadius,
-    // CombinedFog – culled noise layer (existing)
-    nEnabled,
-    nDir,
-    nSpeed,
-    nFrequency,
-    nDistortion,
-    nInfluence,
-    nBoxCenter,
-    nBoxHalf,
-    nMaxDist,
-    // CombinedFog – NEW: near-only shaping + far LOD + separate gain
-    nBoost,
-    nNear,
-    nFar,
-    nAnimFar,
+    // Unified fog controls
+    fEnabled,
+    fColor,
+    fDensity,
+    fExtinction,
+    fFogHeight,
+    fFadeStart,
+    fFadeEnd,
+    fDistStart,
+    fDistEnd,
+    fLightDirX,
+    fLightDirY,
+    fLightDirZ,
+    fLightIntensity,
+    fAnisotropy,
+    fSkyRadius,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -112,89 +100,22 @@ export default function Experience() {
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
     }),
-
-    // ---- Combined Fog (base extinction fog) ----
-    "Combined Fog": folder({
-      cEnabled: { value: true },
-      cColor: { value: "#c1c1c1" },
-      cDensity: { value: 1.96, min: 0.0, max: 3.0, step: 0.01 },
-      cExtinction: { value: 0.1, min: 0.01, max: 5.0, step: 0.01 },
-      cFogHeight: { value: -3.9, min: -20.0, max: 40.0, step: 0.1 },
-      cFadeStart: { value: 3.9, min: 0.0, max: 200.0, step: 0.1 },
-      cFadeEnd: { value: 41.3, min: 0.0, max: 300.0, step: 0.1 },
-      cDistStart: { value: 0.0, min: 0.0, max: 500.0, step: 1.0 },
-      cDistEnd: { value: 92.0, min: 0.0, max: 1000.0, step: 1.0 },
-      cLightDir: { value: [-0.5, 0.8, -0.4] },
-      cLightIntensity: { value: 0.0, min: 0.0, max: 2.0, step: 0.01 },
-      cAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
-      cSkyRadius: { value: 100.0, min: 50, max: 4000, step: 10 },
-    }),
-
-    // ---- Combined Fog (animated local noise, culled) ----
-    "Combined Fog / Noise": folder({
-      nEnabled: { value: true, label: "Enable Noise" },
-      nDir: { value: [-2.19, -4.18, -2.69], label: "Direction" },
-      nSpeed: { value: 0.2, min: 0, max: 5, step: 0.01, label: "Speed" },
-      nFrequency: {
-        value: 0.01,
-        min: 0.01,
-        max: 0.3,
-        step: 0.001,
-        label: "Frequency",
-      },
-      nDistortion: {
-        value: 0.74,
-        min: 0.0,
-        max: 1.5,
-        step: 0.01,
-        label: "Distortion",
-      },
-      nInfluence: {
-        value: 1.14,
-        min: 0.0,
-        max: 1.5,
-        step: 0.01,
-        label: "Influence",
-      },
-      nBoxCenter: { value: [0, -5, 0], label: "Box Center" },
-      nBoxHalf: { value: [10, 2, 10], label: "Box Half-Size" },
-      nMaxDist: {
-        value: 10,
-        min: 5,
-        max: 80,
-        step: 1,
-        label: "Max Camera Dist",
-      },
-
-      // NEW: separate gain + near-only shaping + far LOD
-      nBoost: {
-        value: 2.25,
-        min: 0.0,
-        max: 6.0,
-        step: 0.01,
-        label: "Noise Boost",
-      },
-      nNear: {
-        value: 0.0,
-        min: 0.0,
-        max: 50.0,
-        step: 0.1,
-        label: "Near Start",
-      },
-      nFar: {
-        value: 16.0,
-        min: 0.0,
-        max: 100.0,
-        step: 0.1,
-        label: "Near End",
-      },
-      nAnimFar: {
-        value: 10.0,
-        min: 0.0,
-        max: 200.0,
-        step: 0.1,
-        label: "Freeze Anim ≥",
-      },
+    "Unified Fog": folder({
+      fEnabled: { value: true },
+      fColor: { value: "#98a0a5" },
+      fDensity: { value: 1.96, min: 0.0, max: 3.0, step: 0.01 },
+      fExtinction: { value: 0.1, min: 0.1, max: 5.0, step: 0.01 },
+      fFogHeight: { value: -3.9, min: -20.0, max: 40.0, step: 0.1 },
+      fFadeStart: { value: 3.9, min: 0.0, max: 200.0, step: 0.1 },
+      fFadeEnd: { value: 41.3, min: 0.0, max: 300.0, step: 0.1 },
+      fDistStart: { value: 0.0, min: 0.0, max: 500.0, step: 1.0 },
+      fDistEnd: { value: 92.0, min: 0.0, max: 1000.0, step: 1.0 },
+      fLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
+      fLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
+      fLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
+      fLightIntensity: { value: 0.0, min: 0.0, max: 2.0, step: 0.01 },
+      fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
+      fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
     }),
   });
 
@@ -219,7 +140,7 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Built-in scene fog (kept to define USE_FOG in built-in materials) */}
+      {/* Built-in scene fog */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
@@ -299,37 +220,25 @@ export default function Experience() {
         <Cabin />
         <Man />
         <Cat />
+  {/* Basic fog particle sprites */}
+  <FogParticles count={5} />
       </Suspense>
 
-      {/* Combined forward fog (base extinction + culled animated noise + skydome) */}
-      <CombinedFog
-        enabled={cEnabled}
-        color={cColor}
-        density={cDensity}
-        extinction={cExtinction}
-        fogHeight={cFogHeight}
-        fadeStart={cFadeStart}
-        fadeEnd={cFadeEnd}
-        distFadeStart={cDistStart}
-        distFadeEnd={cDistEnd}
-        lightDir={cLightDir}
-        lightIntensity={cLightIntensity}
-        anisotropy={cAnisotropy}
-        skyRadius={cSkyRadius}
-        enableNoiseFog={nEnabled}
-        noiseDirection={nDir}
-        noiseSpeed={nSpeed}
-        noiseFrequency={nFrequency}
-        noiseDistortion={nDistortion}
-        noiseInfluence={nInfluence}
-        noiseBoxCenter={nBoxCenter}
-        noiseBoxHalfSize={nBoxHalf}
-        noiseMaxDistance={nMaxDist}
-        // NEW props
-        noiseBoost={nBoost}
-        noiseNear={nNear}
-        noiseFar={nFar}
-        noiseAnimFar={nAnimFar}
+      {/* Unified forward fog (stable & cheap large-scale fade) */}
+      <UnifiedForwardFog
+        enabled={fEnabled}
+        color={fColor}
+        density={fDensity}
+        extinction={fExtinction}
+        fogHeight={fFogHeight}
+        fadeStart={fFadeStart}
+        fadeEnd={fFadeEnd}
+        distFadeStart={fDistStart}
+        distFadeEnd={fDistEnd}
+        lightDir={[fLightDirX, fLightDirY, fLightDirZ]}
+        lightIntensity={fLightIntensity}
+        anisotropy={fAnisotropy}
+        skyRadius={fSkyRadius}
       />
     </>
   );
