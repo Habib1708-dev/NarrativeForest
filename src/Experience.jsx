@@ -185,7 +185,8 @@ export default function Experience() {
         makeDefault
         minDistance={1}
         maxDistance={200}
-        target={[0, 0, 0]}
+        // Look toward the characters (midpoint of Man and Cat default positions)
+        target={[-1.25, -4.45, -2.9]}
         enableDamping
         dampingFactor={0.05}
         enablePan
@@ -220,8 +221,13 @@ export default function Experience() {
         <Cabin />
         <Man />
         <Cat />
-        {/* Fog particles with soft intersection against terrain */}
-        <FogParticles count={5} occluder={terrainMesh} />
+        {/* Fog particles with soft intersection against terrain; match unified fog color/density */}
+        <FogParticles
+          count={5}
+          occluder={terrainMesh}
+          fogColor={fColor}
+          fogDensity={fDensity}
+        />
       </Suspense>
 
       {/* Unified forward fog (stable & cheap large-scale fade) */}

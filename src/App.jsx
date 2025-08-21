@@ -4,7 +4,8 @@ import Experience from "./Experience";
 export default function App() {
   return (
     <Canvas
-      camera={{ position: [5, 30, 25], fov: 50 }}
+      // Camera placed per request: x=-1.3, y=-4.5, z=-4.5
+      camera={{ position: [-1.8, -4.8, -5], fov: 50 }}
       shadows
       gl={{ antialias: true }}
       dpr={[1, 2]}

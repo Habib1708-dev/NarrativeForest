@@ -8,12 +8,27 @@ import * as THREE from "three";
 /**
  * FogParticles
  * - Simple billboarded fog sprites using a soft fog texture.
- * - Leva controls: position (x,y,z), size, opacity.
- * - Default: 5 particles, group positioned at (-2, -5, -2).
+ * - Now respects UnifiedForwardFog by sampling from the same fog color
+ * - Uses subtractive blending to darken/obscure rather than brighten
+ * - Soft particles fade at terrain intersection
  */
-export default function FogParticles({ count = 5, occluder = null }) {
+export default function FogParticles({
+  count = 5,
+  occluder = null,
+  fogColor = "#98a0a5", // Should match UnifiedForwardFog color
+  fogDensity = 1.96, // Should match UnifiedForwardFog density
+}) {
   // Controls
-  const { x, y, z, size, opacity, falloff, scaleFalloffWithSize } = useControls(
+  const {
+    x,
+    y,
+    z,
+    size,
+    opacity,
+    falloff,
+    scaleFalloffWithSize,
+    useSubtractive,
+  } = useControls(
     "Fog Particles",
     {
       Position: folder(
@@ -25,9 +40,10 @@ export default function FogParticles({ count = 5, occluder = null }) {
         { collapsed: false }
       ),
       size: { value: 2.5, min: 0.1, max: 20, step: 0.1 },
-      opacity: { value: 0.25, min: 0.0, max: 1.0, step: 0.01 },
+      opacity: { value: 0.15, min: 0.0, max: 1.0, step: 0.01 }, // Reduced default opacity
       falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
       scaleFalloffWithSize: { value: true },
+      useSubtractive: { value: true }, // Use subtractive blending to darken
     },
     { collapsed: false }
   );
@@ -46,6 +62,7 @@ export default function FogParticles({ count = 5, occluder = null }) {
   const depthMeshRef = useRef(null);
   if (!depthMeshRef.current)
     depthMeshRef.current = new THREE.Mesh(undefined, depthMat);
+
   // Ensure only our mesh is in the depth scene
   useEffect(() => {
     depthScene.clear();
@@ -130,11 +147,14 @@ export default function FogParticles({ count = 5, occluder = null }) {
     });
   }, [count]);
 
-  // Soft-particle shader (billboarded quads)
+  // Soft-particle shader that respects the unified fog
   const vertexShader = /* glsl */ `
     varying vec2 vUv;
+    varying vec3 vWorldPos;
     void main() {
       vUv = uv;
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldPos = worldPos.xyz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
   `;
@@ -142,6 +162,7 @@ export default function FogParticles({ count = 5, occluder = null }) {
   const fragmentShader = /* glsl */ `
     precision highp float;
     varying vec2 vUv;
+    varying vec3 vWorldPos;
     uniform sampler2D map;
     uniform sampler2D depthTex;
     uniform vec2 resolution;
@@ -150,9 +171,11 @@ export default function FogParticles({ count = 5, occluder = null }) {
     uniform float far;
     uniform float falloff;
     uniform float sizeFactor;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    uniform bool useSubtractive;
 
     float linearizeDepth(float z) {
-      // z is depth buffer value in [0,1]
       return (2.0 * near * far) / (far + near - z * (far - near));
     }
 
@@ -162,24 +185,45 @@ export default function FogParticles({ count = 5, occluder = null }) {
 
       // Screen-space UV for sampling scene depth
       vec2 screenUV = gl_FragCoord.xy / resolution;
-      float sceneZ = texture2D(depthTex, screenUV).x; // non-linear
+      float sceneZ = texture2D(depthTex, screenUV).x;
       float particleZ = gl_FragCoord.z;
 
       float sceneLin = linearizeDepth(sceneZ);
       float particleLin = linearizeDepth(particleZ);
-      float delta = sceneLin - particleLin; // >0 when scene is behind particle
+      float delta = sceneLin - particleLin;
 
       // Effective falloff scaled by particle size if requested
       float eff = max(1e-4, falloff * sizeFactor);
       float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
 
-      gl_FragColor = vec4(c.rgb, c.a * opacity * soft);
+      // Distance-based fade to respect unified fog distance
+      float distToCamera = distance(vWorldPos, cameraPosition);
+      float distFade = 1.0 - smoothstep(20.0, 50.0, distToCamera);
+
+      // Final opacity combines soft particles, base opacity, and distance fade
+      float finalAlpha = c.a * opacity * soft * distFade;
+      
+      if (useSubtractive) {
+        // Subtractive blending: darken the scene to simulate thick fog
+        // Use fog color but darken it for the particle effect
+        vec3 darkFog = uFogColor * 0.3; // Darker version of fog color
+        gl_FragColor = vec4(darkFog, finalAlpha);
+      } else {
+        // Normal blending with fog color (not pure white)
+        gl_FragColor = vec4(uFogColor, finalAlpha);
+      }
+      
       if (gl_FragColor.a < 0.001) discard;
     }
   `;
 
   // If depth RT missing or occluder not available yet, fallback to sprites
   const fallback = !rt || !occluder;
+
+  // Determine blending mode
+  const blendMode = useSubtractive
+    ? THREE.SubtractiveBlending
+    : THREE.NormalBlending;
 
   return (
     <group ref={groupRef} position={[x, y, z]}>
@@ -194,9 +238,9 @@ export default function FogParticles({ count = 5, occluder = null }) {
                 depthWrite={false}
                 depthTest={true}
                 transparent
-                opacity={opacity}
-                color={0xffffff}
-                blending={THREE.NormalBlending}
+                opacity={opacity * 0.5} // Reduced opacity for fallback
+                color={fogColor} // Use fog color instead of white
+                blending={blendMode}
               />
             </sprite>
           );
@@ -209,7 +253,7 @@ export default function FogParticles({ count = 5, occluder = null }) {
                 transparent
                 depthWrite={false}
                 depthTest={true}
-                blending={THREE.NormalBlending}
+                blending={blendMode}
                 vertexShader={vertexShader}
                 fragmentShader={fragmentShader}
                 uniforms={{
@@ -223,6 +267,9 @@ export default function FogParticles({ count = 5, occluder = null }) {
                   far: { value: camera.far },
                   falloff: { value: falloff },
                   sizeFactor: { value: scaleFalloffWithSize ? s : 1.0 },
+                  uFogColor: { value: new THREE.Color(fogColor) },
+                  uFogDensity: { value: fogDensity },
+                  useSubtractive: { value: useSubtractive },
                 }}
               />
             </mesh>
