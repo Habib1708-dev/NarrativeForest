@@ -211,12 +211,12 @@ export default function FogParticles({
     <group ref={groupRef} position={[0, 0, 0]}>
       {instances.map(({ position, scaleJitter }, i) => {
         const s = size * scaleJitter;
-        const sunkPos = [position[0], position[1] - s / 3, position[2]];
+        const pos = [position[0], position[1], position[2]];
         if (fallback) {
           return (
             <sprite
               key={i}
-              position={sunkPos}
+              position={pos}
               scale={[s, s, 1]}
               ref={(el) => (spriteRefs.current[i] = el)}
             >
@@ -234,7 +234,7 @@ export default function FogParticles({
           );
         }
         return (
-          <Billboard key={i} position={sunkPos} follow={true}>
+          <Billboard key={i} position={pos} follow={true}>
             <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial

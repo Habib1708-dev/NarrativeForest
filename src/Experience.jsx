@@ -1,8 +1,7 @@
-// src/Experience.jsx
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
-import { useRef, useState, Suspense, useEffect } from "react";
+import { useRef, useState, Suspense, useEffect, useCallback } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import Terrain from "./components/Terrain";
@@ -11,38 +10,40 @@ import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
-import FogParticles from "./components/FogParticles";
+import FogParticleSystem from "./components/FogParticleSystem";
 
 export default function Experience() {
   const skyRef = useRef();
   const starsRef = useRef(null);
   const starsWrapRef = useRef(null);
-  const [terrainMesh, setTerrainMesh] = useState(null);
-  const [fogPositions, setFogPositions] = useState([]);
 
-  // --- LAYERED RENDER SETUP ---
-  const skyCamRef = useRef(null); // secondary camera for sky/stars
-  const { gl, scene, camera, size } = useThree();
-  const SKY_FAR = 5000; // big far for background pass
+  // ✅ One-time capture of the Terrain mesh to avoid setState loops
+  const [terrainMesh, setTerrainMesh] = useState(null);
+  const terrainCaptured = useRef(false);
+  const handleTerrainRef = useCallback((m) => {
+    // React may call with null on unmount and multiple times in StrictMode.
+    if (!terrainCaptured.current && m) {
+      terrainCaptured.current = true; // capture once
+      setTerrainMesh(m);
+    }
+  }, []);
+
+  // --- two-camera layered background pass ---
+  const skyCamRef = useRef(null);
+  const { gl, camera, size } = useThree();
+  const SKY_FAR = 5000;
 
   useEffect(() => {
-    // Ensure the world camera renders ONLY layer 0
     camera.layers.enable(0);
     camera.layers.disable(1);
     camera.updateProjectionMatrix();
-
-    // We control clears manually
     gl.autoClear = false;
   }, [camera, gl]);
 
-  // (moved below useControls to avoid TDZ on showStars)
-
-  // Render SKY LAYER (1) first with skyCam, then let R3F do the world pass (layer 0)
   useFrame((state) => {
     const skyCam = skyCamRef.current;
     if (!skyCam) return;
 
-    // Copy the world-camera pose & intrinsics
     skyCam.position.copy(state.camera.position);
     skyCam.quaternion.copy(state.camera.quaternion);
     skyCam.fov = state.camera.fov;
@@ -51,18 +52,13 @@ export default function Experience() {
     skyCam.far = SKY_FAR;
     skyCam.updateProjectionMatrix();
 
-    // Draw background (layer 1)
     skyCam.layers.set(1);
-    state.gl.clear(true, true, true); // clear color+depth
+    state.gl.clear(true, true, true);
     state.gl.render(state.scene, skyCam);
-
-    // Clear only depth, keep color; default R3F world render will run next
     state.gl.clearDepth();
-
-    // Make sure world cam is on layer 0 (just in case)
     state.camera.layers.set(0);
   }, -1);
-  // ----------------------------
+  // -------------------------------------------
 
   const {
     fogColor,
@@ -150,16 +146,15 @@ export default function Experience() {
     }),
   });
 
-  // Imperatively set Stars (and optionally Sky) and any internal children to layer 1
   useEffect(() => {
     const setLayersRecursive = (obj, idx) => {
       if (!obj) return;
       obj.layers?.set(idx);
-      if (obj.children) obj.children.forEach((c) => setLayersRecursive(c, idx));
+      obj.children?.forEach((c) => setLayersRecursive(c, idx));
     };
     if (showStars) {
       setLayersRecursive(starsRef.current, 1);
-      setLayersRecursive(skyRef.current, 1); // optional: also move <Sky /> to layer 1
+      setLayersRecursive(skyRef.current, 1);
       setLayersRecursive(starsWrapRef.current, 1);
     }
   }, [showStars]);
@@ -168,96 +163,25 @@ export default function Experience() {
     gl.toneMappingExposure = exposure;
   }, [gl, exposure]);
 
-  // Keep stars' material stable
   useEffect(() => {
-    [starsRef.current].forEach((pts) => {
-      const mat = pts?.material;
-      if (!mat) return;
-      mat.transparent = false;
-      mat.blending = THREE.NormalBlending;
-      mat.depthTest = true;
-      mat.depthWrite = false;
-      mat.needsUpdate = true;
-    });
+    const mat = starsRef.current?.material;
+    if (!mat) return;
+    mat.transparent = false;
+    mat.blending = THREE.NormalBlending;
+    mat.depthTest = true;
+    mat.depthWrite = false;
+    mat.needsUpdate = true;
   }, [showStars]);
-
-  // Generate grid-based fog positions across the terrain: 2x2 cells, particles at centers and edge midpoints
-  useEffect(() => {
-    if (!terrainMesh) return;
-    const geom = terrainMesh.geometry;
-    if (!geom || !geom.boundingBox) geom?.computeBoundingBox?.();
-    const bb = geom.boundingBox;
-    if (!bb) return;
-
-    // Terrain is a Plane rotated -90deg on X and positioned at [0, -10, 0]
-    // Use local-space grid (x,y) then cast downward in world to meet surface.
-    const raycaster = new THREE.Raycaster();
-    const down = new THREE.Vector3(0, -1, 0);
-    const positions = [];
-
-    const cell = 2; // 2x2 units per cell
-    const minLocalX = bb.min.x;
-    const maxLocalX = bb.max.x;
-    const minLocalY = bb.min.y; // geometry Y maps to world Z after -90deg X rotation
-    const maxLocalY = bb.max.y;
-
-    const sizeX = maxLocalX - minLocalX;
-    const sizeY = maxLocalY - minLocalY;
-    const nx = Math.max(1, Math.floor(sizeX / cell));
-    const ny = Math.max(1, Math.floor(sizeY / cell));
-
-    const castAtLocal = (lx, ly) => {
-      const localOrigin = new THREE.Vector3(lx, ly, 200); // high above plane; local z -> world y
-      const origin = localOrigin.applyMatrix4(terrainMesh.matrixWorld);
-      raycaster.set(origin, down);
-      const hits = raycaster.intersectObject(terrainMesh, true);
-      if (hits && hits.length > 0) {
-        const p = hits[0].point.clone();
-        positions.push([p.x, p.y, p.z]);
-      }
-    };
-
-    // 1) Cell centers
-    for (let i = 0; i < nx; i++) {
-      const cx = minLocalX + (i + 0.5) * cell;
-      for (let j = 0; j < ny; j++) {
-        const cy = minLocalY + (j + 0.5) * cell;
-        castAtLocal(cx, cy);
-      }
-    }
-
-    // 2) Vertical edge midpoints (edges parallel to local Y), k from 0..nx (grid lines), j cells along Y
-    for (let k = 0; k <= nx; k++) {
-      const ex = minLocalX + k * cell;
-      for (let j = 0; j < ny; j++) {
-        const ey = minLocalY + (j + 0.5) * cell; // midpoint along cell height
-        castAtLocal(ex, ey);
-      }
-    }
-
-    // 3) Horizontal edge midpoints (edges parallel to local X), l from 0..ny, i cells along X
-    for (let l = 0; l <= ny; l++) {
-      const ey = minLocalY + l * cell;
-      for (let i = 0; i < nx; i++) {
-        const ex = minLocalX + (i + 0.5) * cell; // midpoint along cell width
-        castAtLocal(ex, ey);
-      }
-    }
-
-    setFogPositions(positions);
-  }, [terrainMesh]);
 
   return (
     <>
       <Perf position="top-left" />
 
-      {/* Secondary camera used only for the SKY pass (layer 1) */}
       <perspectiveCamera
         ref={skyCamRef}
         args={[50, size.width / size.height, 0.1, SKY_FAR]}
       />
 
-      {/* Built-in scene fog just to define USE_FOG for standard materials */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
@@ -273,7 +197,6 @@ export default function Experience() {
         mieDirectionalG={mieDirectionalG}
       />
 
-      {/* SKY LAYER (1): Stars go here so they render in the background pass */}
       {showStars && (
         <group ref={starsWrapRef}>
           <Stars
@@ -318,26 +241,19 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        <Terrain
-          ref={(m) => {
-            setTerrainMesh(m);
-          }}
-        />
+        {/* ✅ one-time ref capture */}
+        <Terrain ref={handleTerrainRef} />
+
+        {/* If Forest expects terrainMesh, this still works */}
         <Forest terrainMesh={terrainMesh} />
         <Cabin />
         <Man />
         <Cat />
-        {/* Scatter 30 fog particles across the terrain */}
-        <FogParticles
-          count={fogPositions.length}
-          positions={fogPositions}
-          occluder={terrainMesh}
-          fogColor={fColor}
-          fogDensity={fDensity}
-        />
+
+        {/* Grid-based fog particle system */}
+        <FogParticleSystem terrainMesh={terrainMesh} cellSize={2} />
       </Suspense>
 
-      {/* Unified forward fog: patch world materials (all layers), sky-dome on layer 1 */}
       <UnifiedForwardFog
         enabled={fEnabled}
         color={fColor}
@@ -352,7 +268,7 @@ export default function Experience() {
         lightIntensity={fLightIntensity}
         anisotropy={fAnisotropy}
         skyRadius={fSkyRadius}
-        layer={1} // <— sky dome draws in the sky pass
+        layer={1}
       />
     </>
   );
