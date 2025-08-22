@@ -17,22 +17,30 @@ export default function FogParticles({
   positions = null,
 }) {
   // Controls
-  const { size, opacity, falloff, scaleFalloffWithSize, rotationSpeedZ } =
-    useControls(
-      "Fog Particles",
-      {
-        size: { value: 3, min: 0.1, max: 20, step: 0.1 },
-        opacity: { value: 0.3, min: 0.0, max: 1.0, step: 0.01 },
-        falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
-        scaleFalloffWithSize: { value: true },
-        rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
-      },
-      { collapsed: false }
-    );
+  const {
+    size,
+    opacity,
+    falloff,
+    scaleFalloffWithSize,
+    rotationSpeedZ,
+    fogTint,
+  } = useControls(
+    "Fog Particles",
+    {
+      size: { value: 3, min: 0.1, max: 20, step: 0.1 },
+      opacity: { value: 1, min: 0.0, max: 1.0, step: 0.01 },
+      falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
+      scaleFalloffWithSize: { value: true },
+      rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
+      fogTint: { value: "#c1c1c1ff" },
+    },
+    { collapsed: false }
+  );
 
   // Drift controls removed: only z-axis rotation retained.
 
   const tex = useTexture("/textures/fog/fog.png");
+  const fogColor = useMemo(() => new THREE.Color(fogTint), [fogTint]);
   const groupRef = useRef();
   const meshRefs = useRef([]);
   const spriteRefs = useRef([]);
@@ -183,6 +191,7 @@ export default function FogParticles({
     uniform float far;
     uniform float falloff;
     uniform float sizeFactor;
+  uniform vec3 fogColor;
 
     float linearizeDepth(float z) {
       // z is depth buffer value in [0,1]
@@ -206,7 +215,8 @@ export default function FogParticles({
       float eff = max(1e-4, falloff * sizeFactor);
       float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
 
-      gl_FragColor = vec4(c.rgb, c.a * opacity * soft);
+  vec3 tinted = c.rgb * fogColor;
+  gl_FragColor = vec4(tinted, c.a * opacity * soft);
       if (gl_FragColor.a < 0.001) discard;
     }
   `;
@@ -234,7 +244,7 @@ export default function FogParticles({
                 depthTest={true}
                 transparent
                 opacity={opacity}
-                color={0xffffff}
+                color={fogColor}
                 blending={THREE.NormalBlending}
               />
             </sprite>
@@ -273,6 +283,7 @@ export default function FogParticles({
                   far: { value: camera.far },
                   falloff: { value: falloff },
                   sizeFactor: { value: scaleFalloffWithSize ? s : 1.0 },
+                  fogColor: { value: fogColor },
                 }}
               />
             </mesh>
