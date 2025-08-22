@@ -30,18 +30,7 @@ export default function FogParticles({
       { collapsed: false }
     );
 
-  // New: gentle drift controls
-  const { driftAmp, driftAmpY, driftSpeed, windX, windZ } = useControls(
-    "Fog Drift",
-    {
-      driftAmp: { value: 0.15, min: 0, max: 2, step: 0.01 },
-      driftAmpY: { value: 0.05, min: 0, max: 1, step: 0.01 },
-      driftSpeed: { value: 0.5, min: 0, max: 5, step: 0.01 },
-      windX: { value: 0.0, min: -0.5, max: 0.5, step: 0.001 },
-      windZ: { value: 0.0, min: -0.5, max: 0.5, step: 0.001 },
-    },
-    { collapsed: true }
-  );
+  // Drift controls removed: only z-axis rotation retained.
 
   const tex = useTexture("/textures/fog/fog.png");
   const groupRef = useRef();
@@ -107,7 +96,7 @@ export default function FogParticles({
     tex.needsUpdate = true;
   }, [tex, gl]);
 
-  // Combined depth prepass + rotation + drift
+  // Combined depth prepass + rotation (drift removed)
   useFrame((state, dt) => {
     // --- depth prepass: only layer 4 (Terrain + Cabin + Man + Cat) ---
     if (rt) {
@@ -137,35 +126,13 @@ export default function FogParticles({
       gl.autoClear = prevAutoClear;
     }
 
-    // --- rotation & drift (existing logic) ---
+    // --- rotation only ---
     angleRef.current += rotationSpeedZ * dt;
     const angle = angleRef.current;
     meshRefs.current.forEach((m) => m && (m.rotation.z = angle));
     spriteRefs.current.forEach(
       (s) => s?.material && (s.material.rotation = angle)
     );
-
-    const t = state.clock.getElapsedTime();
-    const n = basePositionsRef.current.length;
-    for (let i = 0; i < n; i++) {
-      const base = basePositionsRef.current[i];
-      if (!base) continue;
-      const seed = motionSeeds[i] || motionSeeds[0];
-      const dx =
-        Math.sin(t * driftSpeed * seed.freqX + seed.phaseX) * driftAmp +
-        windX * t;
-      const dz =
-        Math.cos(t * driftSpeed * seed.freqZ + seed.phaseZ) * driftAmp +
-        windZ * t;
-      const dy =
-        Math.sin(t * driftSpeed * seed.freqY + seed.phaseY) * driftAmpY;
-      const x = base[0] + dx;
-      const y = base[1] + dy;
-      const z = base[2] + dz;
-      if (spriteRefs.current[i]) spriteRefs.current[i].position.set(x, y, z);
-      if (billboardRefs.current[i])
-        billboardRefs.current[i].position.set(x, y, z);
-    }
   });
 
   // Stable small offsets so all sprites aren't perfectly overlapping
@@ -192,30 +159,7 @@ export default function FogParticles({
     return offsets;
   }, [positions, offsets]);
 
-  // New: base anchors and motion seeds per instance
-  const basePositionsRef = useRef([]);
-  useEffect(() => {
-    basePositionsRef.current = instances.map((it) => [
-      it.position[0],
-      it.position[1],
-      it.position[2],
-    ]);
-  }, [instances]);
-
-  const motionSeeds = useMemo(() => {
-    const rnd = (s) => {
-      const x = Math.sin(s * 12.9898) * 43758.5453;
-      return x - Math.floor(x);
-    };
-    return new Array(instances.length).fill(0).map((_, i) => ({
-      phaseX: rnd(i + 10.1) * Math.PI * 2.0,
-      phaseZ: rnd(i + 20.2) * Math.PI * 2.0,
-      phaseY: rnd(i + 30.3) * Math.PI * 2.0,
-      freqX: 0.8 + rnd(i + 40.4) * 0.6,
-      freqZ: 0.7 + rnd(i + 50.5) * 0.6,
-      freqY: 1.0 + rnd(i + 60.6) * 0.8,
-    }));
-  }, [instances.length]);
+  // Drift/motion seeds removed.
 
   // (Removed separate rotation+drift useFrame; merged above)
 
