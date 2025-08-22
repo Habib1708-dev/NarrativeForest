@@ -1,7 +1,14 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
-import { useRef, useState, Suspense, useEffect, useCallback } from "react";
+import {
+  useRef,
+  useState,
+  Suspense,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import Terrain from "./components/Terrain";
@@ -21,11 +28,25 @@ export default function Experience() {
   const [terrainMesh, setTerrainMesh] = useState(null);
   const terrainCaptured = useRef(false);
   const handleTerrainRef = useCallback((m) => {
-    // React may call with null on unmount and multiple times in StrictMode.
     if (!terrainCaptured.current && m) {
-      terrainCaptured.current = true; // capture once
+      terrainCaptured.current = true;
       setTerrainMesh(m);
     }
+  }, []);
+
+  // Capture Cabin/Man/Cat root objects via callback refs (once each)
+  const [cabinObj, setCabinObj] = useState(null);
+  const [manObj, setManObj] = useState(null);
+  const [catObj, setCatObj] = useState(null);
+
+  const handleCabinRef = useCallback((obj) => {
+    if (obj) setCabinObj(obj);
+  }, []);
+  const handleManRef = useCallback((obj) => {
+    if (obj) setManObj(obj);
+  }, []);
+  const handleCatRef = useCallback((obj) => {
+    if (obj) setCatObj(obj);
   }, []);
 
   // --- two-camera layered background pass ---
@@ -173,6 +194,12 @@ export default function Experience() {
     mat.needsUpdate = true;
   }, [showStars]);
 
+  // Build occluder list once each ref is available
+  const occluders = useMemo(
+    () => [terrainMesh, cabinObj, manObj, catObj].filter(Boolean),
+    [terrainMesh, cabinObj, manObj, catObj]
+  );
+
   return (
     <>
       <Perf position="top-left" />
@@ -241,17 +268,21 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        {/* ✅ one-time ref capture */}
+        {/* Terrain (capture mesh) */}
         <Terrain ref={handleTerrainRef} />
 
-        {/* If Forest expects terrainMesh, this still works */}
+        {/* Scene actors */}
         <Forest terrainMesh={terrainMesh} />
-        <Cabin />
-        <Man />
-        <Cat />
+        <Cabin ref={handleCabinRef} />
+        <Man ref={handleManRef} />
+        <Cat ref={handleCatRef} />
 
-        {/* Grid-based fog particle system */}
-        <FogParticleSystem terrainMesh={terrainMesh} cellSize={3} />
+        {/* Grid-based fog particle system with explicit occluders */}
+        <FogParticleSystem
+          terrainMesh={terrainMesh}
+          cellSize={2}
+          occluders={occluders}
+        />
       </Suspense>
 
       <UnifiedForwardFog

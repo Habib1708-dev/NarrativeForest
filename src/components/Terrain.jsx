@@ -111,11 +111,6 @@ function plateauize(h, threshold, smoothing) {
 export default forwardRef(function Terrain(props, ref) {
   const meshRef = useRef();
 
-  // Enable layer 4 so external depth / prepass systems can selectively include the terrain
-  useEffect(() => {
-    meshRef.current?.layers?.enable(4);
-  }, []);
-
   // 1) Leva controls
   const terrainParams = useControls("Terrain", {
     elevation: { value: 5, min: 0, max: 150, step: 1 },

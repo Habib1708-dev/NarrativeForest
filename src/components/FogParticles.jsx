@@ -1,20 +1,19 @@
-// src/components/FogParticles.jsx
 import { useMemo, useRef, useEffect, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture, Billboard } from "@react-three/drei";
-import { useControls, folder } from "leva";
+import { useControls } from "leva";
 import * as THREE from "three";
 
 /**
  * FogParticles
- * - Simple billboarded fog sprites using a soft fog texture.
- * - Leva controls: position (x,y,z), size, opacity.
- * - Default: 5 particles, group positioned at (-2, -5, -2).
+ * - Billboarded fog sprites using a soft fog texture.
+ * - Depth prepass renders ONLY the provided `occluders` into an offscreen RT depthTexture.
+ * - No reliance on scene-wide layers; we temporarily swap occluders to a scratch layer and restore.
  */
 export default function FogParticles({
   count = 5,
-  occluder = null,
   positions = null,
+  occluders = [], // Array of Object3D or React refs to Object3D
 }) {
   // Controls
   const {
@@ -37,33 +36,40 @@ export default function FogParticles({
     { collapsed: false }
   );
 
-  // Drift controls removed: only z-axis rotation retained.
-
   const tex = useTexture("/textures/fog/fog.png");
   const fogColor = useMemo(() => new THREE.Color(fogTint), [fogTint]);
+
   const groupRef = useRef();
   const meshRefs = useRef([]);
   const spriteRefs = useRef([]);
-  const billboardRefs = useRef([]); // New: track billboard group
+  const billboardRefs = useRef([]);
   const angleRef = useRef(0);
-  const { gl, size: viewport, camera, scene } = useThree();
-  const depthCam = useMemo(() => new THREE.PerspectiveCamera(), []);
 
-  // Depth prepass setup (layer 4 scene render)
+  const { gl, size: viewport, camera, scene } = useThree();
+  const dpr = gl.getPixelRatio ? gl.getPixelRatio() : 1;
+
+  // Keep fog particles on layer 0 (not part of the prepass)
+  useEffect(() => {
+    groupRef.current?.traverse?.((o) => o.layers.set(0));
+  }, []);
+
+  // Standalone camera for the offscreen depth prepass
+  const depthCam = useMemo(() => new THREE.PerspectiveCamera(), []);
+  const PREPASS_LAYER = 7; // scratch layer used only inside the prepass
+
+  // Depth prepass target
   const [rt, setRt] = useState(null);
+
+  // Depth material (no unsupported flags)
   const depthMat = useMemo(() => {
     const m = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
-      skinning: true,
-      morphTargets: true,
-      morphNormals: true,
     });
     m.blending = THREE.NoBlending;
     return m;
   }, []);
 
   // Create render target with depth texture
-  const dpr = gl.getPixelRatio ? gl.getPixelRatio() : 1;
   useEffect(() => {
     const w = Math.max(1, Math.floor(viewport.width * dpr));
     const h = Math.max(1, Math.floor(viewport.height * dpr));
@@ -72,6 +78,7 @@ export default function FogParticles({
       ? THREE.UnsignedIntType
       : THREE.UnsignedShortType;
     depthTexture.format = THREE.DepthFormat;
+
     const target = new THREE.WebGLRenderTarget(w, h, {
       depthTexture,
       depthBuffer: true,
@@ -80,6 +87,7 @@ export default function FogParticles({
     target.texture.minFilter = THREE.LinearFilter;
     target.texture.magFilter = THREE.LinearFilter;
     target.texture.generateMipmaps = false;
+
     setRt(target);
     return () => {
       target.dispose();
@@ -96,6 +104,7 @@ export default function FogParticles({
     );
   }, [rt, viewport.width, viewport.height, dpr]);
 
+  // Texture setup
   useEffect(() => {
     if (!tex) return;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -104,10 +113,33 @@ export default function FogParticles({
     tex.needsUpdate = true;
   }, [tex, gl]);
 
-  // Combined depth prepass + rotation (drift removed)
+  // Helpers to isolate occluders into a scratch layer and restore
+  const getObject = (o) => (o && o.isObject3D ? o : o?.current || null);
+  const setSubtreeToLayer = (root, layer, stash) => {
+    root.traverse((node) => {
+      stash.push([node, node.layers.mask]);
+      node.layers.set(layer);
+    });
+  };
+  const restoreLayers = (stash) => {
+    for (let i = 0; i < stash.length; i++) {
+      const [node, mask] = stash[i];
+      node.layers.mask = mask;
+    }
+    stash.length = 0; // clear
+  };
+
+  // Depth prepass (to RT) + simple rotation (run before your sky pass at -1)
   useFrame((state, dt) => {
-    // --- depth prepass: only layer 4 (Terrain + Cabin + Man + Cat) ---
     if (rt) {
+      // Collect current occluder objects (ignore nulls)
+      const occ = [];
+      for (let i = 0; i < occluders.length; i++) {
+        const obj = getObject(occluders[i]);
+        if (obj) occ.push(obj);
+      }
+
+      // mirror main cam
       depthCam.position.copy(camera.position);
       depthCam.quaternion.copy(camera.quaternion);
       depthCam.fov = camera.fov;
@@ -116,60 +148,61 @@ export default function FogParticles({
       depthCam.far = camera.far;
       depthCam.updateProjectionMatrix();
 
-      depthCam.layers.disableAll?.();
-      depthCam.layers.enable(4);
+      // Set the prepass camera to the scratch layer
+      depthCam.layers.set(PREPASS_LAYER);
 
+      // Save scene state, isolate occluders, render, and restore
       const prevOverride = scene.overrideMaterial;
       const prevTarget = gl.getRenderTarget();
-      const prevAutoClear = gl.autoClear;
+      const stash = [];
 
-      scene.overrideMaterial = depthMat;
-      gl.autoClear = true;
-      gl.setRenderTarget(rt);
-      gl.clear(true, true, true);
-      gl.render(scene, depthCam);
-      gl.setRenderTarget(prevTarget);
+      try {
+        // Move only the occluder subtrees to PREPASS_LAYER
+        for (let i = 0; i < occ.length; i++)
+          setSubtreeToLayer(occ[i], PREPASS_LAYER, stash);
 
-      scene.overrideMaterial = prevOverride;
-      gl.autoClear = prevAutoClear;
+        scene.overrideMaterial = depthMat;
+        gl.setRenderTarget(rt);
+        gl.clear(true, true, true);
+        gl.render(scene, depthCam);
+      } finally {
+        // Restore everything we touched
+        restoreLayers(stash);
+        gl.setRenderTarget(prevTarget);
+        scene.overrideMaterial = prevOverride;
+      }
     }
 
-    // --- rotation only ---
+    // rotation
     angleRef.current += rotationSpeedZ * dt;
     const angle = angleRef.current;
     meshRefs.current.forEach((m) => m && (m.rotation.z = angle));
     spriteRefs.current.forEach(
       (s) => s?.material && (s.material.rotation = angle)
     );
-  });
+  }, -2);
 
-  // Stable small offsets so all sprites aren't perfectly overlapping
+  // Stable local offsets if positions aren’t passed
   const offsets = useMemo(() => {
     const rnd = (s) => {
       const x = Math.sin(s * 12.9898) * 43758.5453;
-      return (x - Math.floor(x)) * 2 - 1; // [-1,1]
+      return (x - Math.floor(x)) * 2 - 1;
     };
     return new Array(count).fill(0).map((_, i) => {
       const ox = rnd(i + 0.13) * 1.2;
       const oy = rnd(i + 1.37) * 0.6;
       const oz = rnd(i + 2.71) * 1.2;
-      const scaleJitter = 1 + rnd(i + 3.33) * 0.25; // +/-25%
+      const scaleJitter = 1 + rnd(i + 3.33) * 0.25;
       return { position: [ox, oy, oz], scaleJitter };
     });
   }, [count]);
 
-  // Use provided absolute positions if given; otherwise fall back to local offsets around [x,y,z]
   const instances = useMemo(() => {
     if (positions && positions.length > 0) {
-      // Ignore local offsets; 1:1 mapping to provided positions
-      return positions.map((p, i) => ({ position: p, scaleJitter: 1 }));
+      return positions.map((p) => ({ position: p, scaleJitter: 1 }));
     }
     return offsets;
   }, [positions, offsets]);
-
-  // Drift/motion seeds removed.
-
-  // (Removed separate rotation+drift useFrame; merged above)
 
   // Soft-particle shader (billboarded quads)
   const vertexShader = /* glsl */ `
@@ -191,10 +224,9 @@ export default function FogParticles({
     uniform float far;
     uniform float falloff;
     uniform float sizeFactor;
-  uniform vec3 fogColor;
+    uniform vec3 fogColor;
 
     float linearizeDepth(float z) {
-      // z is depth buffer value in [0,1]
       return (2.0 * near * far) / (far + near - z * (far - near));
     }
 
@@ -202,26 +234,23 @@ export default function FogParticles({
       vec4 c = texture2D(map, vUv);
       if (c.a <= 0.001) discard;
 
-      // Screen-space UV for sampling scene depth
       vec2 screenUV = gl_FragCoord.xy / resolution;
-      float sceneZ = texture2D(depthTex, screenUV).x; // non-linear
+      float sceneZ = texture2D(depthTex, screenUV).x;
       float particleZ = gl_FragCoord.z;
 
       float sceneLin = linearizeDepth(sceneZ);
       float particleLin = linearizeDepth(particleZ);
-      float delta = sceneLin - particleLin; // >0 when scene is behind particle
+      float delta = sceneLin - particleLin;
 
-      // Effective falloff scaled by particle size if requested
       float eff = max(1e-4, falloff * sizeFactor);
       float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
 
-  vec3 tinted = c.rgb * fogColor;
-  gl_FragColor = vec4(tinted, c.a * opacity * soft);
+      vec3 tinted = c.rgb * fogColor;
+      gl_FragColor = vec4(tinted, c.a * opacity * soft);
       if (gl_FragColor.a < 0.001) discard;
     }
   `;
 
-  // If depth RT missing, fallback to sprites
   const fallback = !rt;
 
   return (

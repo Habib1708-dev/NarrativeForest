@@ -1,19 +1,26 @@
-// src/components/Cat.jsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
-export default function Cat() {
+export default forwardRef(function Cat(_, ref) {
   // Load cat GLB (resides under /public)
   const { scene, animations } = useGLTF("/models/cat/bicolor_cat.glb");
 
   // Clone to preserve skinned meshes/animations when reusing
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
 
-  // Root group for animation binding
+  // Root group for animation binding and for fog occluder usage
   const groupRef = useRef();
+  useImperativeHandle(ref, () => groupRef.current, []);
+
   const { actions, names, mixer } = useAnimations(animations || [], groupRef);
 
   // Pick the first clip and play it
@@ -82,9 +89,7 @@ export default function Cat() {
         // If this mesh has a material or a material array, clone and record original colors
         const recordColor = (mat) => {
           if (!mat || !mat.color) return;
-          // Clone material so tinting this mesh doesn’t affect others
           if (!originalColors.current.has(mat.uuid)) {
-            // Ensure the mesh owns its material instance
             const clonedMat = mat.clone();
             o.material = clonedMat;
             originalColors.current.set(clonedMat.uuid, clonedMat.color.clone());
@@ -120,10 +125,9 @@ export default function Cat() {
         if (!mat || !mat.color) return;
         const base = originalColors.current.get(mat.uuid);
         if (!base) return;
-        // color = mix(base, target, intensity)
         const mixed = base.clone().lerp(target, tintIntensity);
         mat.color.copy(mixed);
-        mat.needsUpdate = true; // be safe
+        mat.needsUpdate = true;
       };
 
       if (Array.isArray(o.material)) {
@@ -138,16 +142,6 @@ export default function Cat() {
   useEffect(() => {
     if (mixer) mixer.timeScale = 1;
   }, [mixer]);
-
-  // Make the whole Cat subtree visible to the fog depth pass (layer 4)
-  useEffect(() => {
-    if (!cloned) return;
-    const setLayersRecursive = (obj, layerIndex) => {
-      obj.layers.enable(layerIndex);
-      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
-    };
-    setLayersRecursive(cloned, 4);
-  }, [cloned]);
 
   if (!cloned) return null;
 
@@ -165,6 +159,6 @@ export default function Cat() {
       <primitive object={cloned} />
     </group>
   );
-}
+});
 
 useGLTF.preload("/models/cat/bicolor_cat.glb");

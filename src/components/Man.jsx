@@ -1,19 +1,25 @@
-// src/components/Man.jsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
-export default function Man() {
+export default forwardRef(function Man(_, ref) {
   // Load the GLB from /public
   const { scene, animations } = useGLTF("/models/man/man.glb");
 
   // Clone with SkeletonUtils so skinned animations remain intact
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
 
-  // Root group ref for animations
+  // Root group ref for animations AND for fog occluder usage
   const groupRef = useRef();
+  useImperativeHandle(ref, () => groupRef.current, []);
 
   // Animation system
   const { actions, names, clips, mixer } = useAnimations(
@@ -43,7 +49,6 @@ export default function Man() {
   } = useControls({
     Man: folder({
       Transform: folder({
-        // Hard-coded refined, miniature defaults for debugging
         positionX: { value: -1.19, min: -50, max: 50, step: 0.01 },
         positionY: { value: -4.48, min: -50, max: 50, step: 0.01 },
         positionZ: { value: -2.95, min: -50, max: 50, step: 0.01 },
@@ -82,13 +87,10 @@ export default function Man() {
 
     cloned.traverse((o) => {
       if (o.isMesh) {
-        // Basic rendering flags
         o.castShadow = true;
         o.receiveShadow = true;
-        // Avoid incorrect culling on skinned/animated meshes
         o.frustumCulled = false;
 
-        // Track mesh info
         const mat = Array.isArray(o.material) ? o.material : [o.material];
         mat.forEach((m) => m && materials.set(m.uuid, m));
         meshes.push({
@@ -100,7 +102,6 @@ export default function Man() {
       }
     });
 
-    // Pretty console logging
     console.groupCollapsed("👨 Man model loaded");
     console.log("Source:", "/models/man/man.glb");
     console.log("Meshes:", meshes.length, "Unique materials:", materials.size);
@@ -133,16 +134,6 @@ export default function Man() {
     console.groupEnd();
   }, [cloned]);
 
-  // Make the whole Man subtree visible to the fog depth pass (layer 4)
-  useEffect(() => {
-    if (!cloned) return;
-    const setLayersRecursive = (obj, layerIndex) => {
-      obj.layers.enable(layerIndex);
-      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
-    };
-    setLayersRecursive(cloned, 4);
-  }, [cloned]);
-
   // Log animation clips and tracks once
   useEffect(() => {
     if (!clips || clips.length === 0) {
@@ -162,7 +153,6 @@ export default function Man() {
         tracks: c.tracks?.length ?? 0,
       }))
     );
-    // Show first clip's tracks as sample
     clips.slice(0, 3).forEach((c) => {
       console.groupCollapsed(
         `Tracks for "${c.name}" (${c.tracks?.length || 0})`
@@ -191,7 +181,6 @@ export default function Man() {
     const prev = currentActionRef.current;
 
     if (!nextName) {
-      // Stop all
       Object.values(actions).forEach((a) => a?.stop());
       if (prev) currentActionRef.current = null;
       console.log("⏹️ Man animation stopped");
@@ -209,7 +198,7 @@ export default function Man() {
     console.log(`▶️ Man playing clip: ${nextName}`);
 
     return () => {
-      // optional: do not stop on unmount to keep state if remounting elsewhere
+      // optional cleanup: keep running across remounts if desired
     };
   }, [actions, clipName]);
 
@@ -250,11 +239,9 @@ export default function Man() {
       rotation={[0, rotationY, 0]}
       scale={scale}
     >
-      {/* Attach after-render hook on the root object so we know it drew */}
       <primitive object={cloned} onAfterRender={onAfterRender} />
     </group>
   );
-}
+});
 
-// Preload for smoother first paint
 useGLTF.preload("/models/man/man.glb");

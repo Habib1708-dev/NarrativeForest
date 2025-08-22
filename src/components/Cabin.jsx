@@ -1,16 +1,25 @@
-// src/components/Cabin.jsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
-export default function Cabin() {
+export default forwardRef(function Cabin(_, ref) {
   // Load GLB from /public
   const { scene } = useGLTF("/models/cabin/Cabin.glb");
 
   // Clone so this instance has its own materials/props
   const clonedScene = useMemo(() => (scene ? clone(scene) : null), [scene]);
+
+  // Expose a root ref (for fog occluder usage)
+  const rootRef = useRef(null);
+  useImperativeHandle(ref, () => rootRef.current, []);
 
   // Collect unique materials for tinting
   const materialsRef = useRef([]);
@@ -35,16 +44,6 @@ export default function Cabin() {
     });
 
     materialsRef.current = Array.from(mats.values());
-  }, [clonedScene]);
-
-  // Put everything in layer 4 (recursively) for the fog depth pass
-  useEffect(() => {
-    if (!clonedScene) return;
-    const setLayersRecursive = (obj, layerIndex) => {
-      obj.layers.enable(layerIndex);
-      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
-    };
-    setLayersRecursive(clonedScene, 4);
   }, [clonedScene]);
 
   // Leva controls (use your provided defaults)
@@ -147,7 +146,7 @@ export default function Cabin() {
   );
 
   return (
-    <>
+    <group ref={rootRef}>
       {/* Cabin model */}
       <group
         position={position}
@@ -183,9 +182,8 @@ export default function Cabin() {
           />
         </group>
       )}
-    </>
+    </group>
   );
-}
+});
 
-// Preload for smoother first render
 useGLTF.preload("/models/cabin/Cabin.glb");
