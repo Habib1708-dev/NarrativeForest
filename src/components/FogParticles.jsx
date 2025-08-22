@@ -250,6 +250,9 @@ export default function FogParticles({
             <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial
+                key={`fogMat-${Math.floor(viewport.width * dpr)}x${Math.floor(
+                  viewport.height * dpr
+                )}`}
                 transparent
                 depthWrite={false}
                 depthTest={true}
@@ -260,7 +263,10 @@ export default function FogParticles({
                   map: { value: tex },
                   depthTex: { value: rt.depthTexture },
                   resolution: {
-                    value: new THREE.Vector2(viewport.width, viewport.height),
+                    value: new THREE.Vector2(
+                      Math.floor(viewport.width * dpr),
+                      Math.floor(viewport.height * dpr)
+                    ),
                   },
                   opacity: { value: opacity },
                   near: { value: camera.near },
