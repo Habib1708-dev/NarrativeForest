@@ -1,5 +1,11 @@
 // src/components/Terrain.jsx
-import React, { useRef, useMemo, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useRef,
+  useMemo,
+  forwardRef,
+  useImperativeHandle,
+  useEffect,
+} from "react";
 import * as THREE from "three";
 import { computeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
 import { useControls } from "leva";
@@ -104,6 +110,11 @@ function plateauize(h, threshold, smoothing) {
 
 export default forwardRef(function Terrain(props, ref) {
   const meshRef = useRef();
+
+  // Enable layer 4 so external depth / prepass systems can selectively include the terrain
+  useEffect(() => {
+    meshRef.current?.layers?.enable(4);
+  }, []);
 
   // 1) Leva controls
   const terrainParams = useControls("Terrain", {

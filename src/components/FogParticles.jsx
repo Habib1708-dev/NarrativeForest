@@ -30,48 +30,56 @@ export default function FogParticles({
       { collapsed: false }
     );
 
+  // New: gentle drift controls
+  const { driftAmp, driftAmpY, driftSpeed, windX, windZ } = useControls(
+    "Fog Drift",
+    {
+      driftAmp: { value: 0.15, min: 0, max: 2, step: 0.01 },
+      driftAmpY: { value: 0.05, min: 0, max: 1, step: 0.01 },
+      driftSpeed: { value: 0.5, min: 0, max: 5, step: 0.01 },
+      windX: { value: 0.0, min: -0.5, max: 0.5, step: 0.001 },
+      windZ: { value: 0.0, min: -0.5, max: 0.5, step: 0.001 },
+    },
+    { collapsed: true }
+  );
+
   const tex = useTexture("/textures/fog/fog.png");
   const groupRef = useRef();
   const meshRefs = useRef([]);
   const spriteRefs = useRef([]);
+  const billboardRefs = useRef([]); // New: track billboard group
   const angleRef = useRef(0);
-  const { gl, size: viewport, camera } = useThree();
+  const { gl, size: viewport, camera, scene } = useThree();
+  const depthCam = useMemo(() => new THREE.PerspectiveCamera(), []);
 
-  // Depth prepass setup
+  // Depth prepass setup (layer 4 scene render)
   const [rt, setRt] = useState(null);
-  const depthScene = useMemo(() => new THREE.Scene(), []);
-  const depthMat = useMemo(
-    () => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }),
-    []
-  );
-  const depthMeshRef = useRef(null);
-  if (!depthMeshRef.current)
-    depthMeshRef.current = new THREE.Mesh(undefined, depthMat);
-  // Ensure only our mesh is in the depth scene
-  useEffect(() => {
-    depthScene.clear();
-    depthScene.add(depthMeshRef.current);
-  }, [depthScene]);
+  const depthMat = useMemo(() => {
+    const m = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      skinning: true,
+      morphTargets: true,
+      morphNormals: true,
+    });
+    m.blending = THREE.NoBlending;
+    return m;
+  }, []);
 
   // Create render target with depth texture
+  const dpr = gl.getPixelRatio ? gl.getPixelRatio() : 1;
   useEffect(() => {
-    const depthTexture = new THREE.DepthTexture(
-      viewport.width,
-      viewport.height
-    );
+    const w = Math.max(1, Math.floor(viewport.width * dpr));
+    const h = Math.max(1, Math.floor(viewport.height * dpr));
+    const depthTexture = new THREE.DepthTexture(w, h);
     depthTexture.type = gl.capabilities.isWebGL2
       ? THREE.UnsignedIntType
       : THREE.UnsignedShortType;
     depthTexture.format = THREE.DepthFormat;
-    const target = new THREE.WebGLRenderTarget(
-      viewport.width,
-      viewport.height,
-      {
-        depthTexture,
-        depthBuffer: true,
-        stencilBuffer: false,
-      }
-    );
+    const target = new THREE.WebGLRenderTarget(w, h, {
+      depthTexture,
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
     target.texture.minFilter = THREE.LinearFilter;
     target.texture.magFilter = THREE.LinearFilter;
     target.texture.generateMipmaps = false;
@@ -80,13 +88,16 @@ export default function FogParticles({
       target.dispose();
       depthTexture.dispose?.();
     };
-  }, [gl, viewport.width, viewport.height]);
+  }, [gl, viewport.width, viewport.height, dpr]);
 
   // Keep RT size in sync with canvas size
   useEffect(() => {
     if (!rt) return;
-    rt.setSize(viewport.width, viewport.height);
-  }, [rt, viewport.width, viewport.height]);
+    rt.setSize(
+      Math.max(1, Math.floor(viewport.width * dpr)),
+      Math.max(1, Math.floor(viewport.height * dpr))
+    );
+  }, [rt, viewport.width, viewport.height, dpr]);
 
   useEffect(() => {
     if (!tex) return;
@@ -96,40 +107,65 @@ export default function FogParticles({
     tex.needsUpdate = true;
   }, [tex, gl]);
 
-  // Update depth mesh to mirror occluder (e.g., Terrain)
-  useFrame(() => {
-    if (!occluder || !rt) return;
-    const dm = depthMeshRef.current;
-    if (!dm) return;
-    // Mirror transform and geometry
-    dm.geometry = occluder.geometry;
-    dm.position.copy(occluder.position);
-    dm.quaternion.copy(occluder.quaternion);
-    dm.scale.copy(occluder.scale);
-    dm.updateMatrixWorld();
-    // Render into depth RT
-    const prevTarget = gl.getRenderTarget();
-    gl.setRenderTarget(rt);
-    gl.clearDepth();
-    gl.clear(true, true, true);
-    gl.render(depthScene, camera);
-    gl.setRenderTarget(prevTarget);
-  }, 0);
+  // Combined depth prepass + rotation + drift
+  useFrame((state, dt) => {
+    // --- depth prepass: only layer 4 (Terrain + Cabin + Man + Cat) ---
+    if (rt) {
+      depthCam.position.copy(camera.position);
+      depthCam.quaternion.copy(camera.quaternion);
+      depthCam.fov = camera.fov;
+      depthCam.aspect = camera.aspect;
+      depthCam.near = camera.near;
+      depthCam.far = camera.far;
+      depthCam.updateProjectionMatrix();
 
-  // Rotate particles around their local Z axis (twist) only
-  useFrame((_, dt) => {
+      depthCam.layers.disableAll?.();
+      depthCam.layers.enable(4);
+
+      const prevOverride = scene.overrideMaterial;
+      const prevTarget = gl.getRenderTarget();
+      const prevAutoClear = gl.autoClear;
+
+      scene.overrideMaterial = depthMat;
+      gl.autoClear = true;
+      gl.setRenderTarget(rt);
+      gl.clear(true, true, true);
+      gl.render(scene, depthCam);
+      gl.setRenderTarget(prevTarget);
+
+      scene.overrideMaterial = prevOverride;
+      gl.autoClear = prevAutoClear;
+    }
+
+    // --- rotation & drift (existing logic) ---
     angleRef.current += rotationSpeedZ * dt;
     const angle = angleRef.current;
-    // Billboard meshes (shader quads)
-    meshRefs.current.forEach((m) => {
-      if (m) m.rotation.z = angle;
-    });
-    // Sprite fallback (rotate material texture)
-    spriteRefs.current.forEach((s) => {
-      if (!s) return;
-      const mat = s.material;
-      if (mat) mat.rotation = angle;
-    });
+    meshRefs.current.forEach((m) => m && (m.rotation.z = angle));
+    spriteRefs.current.forEach(
+      (s) => s?.material && (s.material.rotation = angle)
+    );
+
+    const t = state.clock.getElapsedTime();
+    const n = basePositionsRef.current.length;
+    for (let i = 0; i < n; i++) {
+      const base = basePositionsRef.current[i];
+      if (!base) continue;
+      const seed = motionSeeds[i] || motionSeeds[0];
+      const dx =
+        Math.sin(t * driftSpeed * seed.freqX + seed.phaseX) * driftAmp +
+        windX * t;
+      const dz =
+        Math.cos(t * driftSpeed * seed.freqZ + seed.phaseZ) * driftAmp +
+        windZ * t;
+      const dy =
+        Math.sin(t * driftSpeed * seed.freqY + seed.phaseY) * driftAmpY;
+      const x = base[0] + dx;
+      const y = base[1] + dy;
+      const z = base[2] + dz;
+      if (spriteRefs.current[i]) spriteRefs.current[i].position.set(x, y, z);
+      if (billboardRefs.current[i])
+        billboardRefs.current[i].position.set(x, y, z);
+    }
   });
 
   // Stable small offsets so all sprites aren't perfectly overlapping
@@ -155,6 +191,33 @@ export default function FogParticles({
     }
     return offsets;
   }, [positions, offsets]);
+
+  // New: base anchors and motion seeds per instance
+  const basePositionsRef = useRef([]);
+  useEffect(() => {
+    basePositionsRef.current = instances.map((it) => [
+      it.position[0],
+      it.position[1],
+      it.position[2],
+    ]);
+  }, [instances]);
+
+  const motionSeeds = useMemo(() => {
+    const rnd = (s) => {
+      const x = Math.sin(s * 12.9898) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    return new Array(instances.length).fill(0).map((_, i) => ({
+      phaseX: rnd(i + 10.1) * Math.PI * 2.0,
+      phaseZ: rnd(i + 20.2) * Math.PI * 2.0,
+      phaseY: rnd(i + 30.3) * Math.PI * 2.0,
+      freqX: 0.8 + rnd(i + 40.4) * 0.6,
+      freqZ: 0.7 + rnd(i + 50.5) * 0.6,
+      freqY: 1.0 + rnd(i + 60.6) * 0.8,
+    }));
+  }, [instances.length]);
+
+  // (Removed separate rotation+drift useFrame; merged above)
 
   // Soft-particle shader (billboarded quads)
   const vertexShader = /* glsl */ `
@@ -204,8 +267,8 @@ export default function FogParticles({
     }
   `;
 
-  // If depth RT missing or occluder not available yet, fallback to sprites
-  const fallback = !rt || !occluder;
+  // If depth RT missing, fallback to sprites
+  const fallback = !rt;
 
   return (
     <group ref={groupRef} position={[0, 0, 0]}>
@@ -234,7 +297,12 @@ export default function FogParticles({
           );
         }
         return (
-          <Billboard key={i} position={pos} follow={true}>
+          <Billboard
+            key={i}
+            position={pos}
+            follow={true}
+            ref={(el) => (billboardRefs.current[i] = el)}
+          >
             <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial

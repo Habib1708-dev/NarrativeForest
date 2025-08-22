@@ -133,6 +133,16 @@ export default function Man() {
     console.groupEnd();
   }, [cloned]);
 
+  // Make the whole Man subtree visible to the fog depth pass (layer 4)
+  useEffect(() => {
+    if (!cloned) return;
+    const setLayersRecursive = (obj, layerIndex) => {
+      obj.layers.enable(layerIndex);
+      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
+    };
+    setLayersRecursive(cloned, 4);
+  }, [cloned]);
+
   // Log animation clips and tracks once
   useEffect(() => {
     if (!clips || clips.length === 0) {

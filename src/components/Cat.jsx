@@ -139,6 +139,16 @@ export default function Cat() {
     if (mixer) mixer.timeScale = 1;
   }, [mixer]);
 
+  // Make the whole Cat subtree visible to the fog depth pass (layer 4)
+  useEffect(() => {
+    if (!cloned) return;
+    const setLayersRecursive = (obj, layerIndex) => {
+      obj.layers.enable(layerIndex);
+      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
+    };
+    setLayersRecursive(cloned, 4);
+  }, [cloned]);
+
   if (!cloned) return null;
 
   const rotationY = THREE.MathUtils.degToRad(rotationYDeg || 0);

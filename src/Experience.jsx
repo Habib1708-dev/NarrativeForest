@@ -17,7 +17,7 @@ export default function Experience() {
   const starsRef = useRef(null);
   const starsWrapRef = useRef(null);
 
-  // ✅ One-time capture of the Terrain mesh to avoid setState loops
+  // One-time capture of the Terrain mesh to avoid setState loops
   const [terrainMesh, setTerrainMesh] = useState(null);
   const terrainCaptured = useRef(false);
   const handleTerrainRef = useCallback((m) => {

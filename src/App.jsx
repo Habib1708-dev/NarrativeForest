@@ -11,18 +11,6 @@ export default function App() {
       gl={{ antialias: true }}
       dpr={[1, 2]}
     >
-      {/* Keep if you need; otherwise remove to avoid double lights */}
-      <ambientLight intensity={0} />
-      <directionalLight
-        position={[5, 10, 5]}
-        intensity={3}
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-far={500}
-        shadow-camera-left={-150}
-        shadow-camera-right={150}
-        shadow-camera-top={150}
-        shadow-camera-bottom={-150}
-      />
       <Experience />
     </Canvas>
   );

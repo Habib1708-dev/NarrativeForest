@@ -37,6 +37,16 @@ export default function Cabin() {
     materialsRef.current = Array.from(mats.values());
   }, [clonedScene]);
 
+  // Put everything in layer 4 (recursively) for the fog depth pass
+  useEffect(() => {
+    if (!clonedScene) return;
+    const setLayersRecursive = (obj, layerIndex) => {
+      obj.layers.enable(layerIndex);
+      obj.children?.forEach((c) => setLayersRecursive(c, layerIndex));
+    };
+    setLayersRecursive(clonedScene, 4);
+  }, [clonedScene]);
+
   // Leva controls (use your provided defaults)
   const {
     positionX,
