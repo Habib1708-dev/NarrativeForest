@@ -251,7 +251,7 @@ export default function Experience() {
         <Cat />
 
         {/* Grid-based fog particle system */}
-        <FogParticleSystem terrainMesh={terrainMesh} cellSize={2} />
+        <FogParticleSystem terrainMesh={terrainMesh} cellSize={3} />
       </Suspense>
 
       <UnifiedForwardFog
