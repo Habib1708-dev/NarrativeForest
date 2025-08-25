@@ -8,7 +8,7 @@ import * as THREE from "three";
  * FogParticles
  * - Billboarded fog sprites using a soft fog texture.
  * - Depth prepass renders ONLY the provided `occluders` into an offscreen RT depthTexture.
- * - No reliance on scene-wide layers; we temporarily swap occluders to a scratch layer and restore.
+ * - Handles alpha-cutout foliage with a dedicated depth-only material (no real materials in prepass).
  */
 export default function FogParticles({
   count = 5,
@@ -60,14 +60,40 @@ export default function FogParticles({
   // Depth prepass target
   const [rt, setRt] = useState(null);
 
-  // Depth material (no unsupported flags)
-  const depthMat = useMemo(() => {
+  // Opaque override depth material
+  const depthMatOpaque = useMemo(() => {
     const m = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
     });
     m.blending = THREE.NoBlending;
+    m.depthWrite = true;
+    m.depthTest = true;
     return m;
   }, []);
+
+  // Cache of depth-only materials for cutout meshes (keyed by source material UUID)
+  const cutoutDepthCache = useRef(new Map());
+  const getCutoutDepthMat = (srcMat) => {
+    if (!srcMat) return depthMatOpaque;
+    let cached = cutoutDepthCache.current.get(srcMat.uuid);
+    if (cached) return cached;
+    const dm = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      map: srcMat.map || null,
+      alphaMap: srcMat.alphaMap || null,
+      skinning: !!srcMat.skinning,
+      morphTargets: !!srcMat.morphTargets,
+      morphNormals: !!srcMat.morphNormals,
+    });
+    dm.alphaTest = srcMat.alphaTest ?? 0;
+    dm.side = srcMat.side ?? THREE.FrontSide;
+    dm.transparent = false;
+    dm.depthWrite = true;
+    dm.depthTest = true;
+    dm.blending = THREE.NoBlending;
+    cutoutDepthCache.current.set(srcMat.uuid, dm);
+    return dm;
+  };
 
   // Create render target with depth texture
   useEffect(() => {
@@ -129,7 +155,23 @@ export default function FogParticles({
     stash.length = 0; // clear
   };
 
-  // Depth prepass (to RT) + simple rotation (run before your sky pass at -1)
+  // Detect alpha-tested (cutout) meshes
+  const isCutoutMesh = (node) => {
+    if (!node?.isMesh) return false;
+    const mats = Array.isArray(node.material) ? node.material : [node.material];
+    for (const m of mats) {
+      if (!m) continue;
+      if (
+        (typeof m.alphaTest === "number" && m.alphaTest > 0.0) ||
+        m.alphaMap
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Depth prepass (to RT) + rotation (run before your sky pass at -1)
   useFrame((state, dt) => {
     if (rt) {
       // Collect current occluder objects (ignore nulls)
@@ -139,7 +181,7 @@ export default function FogParticles({
         if (obj) occ.push(obj);
       }
 
-      // mirror main cam
+      // Mirror main cam
       depthCam.position.copy(camera.position);
       depthCam.quaternion.copy(camera.quaternion);
       depthCam.fov = camera.fov;
@@ -148,26 +190,54 @@ export default function FogParticles({
       depthCam.far = camera.far;
       depthCam.updateProjectionMatrix();
 
-      // Set the prepass camera to the scratch layer
+      // Prepass camera on scratch layer
       depthCam.layers.set(PREPASS_LAYER);
 
-      // Save scene state, isolate occluders, render, and restore
+      // Save scene state
       const prevOverride = scene.overrideMaterial;
       const prevTarget = gl.getRenderTarget();
-      const stash = [];
+      const layerStash = [];
 
       try {
-        // Move only the occluder subtrees to PREPASS_LAYER
-        for (let i = 0; i < occ.length; i++)
-          setSubtreeToLayer(occ[i], PREPASS_LAYER, stash);
+        // 0) Move occluders to prepass layer
+        for (let i = 0; i < occ.length; i++) {
+          setSubtreeToLayer(occ[i], PREPASS_LAYER, layerStash);
+        }
 
-        scene.overrideMaterial = depthMat;
+        // 1) Collect cutout meshes
+        const cutoutMeshes = [];
+        for (let i = 0; i < occ.length; i++) {
+          occ[i].traverse((node) => {
+            if (isCutoutMesh(node)) cutoutMeshes.push(node);
+          });
+        }
+
+        // 2) PASS OPAQUE — hide cutout so their quads never write depth
+        const visStash = [];
+        for (const n of cutoutMeshes) {
+          visStash.push([n, n.visible]);
+          n.visible = false;
+        }
+        scene.overrideMaterial = depthMatOpaque;
         gl.setRenderTarget(rt);
         gl.clear(true, true, true);
         gl.render(scene, depthCam);
+        for (const [n, v] of visStash) n.visible = v;
+
+        // 3) PASS CUTOUT — swap materials for depth-only versions
+        scene.overrideMaterial = null;
+        const matSwapStash = [];
+        for (const n of cutoutMeshes) {
+          const srcMats = Array.isArray(n.material) ? n.material : [n.material];
+          const newMats = srcMats.map((m) => getCutoutDepthMat(m));
+          matSwapStash.push([n, n.material]);
+          n.material = Array.isArray(n.material) ? newMats : newMats[0];
+        }
+        gl.render(scene, depthCam);
+        // Restore original materials
+        for (const [n, orig] of matSwapStash) n.material = orig;
       } finally {
-        // Restore everything we touched
-        restoreLayers(stash);
+        restoreLayers(layerStash);
         gl.setRenderTarget(prevTarget);
         scene.overrideMaterial = prevOverride;
       }

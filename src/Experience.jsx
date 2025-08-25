@@ -39,6 +39,7 @@ export default function Experience() {
   const [cabinObj, setCabinObj] = useState(null);
   const [manObj, setManObj] = useState(null);
   const [catObj, setCatObj] = useState(null);
+  const [forestObj, setForestObj] = useState(null);
 
   const handleCabinRef = useCallback((obj) => {
     if (obj) setCabinObj(obj);
@@ -48,6 +49,9 @@ export default function Experience() {
   }, []);
   const handleCatRef = useCallback((obj) => {
     if (obj) setCatObj(obj);
+  }, []);
+  const handleForestRef = useCallback((obj) => {
+    if (obj) setForestObj(obj);
   }, []);
 
   // --- two-camera layered background pass ---
@@ -197,8 +201,8 @@ export default function Experience() {
 
   // Build occluder list once each ref is available
   const occluders = useMemo(
-    () => [terrainMesh, cabinObj, manObj, catObj].filter(Boolean),
-    [terrainMesh, cabinObj, manObj, catObj]
+    () => [terrainMesh, cabinObj, manObj, catObj, forestObj].filter(Boolean),
+    [terrainMesh, cabinObj, manObj, catObj, forestObj]
   );
 
   return (
@@ -273,7 +277,7 @@ export default function Experience() {
         <Terrain ref={handleTerrainRef} />
 
         {/* Scene actors */}
-        <Forest terrainMesh={terrainMesh} />
+        <Forest ref={handleForestRef} terrainMesh={terrainMesh} />
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
@@ -302,8 +306,6 @@ export default function Experience() {
         skyRadius={fSkyRadius}
         layer={1}
       />
-
-      <TestTree />
     </>
   );
 }

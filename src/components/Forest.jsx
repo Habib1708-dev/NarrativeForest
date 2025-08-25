@@ -1,11 +1,11 @@
-import React, { useMemo, useEffect, useRef, useState } from "react";
+import React, { useMemo, useEffect, useRef, useState, forwardRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 
-export default function Forest({ terrainMesh }) {
+const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   // ---------------------------
   // Controls
   // ---------------------------
@@ -54,9 +54,9 @@ export default function Forest({ terrainMesh }) {
   });
 
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
-    tintColor: { value: "#405a3c", label: "Tint Color" },
+    tintColor: { value: "#000000ff", label: "Tint Color" },
     tintIntensity: {
-      value: 0.25,
+      value: 1.0,
       min: 0,
       max: 1,
       step: 0.01,
@@ -96,19 +96,13 @@ export default function Forest({ terrainMesh }) {
   // ---------------------------
   // Assets
   // ---------------------------
-  // High LOD (Spruce1)
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
-
-  // Low LOD (Spruce1_LOD) — your Windows path maps to /public
-  // C:\Users\3liha\Desktop\narrative-forest\public\models\tree\Spruce_Fir\Spruce1_LOD.glb
   const lowParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
-
   const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 
   // ---------------------------
   // Materials tint
   // ---------------------------
-  // Trees
   useEffect(() => {
     const target = new THREE.Color(tintColor);
     const tint = (parts) => {
@@ -127,7 +121,6 @@ export default function Forest({ terrainMesh }) {
     if (lowParts.length) tint(lowParts);
   }, [highParts, lowParts, tintColor, tintIntensity]);
 
-  // Rocks
   useEffect(() => {
     const target = new THREE.Color(rockTintColor);
     rockParts.forEach((p) => {
@@ -149,7 +142,6 @@ export default function Forest({ terrainMesh }) {
   const treeRng = useMemo(() => mulberry32((seed ^ RNG_A) >>> 0), [seed]);
   const rockRng = useMemo(() => mulberry32((seed ^ (RNG_A * 2)) >>> 0), [seed]);
 
-  // Keep a small exclusion for the cabin
   const CABIN_X = -1.8,
     CABIN_Z = -2.7,
     CABIN_HALF = 0.3;
@@ -191,7 +183,6 @@ export default function Forest({ terrainMesh }) {
     return { add, canPlace };
   };
 
-  // Base Y of tree (baked bbox)
   const treeBaseMinY = useMemo(() => {
     const parts = highParts.length ? highParts : lowParts;
     let minY = 0;
@@ -240,7 +231,7 @@ export default function Forest({ terrainMesh }) {
       if (insideCabinXZ(x, z)) continue;
 
       const sMin = 0.02,
-        sMax = 0.035;
+        sMax = 0.035; // your adjusted range
       const scale = sMin + treeRng() * (sMax - sMin);
       const footprint = radiusPerScale * scale;
       if (!index.canPlace(x, z, footprint)) continue;
@@ -270,9 +261,7 @@ export default function Forest({ terrainMesh }) {
 
     if (attempts >= maxAttempts && placed < count) {
       if (process.env.NODE_ENV !== "production") {
-        console.warn(
-          `[Forest] Tree placement saturated: ${placed}/${count}. Increase plantRadius or decrease count.`
-        );
+        console.warn(`[Forest] Tree placement saturated: ${placed}/${count}.`);
       }
     }
     return arr;
@@ -300,9 +289,8 @@ export default function Forest({ terrainMesh }) {
 
     const index = makeHasher(0.2);
     const TREE_RADIUS = 0.18;
-    for (const t of treeTransforms) {
+    for (const t of treeTransforms)
       index.add(t.position[0], t.position[2], TREE_RADIUS);
-    }
 
     const bottomByPart = rockParts.map((rp) => {
       const bb = rp.geometry.boundingBox || null;
@@ -349,7 +337,7 @@ export default function Forest({ terrainMesh }) {
       const sink = 0.4 * scale;
       y += bottomAlign - sink;
 
-      const rotX = (rockRng() - 0.5) * 0.2; // small tilt
+      const rotX = (rockRng() - 0.5) * 0.2;
       const rotY = rockRng() * Math.PI * 2;
 
       arr.push({ position: [x, y, z], rotation: [rotX, rotY], scale, pick });
@@ -451,7 +439,6 @@ export default function Forest({ terrainMesh }) {
     return next;
   };
 
-  // Precompute initial modes before first paint
   const initialModes = useMemo(() => {
     const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     return computeChunkModes(chunks, camXZ);
@@ -463,7 +450,6 @@ export default function Forest({ terrainMesh }) {
     lastCam.current.set(camera.position.x, 0, camera.position.z);
   }, [initialModes, camera.position.x, camera.position.z]);
 
-  // Update modes when camera moves far enough
   useFrame(() => {
     cam2.current.set(camera.position.x, 0, camera.position.z);
     const dx = cam2.current.x - lastCam.current.x;
@@ -491,7 +477,7 @@ export default function Forest({ terrainMesh }) {
   if (!highParts.length || !lowParts.length || !rockParts.length) return null;
 
   return (
-    <group>
+    <group ref={ref}>
       {chunks.map((chunk) => (
         <ChunkInstanced
           key={chunk.key}
@@ -505,8 +491,13 @@ export default function Forest({ terrainMesh }) {
       ))}
     </group>
   );
-}
+}); // <-- close forwardRef!
 
+export default Forest;
+
+// ---------------------------
+// Child component
+// ---------------------------
 function ChunkInstanced({
   mode,
   treeTransforms,
@@ -521,7 +512,6 @@ function ChunkInstanced({
   const treeMedRefs = useRef(treeMedParts.map(() => React.createRef()));
   const rockRefs = useRef(rockParts.map(() => React.createRef()));
 
-  // Trees matrices (yaw only)
   const treeMatrices = useMemo(() => {
     const list = new Array(treeTransforms.length);
     const m4 = new THREE.Matrix4();
@@ -538,7 +528,6 @@ function ChunkInstanced({
     return list;
   }, [treeTransforms]);
 
-  // Rocks matrices PER PART (rotX + rotY)
   const rockMatricesByPart = useMemo(() => {
     const lists = rockParts.map(() => []);
     if (!rockTransforms.length || !rockParts.length) return lists;
@@ -563,7 +552,6 @@ function ChunkInstanced({
     return lists;
   }, [rockTransforms, rockParts]);
 
-  // Upload matrices once
   useEffect(() => {
     [treeHighRefs.current, treeMedRefs.current, rockRefs.current].forEach(
       (arr) =>
@@ -576,7 +564,6 @@ function ChunkInstanced({
         })
     );
 
-    // Trees high
     treeHighRefs.current.forEach((r) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -586,7 +573,6 @@ function ChunkInstanced({
       mesh.instanceMatrix.needsUpdate = true;
     });
 
-    // Trees med
     treeMedRefs.current.forEach((r) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -596,7 +582,6 @@ function ChunkInstanced({
       mesh.instanceMatrix.needsUpdate = true;
     });
 
-    // Rocks (per part)
     rockRefs.current.forEach((r, iPart) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -607,7 +592,6 @@ function ChunkInstanced({
     });
   }, [treeMatrices, rockMatricesByPart]);
 
-  // Flip counts per LOD mode
   useEffect(() => {
     const setCount = (refs, n) =>
       refs.forEach((ref) => ref.current && (ref.current.count = n));
@@ -615,7 +599,6 @@ function ChunkInstanced({
     if (mode === "high") {
       setCount(treeHighRefs.current, treeMatrices.length);
       setCount(treeMedRefs.current, 0);
-      // rocks only in high
       rockRefs.current.forEach((ref, iPart) => {
         if (ref.current)
           ref.current.count = rockMatricesByPart[iPart]?.length || 0;
@@ -633,7 +616,6 @@ function ChunkInstanced({
 
   return (
     <group>
-      {/* Trees: High LOD */}
       {treeHighParts.map((p, i) => (
         <instancedMesh
           key={`th-${i}`}
@@ -645,7 +627,6 @@ function ChunkInstanced({
         />
       ))}
 
-      {/* Trees: Low/Med LOD */}
       {treeMedParts.map((p, i) => (
         <instancedMesh
           key={`tm-${i}`}
@@ -657,7 +638,6 @@ function ChunkInstanced({
         />
       ))}
 
-      {/* Rocks */}
       {rockParts.map((p, i) => {
         const cap = rockMatricesByPart[i]?.length || 1;
         return (
