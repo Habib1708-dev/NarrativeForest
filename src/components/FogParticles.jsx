@@ -5,15 +5,13 @@ import { useControls } from "leva";
 import * as THREE from "three";
 
 /**
- * FogParticles
- * - Billboarded fog sprites using a soft fog texture.
- * - Depth prepass renders ONLY the provided `occluders` into an offscreen RT depthTexture.
- * - Handles alpha-cutout foliage with a dedicated depth-only material (no real materials in prepass).
+ * FogParticles — soft-particle billboards with a two-pass depth prepass.
+ * Resize-safe: uniforms are stable objects; we only update their .value.
  */
 export default function FogParticles({
   count = 5,
   positions = null,
-  occluders = [], // Array of Object3D or React refs to Object3D
+  occluders = [],
 }) {
   // Controls
   const {
@@ -53,14 +51,53 @@ export default function FogParticles({
     groupRef.current?.traverse?.((o) => o.layers.set(0));
   }, []);
 
-  // Standalone camera for the offscreen depth prepass
+  // Prepass camera
   const depthCam = useMemo(() => new THREE.PerspectiveCamera(), []);
-  const PREPASS_LAYER = 7; // scratch layer used only inside the prepass
+  const PREPASS_LAYER = 7;
 
-  // Depth prepass target
+  // ---- Render target + uniforms (RESIZE-SAFE) ----
   const [rt, setRt] = useState(null);
 
-  // Opaque override depth material
+  // Stable uniform objects; we mutate their .value on changes
+  const uResolution = useRef(new THREE.Vector2(1, 1));
+  const uDepthTex = useRef({ value: null });
+
+  // Create / recreate RT when size or DPR changes
+  useEffect(() => {
+    const w = Math.max(1, Math.floor(viewport.width * dpr));
+    const h = Math.max(1, Math.floor(viewport.height * dpr));
+
+    const depthTexture = new THREE.DepthTexture(w, h);
+    depthTexture.type = gl.capabilities.isWebGL2
+      ? THREE.UnsignedIntType
+      : THREE.UnsignedShortType;
+    depthTexture.format = THREE.DepthFormat;
+
+    const target = new THREE.WebGLRenderTarget(w, h, {
+      depthTexture,
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
+    target.texture.minFilter = THREE.LinearFilter;
+    target.texture.magFilter = THREE.LinearFilter;
+    target.texture.generateMipmaps = false;
+
+    // Point uniforms to the NEW resources
+    uResolution.current.set(w, h);
+    uDepthTex.current.value = depthTexture;
+
+    setRt(target);
+
+    return () => {
+      target.dispose();
+      depthTexture.dispose?.();
+      if (uDepthTex.current.value === depthTexture) {
+        uDepthTex.current.value = null;
+      }
+    };
+  }, [gl, viewport.width, viewport.height, dpr]);
+
+  // Depth material (opaque override)
   const depthMatOpaque = useMemo(() => {
     const m = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
@@ -71,7 +108,7 @@ export default function FogParticles({
     return m;
   }, []);
 
-  // Cache of depth-only materials for cutout meshes (keyed by source material UUID)
+  // Cache of depth-only materials for alpha-cut meshes
   const cutoutDepthCache = useRef(new Map());
   const getCutoutDepthMat = (srcMat) => {
     if (!srcMat) return depthMatOpaque;
@@ -95,41 +132,6 @@ export default function FogParticles({
     return dm;
   };
 
-  // Create render target with depth texture
-  useEffect(() => {
-    const w = Math.max(1, Math.floor(viewport.width * dpr));
-    const h = Math.max(1, Math.floor(viewport.height * dpr));
-    const depthTexture = new THREE.DepthTexture(w, h);
-    depthTexture.type = gl.capabilities.isWebGL2
-      ? THREE.UnsignedIntType
-      : THREE.UnsignedShortType;
-    depthTexture.format = THREE.DepthFormat;
-
-    const target = new THREE.WebGLRenderTarget(w, h, {
-      depthTexture,
-      depthBuffer: true,
-      stencilBuffer: false,
-    });
-    target.texture.minFilter = THREE.LinearFilter;
-    target.texture.magFilter = THREE.LinearFilter;
-    target.texture.generateMipmaps = false;
-
-    setRt(target);
-    return () => {
-      target.dispose();
-      depthTexture.dispose?.();
-    };
-  }, [gl, viewport.width, viewport.height, dpr]);
-
-  // Keep RT size in sync with canvas size
-  useEffect(() => {
-    if (!rt) return;
-    rt.setSize(
-      Math.max(1, Math.floor(viewport.width * dpr)),
-      Math.max(1, Math.floor(viewport.height * dpr))
-    );
-  }, [rt, viewport.width, viewport.height, dpr]);
-
   // Texture setup
   useEffect(() => {
     if (!tex) return;
@@ -139,7 +141,7 @@ export default function FogParticles({
     tex.needsUpdate = true;
   }, [tex, gl]);
 
-  // Helpers to isolate occluders into a scratch layer and restore
+  // Helpers (layers)
   const getObject = (o) => (o && o.isObject3D ? o : o?.current || null);
   const setSubtreeToLayer = (root, layer, stash) => {
     root.traverse((node) => {
@@ -152,10 +154,9 @@ export default function FogParticles({
       const [node, mask] = stash[i];
       node.layers.mask = mask;
     }
-    stash.length = 0; // clear
+    stash.length = 0;
   };
 
-  // Detect alpha-tested (cutout) meshes
   const isCutoutMesh = (node) => {
     if (!node?.isMesh) return false;
     const mats = Array.isArray(node.material) ? node.material : [node.material];
@@ -171,17 +172,17 @@ export default function FogParticles({
     return false;
   };
 
-  // Depth prepass (to RT) + rotation (run before your sky pass at -1)
-  useFrame((state, dt) => {
+  // Prepass + billboard rotation
+  useFrame((_, dt) => {
     if (rt) {
-      // Collect current occluder objects (ignore nulls)
+      // Collect occluders
       const occ = [];
       for (let i = 0; i < occluders.length; i++) {
         const obj = getObject(occluders[i]);
         if (obj) occ.push(obj);
       }
 
-      // Mirror main cam
+      // Mirror world camera
       depthCam.position.copy(camera.position);
       depthCam.quaternion.copy(camera.quaternion);
       depthCam.fov = camera.fov;
@@ -189,22 +190,18 @@ export default function FogParticles({
       depthCam.near = camera.near;
       depthCam.far = camera.far;
       depthCam.updateProjectionMatrix();
-
-      // Prepass camera on scratch layer
       depthCam.layers.set(PREPASS_LAYER);
 
-      // Save scene state
       const prevOverride = scene.overrideMaterial;
       const prevTarget = gl.getRenderTarget();
       const layerStash = [];
 
       try {
-        // 0) Move occluders to prepass layer
         for (let i = 0; i < occ.length; i++) {
           setSubtreeToLayer(occ[i], PREPASS_LAYER, layerStash);
         }
 
-        // 1) Collect cutout meshes
+        // Collect cutouts
         const cutoutMeshes = [];
         for (let i = 0; i < occ.length; i++) {
           occ[i].traverse((node) => {
@@ -212,7 +209,7 @@ export default function FogParticles({
           });
         }
 
-        // 2) PASS OPAQUE — hide cutout so their quads never write depth
+        // PASS 1: opaque (hide cutouts)
         const visStash = [];
         for (const n of cutoutMeshes) {
           visStash.push([n, n.visible]);
@@ -224,7 +221,7 @@ export default function FogParticles({
         gl.render(scene, depthCam);
         for (const [n, v] of visStash) n.visible = v;
 
-        // 3) PASS CUTOUT — swap materials for depth-only versions
+        // PASS 2: cutout (swap to depth-only mats)
         scene.overrideMaterial = null;
         const matSwapStash = [];
         for (const n of cutoutMeshes) {
@@ -234,12 +231,12 @@ export default function FogParticles({
           n.material = Array.isArray(n.material) ? newMats : newMats[0];
         }
         gl.render(scene, depthCam);
-        // Restore original materials
         for (const [n, orig] of matSwapStash) n.material = orig;
       } finally {
         restoreLayers(layerStash);
-        gl.setRenderTarget(prevTarget);
-        scene.overrideMaterial = prevOverride;
+        // Restore framebuffer safely (avoid stale target after resize)
+        gl.setRenderTarget(prevTarget || null);
+        scene.overrideMaterial = prevOverride || null;
       }
     }
 
@@ -252,7 +249,7 @@ export default function FogParticles({
     );
   }, -2);
 
-  // Stable local offsets if positions aren’t passed
+  // Instance positions
   const offsets = useMemo(() => {
     const rnd = (s) => {
       const x = Math.sin(s * 12.9898) * 43758.5453;
@@ -274,7 +271,7 @@ export default function FogParticles({
     return offsets;
   }, [positions, offsets]);
 
-  // Soft-particle shader (billboarded quads)
+  // Shaders
   const vertexShader = /* glsl */ `
     varying vec2 vUv;
     void main() {
@@ -326,8 +323,9 @@ export default function FogParticles({
   return (
     <group ref={groupRef} position={[0, 0, 0]}>
       {instances.map(({ position, scaleJitter }, i) => {
-        const s = size * scaleJitter;
+        const s = scaleFalloffWithSize ? size * scaleJitter : size;
         const pos = [position[0], position[1], position[2]];
+
         if (fallback) {
           return (
             <sprite
@@ -349,6 +347,7 @@ export default function FogParticles({
             </sprite>
           );
         }
+
         return (
           <Billboard
             key={i}
@@ -359,9 +358,6 @@ export default function FogParticles({
             <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
               <planeGeometry args={[1, 1, 1, 1]} />
               <shaderMaterial
-                key={`fogMat-${Math.floor(viewport.width * dpr)}x${Math.floor(
-                  viewport.height * dpr
-                )}`}
                 transparent
                 depthWrite={false}
                 depthTest={true}
@@ -370,13 +366,8 @@ export default function FogParticles({
                 fragmentShader={fragmentShader}
                 uniforms={{
                   map: { value: tex },
-                  depthTex: { value: rt.depthTexture },
-                  resolution: {
-                    value: new THREE.Vector2(
-                      Math.floor(viewport.width * dpr),
-                      Math.floor(viewport.height * dpr)
-                    ),
-                  },
+                  depthTex: uDepthTex.current, // stays valid; .value updates
+                  resolution: { value: uResolution.current }, // same object; values update
                   opacity: { value: opacity },
                   near: { value: camera.near },
                   far: { value: camera.far },
