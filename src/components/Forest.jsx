@@ -18,10 +18,13 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     midRadius,
     viewRadius,
     plantRadius,
+    treeCabinBaseHalf, // base half-size for trees (per axis)
+    treeCabinPadFactor, // multiply tree footprint by this
+    treeCabinPadMax, // clamp the extra pad
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
-    seed: { value: 1, min: 0, max: 100, step: 1 },
-    count: { value: 1000, min: 10, max: 20000, step: 10, label: "Tree Count" },
+    seed: { value: 2, min: 0, max: 100, step: 1 },
+    count: { value: 1200, min: 10, max: 20000, step: 10, label: "Tree Count" },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 0.2,
@@ -51,6 +54,27 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       step: 1,
       label: "Plant radius (m)",
     },
+    treeCabinBaseHalf: {
+      value: 0.48,
+      min: 0.3,
+      max: 0.8,
+      step: 0.01,
+      label: "Tree base half (m)",
+    },
+    treeCabinPadFactor: {
+      value: 0.1,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Tree pad factor × footprint",
+    },
+    treeCabinPadMax: {
+      value: 0.25,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Tree pad max (m)",
+    },
   });
 
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
@@ -67,16 +91,16 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const { rockCount, rockScaleMin, rockScaleMax } = useControls("Rocks", {
     rockCount: { value: 1000, min: 0, max: 10000, step: 10, label: "Count" },
     rockScaleMin: {
-      value: 0.03,
+      value: 3.0,
       min: 0.03,
-      max: 0.11,
+      max: 4,
       step: 0.001,
       label: "Scale Min",
     },
     rockScaleMax: {
-      value: 0.101,
+      value: 4.0,
       min: 0.03,
-      max: 0.11,
+      max: 6,
       step: 0.001,
       label: "Scale Max",
     },
@@ -85,7 +109,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const { rockTintColor, rockTintIntensity } = useControls("Rock Tint", {
     rockTintColor: { value: "#444444", label: "Tint Color" },
     rockTintIntensity: {
-      value: 0.5,
+      value: 1.0,
       min: 0,
       max: 1,
       step: 0.01,
@@ -142,14 +166,30 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const treeRng = useMemo(() => mulberry32((seed ^ RNG_A) >>> 0), [seed]);
   const rockRng = useMemo(() => mulberry32((seed ^ (RNG_A * 2)) >>> 0), [seed]);
 
-  const CABIN_X = -1.8,
-    CABIN_Z = -2.7,
-    CABIN_HALF = 0.3;
-  const insideCabinXZ = (x, z) =>
-    x >= CABIN_X - CABIN_HALF &&
-    x <= CABIN_X + CABIN_HALF &&
-    z >= CABIN_Z - CABIN_HALF &&
-    z <= CABIN_Z + CABIN_HALF;
+  // Cabin center
+  const CABIN_X = -1.8;
+  const CABIN_Z = -2.7;
+
+  // Rocks use the bigger doubled box:
+  const CABIN_HALF_X = 0.6;
+  const CABIN_HALF_Z = 0.6;
+
+  // Trees use a smaller base box (tunable via Leva):
+  const TREE_HALF_X = treeCabinBaseHalf;
+  const TREE_HALF_Z = treeCabinBaseHalf;
+
+  // Generic AABB test with optional padding
+  const insideAABB = (x, z, cx, cz, hx, hz, pad = 0) =>
+    x >= cx - (hx + pad) &&
+    x <= cx + (hx + pad) &&
+    z >= cz - (hz + pad) &&
+    z <= cz + (hz + pad);
+
+  // Type-specific helpers
+  const insideCabinTrees = (x, z, pad = 0) =>
+    insideAABB(x, z, CABIN_X, CABIN_Z, TREE_HALF_X, TREE_HALF_Z, pad);
+  const insideCabinRocks = (x, z, pad = 0) =>
+    insideAABB(x, z, CABIN_X, CABIN_Z, CABIN_HALF_X, CABIN_HALF_Z, pad);
 
   const makeHasher = (cellSize) => {
     const map = new Map();
@@ -228,12 +268,14 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      if (insideCabinXZ(x, z)) continue;
-
       const sMin = 0.02,
-        sMax = 0.035; // your adjusted range
+        sMax = 0.037;
       const scale = sMin + treeRng() * (sMax - sMin);
       const footprint = radiusPerScale * scale;
+
+      // NEW: much smaller pad near the cabin
+      const treePad = Math.min(treeCabinPadMax, footprint * treeCabinPadFactor);
+      if (insideCabinTrees(x, z, treePad)) continue;
       if (!index.canPlace(x, z, footprint)) continue;
 
       origin.set(x, originY, z);
@@ -313,13 +355,14 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
 
       const r = Math.sqrt(rockRng()) * R;
       const theta = rockRng() * Math.PI * 2;
+      // ... inside the while(rock) loop:
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      if (insideCabinXZ(x, z)) continue;
-
       const scale = sMin + rockRng() * (sMax - sMin);
       const ROCK_RADIUS = 0.12 * (scale / Math.max(0.001, sMax));
+
+      if (insideCabinRocks(x, z, ROCK_RADIUS)) continue;
       if (!index.canPlace(x, z, ROCK_RADIUS)) continue;
 
       origin.set(x, originY, z);
