@@ -273,7 +273,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const scale = sMin + treeRng() * (sMax - sMin);
       const footprint = radiusPerScale * scale;
 
-      // NEW: much smaller pad near the cabin
       const treePad = Math.min(treeCabinPadMax, footprint * treeCabinPadFactor);
       if (insideCabinTrees(x, z, treePad)) continue;
       if (!index.canPlace(x, z, footprint)) continue;
@@ -355,7 +354,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
 
       const r = Math.sqrt(rockRng()) * R;
       const theta = rockRng() * Math.PI * 2;
-      // ... inside the while(rock) loop:
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
@@ -454,14 +452,15 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const [chunkModes, setChunkModes] = useState({});
   const modesRef = useRef(chunkModes);
   const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9));
-  const cam2 = useRef(new THREE.Vector3());
+  const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
+  const camXZ = useRef(new THREE.Vector3());
   const moveThreshold = Math.max(0.5, chunkSize * 0.5);
 
   useEffect(() => {
     modesRef.current = chunkModes;
   }, [chunkModes]);
 
-  const computeChunkModes = (chunksArr, camXZ) => {
+  const computeChunkModes = (chunksArr, cam) => {
     const rNear = Math.max(0.01, nearRadius);
     const rMid = Math.max(rNear + 0.001, midRadius);
     const rView = Math.max(rMid + 0.001, viewRadius);
@@ -473,7 +472,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
 
     const next = {};
     for (const c of chunksArr) {
-      const dist = c.center.distanceTo(camXZ);
+      const dist = c.center.distanceTo(cam);
       if (dist > viewWorld + halfDiag) next[c.key] = "off";
       else if (dist <= nearWorld + halfDiag) next[c.key] = "high";
       else if (dist <= midWorld + halfDiag) next[c.key] = "med";
@@ -482,38 +481,61 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     return next;
   };
 
-  const initialModes = useMemo(() => {
-    const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
-    return computeChunkModes(chunks, camXZ);
-  }, [camera, chunks, chunkSize, nearRadius, midRadius, viewRadius]);
-
+  // Initialize modes when chunks/knobs change (NOT on camera move)
   useEffect(() => {
-    setChunkModes(initialModes);
-    modesRef.current = initialModes;
-    lastCam.current.set(camera.position.x, 0, camera.position.z);
-  }, [initialModes, camera.position.x, camera.position.z]);
+    const effSize = terrainMesh?.getTerrainSize?.() ?? size;
+    const cam = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+    const next = computeChunkModes(chunks, cam);
+    setChunkModes(next);
+    modesRef.current = next;
+    lastCam.current.copy(cam);
+    lastCellRef.current = {
+      cx: Math.floor((cam.x + effSize * 0.5) / chunkSize),
+      cz: Math.floor((cam.z + effSize * 0.5) / chunkSize),
+    };
+  }, [chunks, chunkSize, nearRadius, midRadius, viewRadius, terrainMesh, size, camera.position.x, camera.position.z]);
 
+  // Recompute on cell changes or sufficient distance
   useFrame(() => {
-    cam2.current.set(camera.position.x, 0, camera.position.z);
-    const dx = cam2.current.x - lastCam.current.x;
-    const dz = cam2.current.z - lastCam.current.z;
-    if (dx * dx + dz * dz < moveThreshold * moveThreshold) return;
-    lastCam.current.copy(cam2.current);
+    if (!chunks.length) return;
 
-    const next = computeChunkModes(chunks, cam2.current);
-    const curr = modesRef.current;
+    const effSize = terrainMesh?.getTerrainSize?.() ?? size;
+    camXZ.current.set(camera.position.x, 0, camera.position.z);
 
-    let changed = Object.keys(next).length !== Object.keys(curr).length;
-    if (!changed)
-      for (const k in next)
-        if (curr[k] !== next[k]) {
-          changed = true;
-          break;
-        }
+    const cx = Math.floor((camXZ.current.x + effSize * 0.5) / chunkSize);
+    const cz = Math.floor((camXZ.current.z + effSize * 0.5) / chunkSize);
 
-    if (changed) {
+    // If we entered a new cell, recompute immediately
+    if (cx !== lastCellRef.current.cx || cz !== lastCellRef.current.cz) {
+      lastCellRef.current = { cx, cz };
+      const next = computeChunkModes(chunks, camXZ.current);
       setChunkModes(next);
       modesRef.current = next;
+      lastCam.current.copy(camXZ.current);
+      return;
+    }
+
+    // Otherwise, update on larger translations (keeps behavior smooth)
+    const dx = camXZ.current.x - lastCam.current.x;
+    const dz = camXZ.current.z - lastCam.current.z;
+    if (dx * dx + dz * dz >= moveThreshold * moveThreshold) {
+      lastCam.current.copy(camXZ.current);
+      const next = computeChunkModes(chunks, camXZ.current);
+      const curr = modesRef.current;
+
+      let changed = Object.keys(next).length !== Object.keys(curr).length;
+      if (!changed) {
+        for (const k in next) {
+          if (curr[k] !== next[k]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) {
+        setChunkModes(next);
+        modesRef.current = next;
+      }
     }
   });
 
@@ -595,6 +617,7 @@ function ChunkInstanced({
     return lists;
   }, [rockTransforms, rockParts]);
 
+  // Upload matrices once
   useEffect(() => {
     [treeHighRefs.current, treeMedRefs.current, rockRefs.current].forEach(
       (arr) =>
@@ -607,6 +630,7 @@ function ChunkInstanced({
         })
     );
 
+    // Trees high
     treeHighRefs.current.forEach((r) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -616,6 +640,7 @@ function ChunkInstanced({
       mesh.instanceMatrix.needsUpdate = true;
     });
 
+    // Trees low/med
     treeMedRefs.current.forEach((r) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -625,6 +650,7 @@ function ChunkInstanced({
       mesh.instanceMatrix.needsUpdate = true;
     });
 
+    // Rocks (per part)
     rockRefs.current.forEach((r, iPart) => {
       const mesh = r.current;
       if (!mesh) return;
@@ -635,16 +661,26 @@ function ChunkInstanced({
     });
   }, [treeMatrices, rockMatricesByPart]);
 
+  // Flip counts per LOD mode (+force buffer update)
   useEffect(() => {
     const setCount = (refs, n) =>
-      refs.forEach((ref) => ref.current && (ref.current.count = n));
+      refs.forEach((ref) => {
+        const m = ref.current;
+        if (m) {
+          m.count = n;
+          m.instanceMatrix.needsUpdate = true;
+        }
+      });
 
     if (mode === "high") {
       setCount(treeHighRefs.current, treeMatrices.length);
       setCount(treeMedRefs.current, 0);
       rockRefs.current.forEach((ref, iPart) => {
-        if (ref.current)
-          ref.current.count = rockMatricesByPart[iPart]?.length || 0;
+        const m = ref.current;
+        if (m) {
+          m.count = rockMatricesByPart[iPart]?.length || 0;
+          m.instanceMatrix.needsUpdate = true;
+        }
       });
     } else if (mode === "med") {
       setCount(treeHighRefs.current, 0);
@@ -659,6 +695,7 @@ function ChunkInstanced({
 
   return (
     <group>
+      {/* Trees: High LOD */}
       {treeHighParts.map((p, i) => (
         <instancedMesh
           key={`th-${i}`}
@@ -670,6 +707,7 @@ function ChunkInstanced({
         />
       ))}
 
+      {/* Trees: Low/Med LOD */}
       {treeMedParts.map((p, i) => (
         <instancedMesh
           key={`tm-${i}`}
@@ -681,6 +719,7 @@ function ChunkInstanced({
         />
       ))}
 
+      {/* Rocks */}
       {rockParts.map((p, i) => {
         const cap = rockMatricesByPart[i]?.length || 1;
         return (
