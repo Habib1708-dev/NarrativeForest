@@ -18,6 +18,7 @@ import Man from "./components/Man";
 import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
+import TestTree from "./components/TestTree";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -301,6 +302,8 @@ export default function Experience() {
         skyRadius={fSkyRadius}
         layer={1}
       />
+
+      <TestTree />
     </>
   );
 }

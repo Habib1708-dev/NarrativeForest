@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useRef, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useControls, folder } from "leva";
+import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 
@@ -66,7 +66,6 @@ export default function Forest({ terrainMesh }) {
 
   const { rockCount, rockScaleMin, rockScaleMax } = useControls("Rocks", {
     rockCount: { value: 1000, min: 0, max: 10000, step: 10, label: "Count" },
-    // Lock rock scale range to [0.03, 0.11]
     rockScaleMin: {
       value: 0.03,
       min: 0.03,
@@ -97,9 +96,7 @@ export default function Forest({ terrainMesh }) {
   // ---------------------------
   // Assets
   // ---------------------------
-  const highParts = useInstancedTree(
-    "/models/tree/PineTrees2/PineTreeHighLOD6065.glb"
-  );
+  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb"); // High LOD → Spruce
   const lowParts = useInstancedTree(
     "/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"
   );
@@ -154,7 +151,7 @@ export default function Forest({ terrainMesh }) {
     z >= CABIN_Z - CABIN_HALF &&
     z <= CABIN_Z + CABIN_HALF;
 
-  // Spatial hash to prevent overlaps (works for both trees & rocks)
+  // Spatial hash
   const makeHasher = (cellSize) => {
     const map = new Map();
     const key = (i, j) => `${i},${j}`;
@@ -171,7 +168,7 @@ export default function Forest({ terrainMesh }) {
     };
     const canPlace = (x, z, r) => {
       const [ci, cj] = cell(x, z);
-      for (let di = -1; di <= 1; di++) {
+      for (let di = -1; di <= 1; di++)
         for (let dj = -1; dj <= 1; dj++) {
           const arr = map.get(key(ci + di, cj + dj));
           if (!arr) continue;
@@ -182,14 +179,24 @@ export default function Forest({ terrainMesh }) {
             if (dx * dx + dz * dz < rr * rr) return false;
           }
         }
-      }
       return true;
     };
     return { add, canPlace };
   };
 
+  // Real tree base (from baked bbox) for proper ground contact
+  const treeBaseMinY = useMemo(() => {
+    const parts = highParts.length ? highParts : lowParts;
+    let minY = 0;
+    for (const p of parts) {
+      const bb = p.geometry.boundingBox;
+      if (bb) minY = Math.min(minY, bb.min.y);
+    }
+    return minY; // likely <= 0
+  }, [highParts, lowParts]);
+
   // ---------------------------
-  // Trees: BVH raycast + cabin avoidance + tree-tree spacing
+  // Trees (0.02–0.04 scale, spacing scales with size)
   // ---------------------------
   const treeTransforms = useMemo(() => {
     if (!terrainMesh) return [];
@@ -208,8 +215,8 @@ export default function Forest({ terrainMesh }) {
     const originY = bbox.max.y + 5;
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
-    const TREE_RADIUS = 0.18; // footprint radius; tune as needed
     const index = makeHasher(0.25);
+    const radiusPerScale = 30.0;
 
     let placed = 0,
       attempts = 0,
@@ -217,14 +224,18 @@ export default function Forest({ terrainMesh }) {
     while (placed < count && attempts < maxAttempts) {
       attempts++;
 
-      // uniform disk
       const r = Math.sqrt(prng()) * R;
       const theta = prng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
       if (insideCabinXZ(x, z)) continue;
-      if (!index.canPlace(x, z, TREE_RADIUS)) continue;
+
+      const sMin = 0.02,
+        sMax = 0.04;
+      const scale = sMin + prng() * (sMax - sMin);
+      const footprint = radiusPerScale * scale;
+      if (!index.canPlace(x, z, footprint)) continue;
 
       origin.set(x, originY, z);
       ray.set(origin, down);
@@ -235,9 +246,9 @@ export default function Forest({ terrainMesh }) {
       if (!hit) continue;
 
       const terrainY = hit.point.y;
-      const baseScale = 0.0045;
-      const scale = baseScale * (1.3 + prng() * 0.6);
-      const adjustedY = terrainY - scale * 2.0;
+      const bottomAlign = -treeBaseMinY * scale; // lift lowest vertex to ground
+      const sink = 0.02; // tiny sink to avoid z-fighting
+      const adjustedY = terrainY - bottomAlign - sink;
 
       arr.push({
         position: [x, adjustedY, z],
@@ -245,16 +256,14 @@ export default function Forest({ terrainMesh }) {
         scale,
       });
 
-      index.add(x, z, TREE_RADIUS);
+      index.add(x, z, footprint);
       placed++;
     }
     return arr;
-  }, [terrainMesh, seed, size, count, plantRadius]);
+  }, [terrainMesh, seed, size, count, plantRadius, treeBaseMinY]);
 
   // ---------------------------
-  // Rocks: BVH raycast + cabin avoidance + no overlap with trees/rocks
-  // - Y yaw only (no X tilt)
-  // - Scale in [0.03, 0.11] (clamped)
+  // Rocks
   // ---------------------------
   const rockTransforms = useMemo(() => {
     if (!terrainMesh || !rockParts.length) return [];
@@ -273,22 +282,19 @@ export default function Forest({ terrainMesh }) {
     const originY = bbox.max.y + 5;
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
-    // spatial hash seeded with trees
     const index = makeHasher(0.2);
     const TREE_RADIUS = 0.18;
     for (const t of treeTransforms) {
       index.add(t.position[0], t.position[2], TREE_RADIUS);
     }
 
-    // per-part bottom offsets for ground contact
     const bottomByPart = rockParts.map((rp) => {
       const bb = rp.geometry.boundingBox || null;
       return bb ? -bb.min.y : 0;
     });
 
-    // guard against inverted range and clamp to [0.03, 0.11]
-    const RANGE_MIN = 0.03;
-    const RANGE_MAX = 0.11;
+    const RANGE_MIN = 0.03,
+      RANGE_MAX = 0.11;
     const sMinRaw = Math.min(rockScaleMin, rockScaleMax);
     const sMaxRaw = Math.max(rockScaleMin, rockScaleMax);
     const sMin = Math.max(RANGE_MIN, Math.min(sMinRaw, RANGE_MAX));
@@ -308,7 +314,6 @@ export default function Forest({ terrainMesh }) {
       if (insideCabinXZ(x, z)) continue;
 
       const scale = sMin + prng() * (sMax - sMin);
-      // footprint radius scales with size (tune factor)
       const ROCK_RADIUS = 0.12 * (scale / Math.max(0.001, sMax));
       if (!index.canPlace(x, z, ROCK_RADIUS)) continue;
 
@@ -320,26 +325,17 @@ export default function Forest({ terrainMesh }) {
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
       if (!hit) continue;
 
-      // choose submesh/part
       const pick = Math.floor(prng() * Math.max(1, rockParts.length));
 
-      // base Y on terrain, then bottom-align and sink slightly with scale
       let y = hit.point.y;
       const bottomAlign = (bottomByPart[pick] || 0) * scale;
-      const sink = 0.4 * scale; // sink further, proportional to scale
+      const sink = 0.4 * scale;
       y += bottomAlign - sink;
 
-      // rotations
-      const rotX = 0; // remove X-axis tilt
+      const rotX = 0;
       const rotY = prng() * Math.PI * 2;
 
-      arr.push({
-        position: [x, y, z],
-        rotation: [rotX, rotY],
-        scale,
-        pick,
-      });
-
+      arr.push({ position: [x, y, z], rotation: [rotX, rotY], scale, pick });
       index.add(x, z, ROCK_RADIUS);
       placed++;
     }
@@ -358,8 +354,7 @@ export default function Forest({ terrainMesh }) {
   ]);
 
   // ---------------------------
-  // Chunking: trees & rocks
-  // Rocks will render only when the tree chunk is in HIGH LOD
+  // Chunking
   // ---------------------------
   const chunks = useMemo(() => {
     if (!terrainMesh) return [];
@@ -400,10 +395,10 @@ export default function Forest({ terrainMesh }) {
   }, [terrainMesh, size, chunkSize, treeTransforms, rockTransforms]);
 
   // ---------------------------
-  // LOD selection (tree-driven)
+  // LOD selection
   // ---------------------------
   const { camera } = useThree();
-  const [chunkModes, setChunkModes] = useState({}); // key -> "off" | "med" | "high"
+  const [chunkModes, setChunkModes] = useState({});
   const modesRef = useRef(chunkModes);
   const lastCam = useRef(new THREE.Vector3(1e9, 0, 1e9));
   const cam2 = useRef(new THREE.Vector3());
@@ -413,11 +408,38 @@ export default function Forest({ terrainMesh }) {
     modesRef.current = chunkModes;
   }, [chunkModes]);
 
-  useEffect(() => {
-    setChunkModes({});
-    lastCam.current.set(1e9, 0, 1e9);
-  }, [chunks, chunkSize, nearRadius, midRadius, viewRadius]);
+  // Helper to clamp radii & compute modes
+  const computeChunkModes = (chunksArr, camXZ) => {
+    const rNear = Math.max(0.01, nearRadius);
+    const rMid = Math.max(rNear + 0.001, midRadius);
+    const rView = Math.max(rMid + 0.001, viewRadius);
 
+    const halfDiag = Math.SQRT2 * (chunkSize / 2);
+    const nearWorld = rNear * chunkSize;
+    const midWorld = rMid * chunkSize;
+    const viewWorld = rView * chunkSize;
+
+    const next = {};
+    for (const c of chunksArr) {
+      const dist = c.center.distanceTo(camXZ);
+      if (dist > viewWorld + halfDiag) next[c.key] = "off";
+      else if (dist <= nearWorld + halfDiag) next[c.key] = "high";
+      else if (dist <= midWorld + halfDiag) next[c.key] = "med";
+      else next[c.key] = "off";
+    }
+    return next;
+  };
+
+  // Compute FIRST modes immediately (prevents “show then disappear until move”)
+  useEffect(() => {
+    const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+    const next = computeChunkModes(chunks, camXZ);
+    setChunkModes(next);
+    modesRef.current = next;
+    lastCam.current.copy(camXZ);
+  }, [camera, chunks, chunkSize, nearRadius, midRadius, viewRadius]);
+
+  // Update modes when the camera moves enough
   useFrame(() => {
     cam2.current.set(camera.position.x, 0, camera.position.z);
     const dx = cam2.current.x - lastCam.current.x;
@@ -425,38 +447,23 @@ export default function Forest({ terrainMesh }) {
     if (dx * dx + dz * dz < moveThreshold * moveThreshold) return;
     lastCam.current.copy(cam2.current);
 
-    const halfDiag = Math.SQRT2 * (chunkSize / 2);
-    const nearWorld = nearRadius * chunkSize;
-    const midWorld = midRadius * chunkSize;
-    const viewWorld = viewRadius * chunkSize;
-
-    const nextModes = {};
-    for (const c of chunks) {
-      const dist = c.center.distanceTo(cam2.current);
-      if (dist > viewWorld + halfDiag) nextModes[c.key] = "off";
-      else if (dist <= nearWorld + halfDiag) nextModes[c.key] = "high";
-      else if (dist <= midWorld + halfDiag) nextModes[c.key] = "med";
-      else nextModes[c.key] = "off";
-    }
-
+    const next = computeChunkModes(chunks, cam2.current);
     const curr = modesRef.current;
-    let changed = false;
-    if (Object.keys(nextModes).length !== Object.keys(curr).length)
-      changed = true;
-    else
-      for (const k in nextModes)
-        if (curr[k] !== nextModes[k]) {
+
+    let changed = Object.keys(next).length !== Object.keys(curr).length;
+    if (!changed)
+      for (const k in next)
+        if (curr[k] !== next[k]) {
           changed = true;
           break;
         }
 
     if (changed) {
-      setChunkModes(nextModes);
-      modesRef.current = nextModes;
+      setChunkModes(next);
+      modesRef.current = next;
     }
   });
 
-  // Wait for assets
   if (!highParts.length || !lowParts.length || !rockParts.length) return null;
 
   return (
@@ -465,11 +472,9 @@ export default function Forest({ terrainMesh }) {
         <ChunkInstanced
           key={chunk.key}
           mode={chunkModes[chunk.key] ?? "off"}
-          // trees
           treeTransforms={chunk.treeTransforms}
           treeHighParts={highParts}
           treeMedParts={lowParts}
-          // rocks
           rockTransforms={chunk.rockTransforms}
           rockParts={rockParts}
         />
@@ -478,11 +483,6 @@ export default function Forest({ terrainMesh }) {
   );
 }
 
-// ------------------------------------
-// Chunk renderer with TREES + ROCKS
-// - Trees: high/med via mode
-// - Rocks: render ONLY when mode === "high"
-// ------------------------------------
 function ChunkInstanced({
   mode,
   treeTransforms,
@@ -529,13 +529,11 @@ function ChunkInstanced({
         0,
         Math.min(rockParts.length - 1, t.pick || 0)
       );
-
       p.fromArray(t.position);
       const rx = t.rotation[0],
         ry = t.rotation[1];
       q.setFromEuler(new THREE.Euler(rx, ry, 0));
       s.set(t.scale, t.scale, t.scale);
-
       lists[partIndex].push(m4.clone().compose(p, q, s));
     }
     return lists;
@@ -580,7 +578,7 @@ function ChunkInstanced({
       if (!mesh) return;
       const mats = rockMatricesByPart[iPart] || [];
       for (let i = 0; i < mats.length; i++) mesh.setMatrixAt(i, mats[i]);
-      mesh.count = 0; // will flip on mode
+      mesh.count = 0; // flip in mode effect below
       mesh.instanceMatrix.needsUpdate = true;
     });
   }, [treeMatrices, rockMatricesByPart]);
@@ -601,10 +599,8 @@ function ChunkInstanced({
     } else if (mode === "med") {
       setCount(treeHighRefs.current, 0);
       setCount(treeMedRefs.current, treeMatrices.length);
-      // hide rocks
       setCount(rockRefs.current, 0);
     } else {
-      // off
       setCount(treeHighRefs.current, 0);
       setCount(treeMedRefs.current, 0);
       setCount(rockRefs.current, 0);
@@ -637,22 +633,24 @@ function ChunkInstanced({
         />
       ))}
 
-      {/* Rocks: render only if mode === "high" (count flips in effect above) */}
-      {rockParts.map((p, i) => (
-        <instancedMesh
-          key={`rk-${i}`}
-          ref={rockRefs.current[i]}
-          args={[p.geometry, p.material, rockTransforms.length]}
-          castShadow={false}
-          receiveShadow
-          frustumCulled={false}
-        />
-      ))}
+      {/* Rocks: per-part capacity */}
+      {rockParts.map((p, i) => {
+        const cap = rockMatricesByPart[i]?.length || 1;
+        return (
+          <instancedMesh
+            key={`rk-${i}`}
+            ref={rockRefs.current[i]}
+            args={[p.geometry, p.material, cap]}
+            castShadow={false}
+            receiveShadow
+            frustumCulled={false}
+          />
+        );
+      })}
     </group>
   );
 }
 
-// simple seedable prng
 function mulberry32(seed) {
   let t = seed >>> 0;
   return () => {

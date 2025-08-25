@@ -1,12 +1,9 @@
-// src/hooks/InstancedTree.jsx
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 
-// keep track of which URLs i've already logged to avoid spam
 const __logged = new Set();
 
-// summarize helpers
 function colorHex(c) {
   if (!c || !(c instanceof THREE.Color)) return null;
   return `#${c.getHexString()}`;
@@ -51,7 +48,7 @@ function summarizeGeometry(geom) {
 function summarizeMaterial(mat) {
   if (!mat) return null;
   const isFoliage =
-    /leaf|leaves|foliage|needle|pine|branch/i.test(mat.name || "") ||
+    /leaf|leaves|foliage|needle|pine|branch|spruce|fir/i.test(mat.name || "") ||
     !!mat.alphaMap;
   return {
     id: mat.uuid,
@@ -75,9 +72,7 @@ function summarizeMaterial(mat) {
 }
 
 /**
- * Loads a GLTF and returns an array of parts: [{ geometry, material, name, materialName }, ...]
- * I bake each mesh's world transform relative to root into the geometry so instancing uses correct size.
- * I also log a compact summary of parts and unique materials (once per URL).
+ * Loads a GLTF and returns an array of parts suitable for instancing.
  */
 export function useInstancedTree(url) {
   const { scene } = useGLTF(url);
@@ -91,7 +86,6 @@ export function useInstancedTree(url) {
     scene.traverse((child) => {
       if (!child.isMesh) return;
 
-      // handle multi-material meshes (instancing expects single material)
       const mats = Array.isArray(child.material)
         ? child.material
         : [child.material];
@@ -102,7 +96,6 @@ export function useInstancedTree(url) {
       }
       const mat = mats[0];
 
-      // bake transform relative to GLTF root into a cloned geometry
       const geom = child.geometry.clone();
       const baked = new THREE.Matrix4()
         .copy(invRoot)
@@ -114,28 +107,53 @@ export function useInstancedTree(url) {
 
       parts.push({
         geometry: geom,
-        material: mat, // share material (fine for instancing)
+        material: mat,
         name: child.name,
         materialName: mat?.name || "",
       });
     });
 
-    // log once per url
+    // Normalize foliage materials to CUTOUT (alphaTest) so trees occlude trees
+    // Normalize foliage materials to CUTOUT (alphaTest) so trees occlude trees
+    const unique = new Map();
+    parts.forEach((p) => p.material && unique.set(p.material.uuid, p.material));
+
+    unique.forEach((m) => {
+      const looksLikeFoliage =
+        /leaf|leaves|foliage|needle|pine|branch|spruce|fir/i.test(
+          m.name || ""
+        ) ||
+        !!m.alphaMap ||
+        !!m.map;
+
+      if (looksLikeFoliage) {
+        // Hard cutout, NO MSAA coverage dithering
+        m.transparent = false; // no blend
+        m.alphaTest = Math.max(0.35, m.alphaTest ?? 0.45);
+        m.alphaToCoverage = false; // <- stop the noisy stipple
+        m.depthWrite = true;
+        m.depthTest = true;
+        m.side = THREE.DoubleSide; // cards visible both ways
+        m.metalness = 0.0;
+        m.roughness = 1.0; // kill specular sparkle on tiny quads
+        m.dithering = true; // mild post-dither for banding, not coverage
+        m.needsUpdate = true;
+      } else {
+        if (typeof m.metalness === "number") m.metalness = 0.0;
+        if (typeof m.roughness === "number")
+          m.roughness = Math.min(1.0, Math.max(0.6, m.roughness ?? 1.0));
+      }
+    });
+
     if (!__logged.has(url)) {
       __logged.add(url);
 
-      // geometry table
       const geoRows = parts.map((p) => ({
         mesh: p.name || "",
         material: p.materialName || p.material?.type || "",
         ...summarizeGeometry(p.geometry),
       }));
 
-      // unique material table
-      const unique = new Map();
-      parts.forEach(
-        (p) => p.material && unique.set(p.material.uuid, p.material)
-      );
       const matRows = [...unique.values()].map(summarizeMaterial);
 
       console.groupCollapsed(`%cuseInstancedTree: ${url}`, "color:#888");
@@ -150,7 +168,6 @@ export function useInstancedTree(url) {
       console.groupEnd();
       console.groupEnd();
 
-      // stash for quick inspection from DevTools
       if (typeof window !== "undefined") {
         window.__instancedTreeLast = { url, geoRows, matRows };
       }
@@ -160,7 +177,6 @@ export function useInstancedTree(url) {
   }, [scene, url]);
 }
 
-// Preload so Suspense batches fetches (paths are /public-relative)
-useGLTF.preload("/models/tree/PineTrees2/PineTreeHighLOD6065.glb"); // High
-useGLTF.preload("/models/tree/PineTrees2/PineTree2MediumLODDecimated1668.glb"); // Medium
-useGLTF.preload("/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"); // Low
+// Preload the spruce high-LOD and keep the existing low-LOD
+useGLTF.preload("/models/tree/Spruce_Fir/Spruce1.glb"); // High
+useGLTF.preload("/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"); // Low (kept)
