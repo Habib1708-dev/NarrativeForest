@@ -54,9 +54,9 @@ export default function Forest({ terrainMesh }) {
   });
 
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
-    tintColor: { value: "#0a0a0a", label: "Tint Color" },
+    tintColor: { value: "#405a3c", label: "Tint Color" },
     tintIntensity: {
-      value: 0.8,
+      value: 0.25,
       min: 0,
       max: 1,
       step: 0.01,
@@ -83,9 +83,9 @@ export default function Forest({ terrainMesh }) {
   });
 
   const { rockTintColor, rockTintIntensity } = useControls("Rock Tint", {
-    rockTintColor: { value: "#2a2a2a", label: "Tint Color" },
+    rockTintColor: { value: "#444444", label: "Tint Color" },
     rockTintIntensity: {
-      value: 1,
+      value: 0.5,
       min: 0,
       max: 1,
       step: 0.01,
@@ -96,13 +96,19 @@ export default function Forest({ terrainMesh }) {
   // ---------------------------
   // Assets
   // ---------------------------
-  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb"); // High LOD → Spruce
-  const lowParts = useInstancedTree(
-    "/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"
-  );
+  // High LOD (Spruce1)
+  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
+
+  // Low LOD (Spruce1_LOD) — your Windows path maps to /public
+  // C:\Users\3liha\Desktop\narrative-forest\public\models\tree\Spruce_Fir\Spruce1_LOD.glb
+  const lowParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
+
   const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 
-  // Tint trees
+  // ---------------------------
+  // Materials tint
+  // ---------------------------
+  // Trees
   useEffect(() => {
     const target = new THREE.Color(tintColor);
     const tint = (parts) => {
@@ -121,7 +127,7 @@ export default function Forest({ terrainMesh }) {
     if (lowParts.length) tint(lowParts);
   }, [highParts, lowParts, tintColor, tintIntensity]);
 
-  // Tint rocks
+  // Rocks
   useEffect(() => {
     const target = new THREE.Color(rockTintColor);
     rockParts.forEach((p) => {
@@ -137,11 +143,13 @@ export default function Forest({ terrainMesh }) {
   }, [rockParts, rockTintColor, rockTintIntensity]);
 
   // ---------------------------
-  // Placement helpers
+  // Helpers
   // ---------------------------
-  const prng = useMemo(() => mulberry32(Math.floor(seed)), [seed]);
+  const RNG_A = 0x9e3779b9;
+  const treeRng = useMemo(() => mulberry32((seed ^ RNG_A) >>> 0), [seed]);
+  const rockRng = useMemo(() => mulberry32((seed ^ (RNG_A * 2)) >>> 0), [seed]);
 
-  // Cabin AABB (XZ only)
+  // Keep a small exclusion for the cabin
   const CABIN_X = -1.8,
     CABIN_Z = -2.7,
     CABIN_HALF = 0.3;
@@ -151,7 +159,6 @@ export default function Forest({ terrainMesh }) {
     z >= CABIN_Z - CABIN_HALF &&
     z <= CABIN_Z + CABIN_HALF;
 
-  // Spatial hash
   const makeHasher = (cellSize) => {
     const map = new Map();
     const key = (i, j) => `${i},${j}`;
@@ -184,7 +191,7 @@ export default function Forest({ terrainMesh }) {
     return { add, canPlace };
   };
 
-  // Real tree base (from baked bbox) for proper ground contact
+  // Base Y of tree (baked bbox)
   const treeBaseMinY = useMemo(() => {
     const parts = highParts.length ? highParts : lowParts;
     let minY = 0;
@@ -192,11 +199,11 @@ export default function Forest({ terrainMesh }) {
       const bb = p.geometry.boundingBox;
       if (bb) minY = Math.min(minY, bb.min.y);
     }
-    return minY; // likely <= 0
+    return minY;
   }, [highParts, lowParts]);
 
   // ---------------------------
-  // Trees (0.02–0.04 scale, spacing scales with size)
+  // Trees
   // ---------------------------
   const treeTransforms = useMemo(() => {
     if (!terrainMesh) return [];
@@ -221,19 +228,20 @@ export default function Forest({ terrainMesh }) {
     let placed = 0,
       attempts = 0,
       maxAttempts = count * 20;
+
     while (placed < count && attempts < maxAttempts) {
       attempts++;
 
-      const r = Math.sqrt(prng()) * R;
-      const theta = prng() * Math.PI * 2;
+      const r = Math.sqrt(treeRng()) * R;
+      const theta = treeRng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
       if (insideCabinXZ(x, z)) continue;
 
       const sMin = 0.02,
-        sMax = 0.04;
-      const scale = sMin + prng() * (sMax - sMin);
+        sMax = 0.035;
+      const scale = sMin + treeRng() * (sMax - sMin);
       const footprint = radiusPerScale * scale;
       if (!index.canPlace(x, z, footprint)) continue;
 
@@ -246,21 +254,29 @@ export default function Forest({ terrainMesh }) {
       if (!hit) continue;
 
       const terrainY = hit.point.y;
-      const bottomAlign = -treeBaseMinY * scale; // lift lowest vertex to ground
-      const sink = 0.02; // tiny sink to avoid z-fighting
+      const bottomAlign = -treeBaseMinY * scale;
+      const sink = 0.02;
       const adjustedY = terrainY - bottomAlign - sink;
 
       arr.push({
         position: [x, adjustedY, z],
-        rotation: prng() * Math.PI * 2,
+        rotation: treeRng() * Math.PI * 2,
         scale,
       });
 
       index.add(x, z, footprint);
       placed++;
     }
+
+    if (attempts >= maxAttempts && placed < count) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          `[Forest] Tree placement saturated: ${placed}/${count}. Increase plantRadius or decrease count.`
+        );
+      }
+    }
     return arr;
-  }, [terrainMesh, seed, size, count, plantRadius, treeBaseMinY]);
+  }, [terrainMesh, seed, size, count, plantRadius, treeBaseMinY, treeRng]);
 
   // ---------------------------
   // Rocks
@@ -303,17 +319,18 @@ export default function Forest({ terrainMesh }) {
     let placed = 0,
       attempts = 0,
       maxAttempts = rockCount * 30;
+
     while (placed < rockCount && attempts < maxAttempts) {
       attempts++;
 
-      const r = Math.sqrt(prng()) * R;
-      const theta = prng() * Math.PI * 2;
+      const r = Math.sqrt(rockRng()) * R;
+      const theta = rockRng() * Math.PI * 2;
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
       if (insideCabinXZ(x, z)) continue;
 
-      const scale = sMin + prng() * (sMax - sMin);
+      const scale = sMin + rockRng() * (sMax - sMin);
       const ROCK_RADIUS = 0.12 * (scale / Math.max(0.001, sMax));
       if (!index.canPlace(x, z, ROCK_RADIUS)) continue;
 
@@ -325,36 +342,44 @@ export default function Forest({ terrainMesh }) {
       const hit = ray.intersectObject(terrainMesh, false)[0] || null;
       if (!hit) continue;
 
-      const pick = Math.floor(prng() * Math.max(1, rockParts.length));
+      const pick = Math.floor(rockRng() * Math.max(1, rockParts.length));
 
       let y = hit.point.y;
       const bottomAlign = (bottomByPart[pick] || 0) * scale;
       const sink = 0.4 * scale;
       y += bottomAlign - sink;
 
-      const rotX = 0;
-      const rotY = prng() * Math.PI * 2;
+      const rotX = (rockRng() - 0.5) * 0.2; // small tilt
+      const rotY = rockRng() * Math.PI * 2;
 
       arr.push({ position: [x, y, z], rotation: [rotX, rotY], scale, pick });
       index.add(x, z, ROCK_RADIUS);
       placed++;
     }
 
+    if (attempts >= maxAttempts && placed < rockCount) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          `[Forest] Rock placement saturated: ${placed}/${rockCount}.`
+        );
+      }
+    }
+
     return arr;
   }, [
     terrainMesh,
     rockParts,
-    seed,
     size,
     plantRadius,
     rockCount,
     rockScaleMin,
     rockScaleMax,
     treeTransforms,
+    rockRng,
   ]);
 
   // ---------------------------
-  // Chunking
+  // Chunking & LOD
   // ---------------------------
   const chunks = useMemo(() => {
     if (!terrainMesh) return [];
@@ -394,9 +419,6 @@ export default function Forest({ terrainMesh }) {
     return Array.from(map.values());
   }, [terrainMesh, size, chunkSize, treeTransforms, rockTransforms]);
 
-  // ---------------------------
-  // LOD selection
-  // ---------------------------
   const { camera } = useThree();
   const [chunkModes, setChunkModes] = useState({});
   const modesRef = useRef(chunkModes);
@@ -408,7 +430,6 @@ export default function Forest({ terrainMesh }) {
     modesRef.current = chunkModes;
   }, [chunkModes]);
 
-  // Helper to clamp radii & compute modes
   const computeChunkModes = (chunksArr, camXZ) => {
     const rNear = Math.max(0.01, nearRadius);
     const rMid = Math.max(rNear + 0.001, midRadius);
@@ -430,16 +451,19 @@ export default function Forest({ terrainMesh }) {
     return next;
   };
 
-  // Compute FIRST modes immediately (prevents “show then disappear until move”)
-  useEffect(() => {
+  // Precompute initial modes before first paint
+  const initialModes = useMemo(() => {
     const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
-    const next = computeChunkModes(chunks, camXZ);
-    setChunkModes(next);
-    modesRef.current = next;
-    lastCam.current.copy(camXZ);
+    return computeChunkModes(chunks, camXZ);
   }, [camera, chunks, chunkSize, nearRadius, midRadius, viewRadius]);
 
-  // Update modes when the camera moves enough
+  useEffect(() => {
+    setChunkModes(initialModes);
+    modesRef.current = initialModes;
+    lastCam.current.set(camera.position.x, 0, camera.position.z);
+  }, [initialModes, camera.position.x, camera.position.z]);
+
+  // Update modes when camera moves far enough
   useFrame(() => {
     cam2.current.set(camera.position.x, 0, camera.position.z);
     const dx = cam2.current.x - lastCam.current.x;
@@ -578,7 +602,7 @@ function ChunkInstanced({
       if (!mesh) return;
       const mats = rockMatricesByPart[iPart] || [];
       for (let i = 0; i < mats.length; i++) mesh.setMatrixAt(i, mats[i]);
-      mesh.count = 0; // flip in mode effect below
+      mesh.count = 0;
       mesh.instanceMatrix.needsUpdate = true;
     });
   }, [treeMatrices, rockMatricesByPart]);
@@ -621,7 +645,7 @@ function ChunkInstanced({
         />
       ))}
 
-      {/* Trees: Medium/Low LOD */}
+      {/* Trees: Low/Med LOD */}
       {treeMedParts.map((p, i) => (
         <instancedMesh
           key={`tm-${i}`}
@@ -633,7 +657,7 @@ function ChunkInstanced({
         />
       ))}
 
-      {/* Rocks: per-part capacity */}
+      {/* Rocks */}
       {rockParts.map((p, i) => {
         const cap = rockMatricesByPart[i]?.length || 1;
         return (

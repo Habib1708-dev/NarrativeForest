@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 
@@ -48,8 +48,9 @@ function summarizeGeometry(geom) {
 function summarizeMaterial(mat) {
   if (!mat) return null;
   const isFoliage =
-    /leaf|leaves|foliage|needle|pine|branch|spruce|fir/i.test(mat.name || "") ||
-    !!mat.alphaMap;
+    /leaf|leaves|foliage|needle|pine|branch|spruce|fir|billboard/i.test(
+      mat.name || ""
+    ) || !!mat.alphaMap;
   return {
     id: mat.uuid,
     name: mat.name || "",
@@ -71,31 +72,47 @@ function summarizeMaterial(mat) {
   };
 }
 
+// Narrow foliage detection:
+// - Treat names like "Spruce_1_Mat", "Spruce_1_Billboard_Mat", "needle", etc. as foliage
+// - "Bark" is explicitly NOT foliage
+function isFoliageMaterial(m) {
+  if (!m) return false;
+  const n = (m.name || "").toLowerCase();
+  if (/bark/.test(n)) return false; // e.g. "Bark1_Mat.001"
+  if (/billboard/.test(n)) return true; // "Spruce_1_Billboard_Mat"
+  if (/leaf|leaves|foliage|needle|pine|spruce|fir|branch/.test(n)) return true;
+  if (m.alphaMap) return true;
+  return false;
+}
+
 /**
  * Loads a GLTF and returns an array of parts suitable for instancing.
+ * Each part: { geometry, material, name, materialName }
  */
 export function useInstancedTree(url) {
   const { scene } = useGLTF(url);
 
-  return useMemo(() => {
+  const parts = useMemo(() => {
     scene.updateMatrixWorld(true);
 
     const invRoot = new THREE.Matrix4().copy(scene.matrixWorld).invert();
-    const parts = [];
+    const result = [];
 
     scene.traverse((child) => {
       if (!child.isMesh) return;
 
+      // Single material per instanced mesh
       const mats = Array.isArray(child.material)
         ? child.material
         : [child.material];
       if (mats.length > 1) {
         console.warn(
-          `[useInstancedTree] ${url}: mesh "${child.name}" has ${mats.length} materials; instancedMesh expects a single material. Using the first one.`
+          `[useInstancedTree] ${url}: mesh "${child.name}" has ${mats.length} materials; using the first one for instancing.`
         );
       }
-      const mat = mats[0];
+      const srcMat = mats[0];
 
+      // Bake geometry to world, then to root space
       const geom = child.geometry.clone();
       const baked = new THREE.Matrix4()
         .copy(invRoot)
@@ -105,38 +122,41 @@ export function useInstancedTree(url) {
       geom.computeBoundingSphere();
       geom.computeBoundingBox();
 
-      parts.push({
+      result.push({
         geometry: geom,
-        material: mat,
+        material: srcMat, // will be normalized (and optionally cloned) below
         name: child.name,
-        materialName: mat?.name || "",
+        materialName: srcMat?.name || "",
       });
     });
 
-    // Normalize foliage materials to CUTOUT (alphaTest) so trees occlude trees
-    // Normalize foliage materials to CUTOUT (alphaTest) so trees occlude trees
-    const unique = new Map();
-    parts.forEach((p) => p.material && unique.set(p.material.uuid, p.material));
+    // Collect and (optionally) clone unique materials to avoid global side-effects
+    const uniqueByUUID = new Map();
+    result.forEach(
+      (p) => p.material && uniqueByUUID.set(p.material.uuid, p.material)
+    );
 
-    unique.forEach((m) => {
-      const looksLikeFoliage =
-        /leaf|leaves|foliage|needle|pine|branch|spruce|fir/i.test(
-          m.name || ""
-        ) ||
-        !!m.alphaMap ||
-        !!m.map;
+    // Clone so edits don't leak to other consumers of the glTF
+    const clones = new Map();
+    uniqueByUUID.forEach((m, id) => clones.set(id, m.clone()));
+    result.forEach((p) => {
+      p.material = clones.get(p.material.uuid) || p.material;
+    });
 
-      if (looksLikeFoliage) {
-        // Hard cutout, NO MSAA coverage dithering
-        m.transparent = false; // no blend
-        m.alphaTest = Math.max(0.35, m.alphaTest ?? 0.45);
-        m.alphaToCoverage = false; // <- stop the noisy stipple
+    // Normalize materials:
+    // - Foliage → alphaTest cutout, depthWrite=true, transparent=false, DoubleSide, rough=1, metal=0
+    // - Bark/other → sane rough/metal
+    clones.forEach((m) => {
+      if (isFoliageMaterial(m)) {
+        m.transparent = false;
+        m.alphaTest = Math.max(0.35, m.alphaTest ?? 0.4);
+        m.alphaToCoverage = false;
         m.depthWrite = true;
         m.depthTest = true;
-        m.side = THREE.DoubleSide; // cards visible both ways
+        m.side = THREE.DoubleSide;
         m.metalness = 0.0;
-        m.roughness = 1.0; // kill specular sparkle on tiny quads
-        m.dithering = true; // mild post-dither for banding, not coverage
+        m.roughness = 1.0;
+        m.dithering = true;
         m.needsUpdate = true;
       } else {
         if (typeof m.metalness === "number") m.metalness = 0.0;
@@ -148,17 +168,17 @@ export function useInstancedTree(url) {
     if (!__logged.has(url)) {
       __logged.add(url);
 
-      const geoRows = parts.map((p) => ({
+      const geoRows = result.map((p) => ({
         mesh: p.name || "",
         material: p.materialName || p.material?.type || "",
         ...summarizeGeometry(p.geometry),
       }));
 
-      const matRows = [...unique.values()].map(summarizeMaterial);
+      const matRows = [...clones.values()].map(summarizeMaterial);
 
       console.groupCollapsed(`%cuseInstancedTree: ${url}`, "color:#888");
       console.log(
-        `meshes: ${parts.length}, unique materials: ${matRows.length}`
+        `meshes: ${result.length}, unique materials: ${matRows.length}`
       );
       console.groupCollapsed("%cparts (geometry)", "color:#888");
       console.table(geoRows);
@@ -173,10 +193,19 @@ export function useInstancedTree(url) {
       }
     }
 
-    return parts;
+    return result;
   }, [scene, url]);
+
+  // Dispose cloned geometries on unmount
+  useEffect(() => {
+    return () => {
+      parts.forEach((p) => p.geometry?.dispose());
+    };
+  }, [parts]);
+
+  return parts;
 }
 
-// Preload the spruce high-LOD and keep the existing low-LOD
-useGLTF.preload("/models/tree/Spruce_Fir/Spruce1.glb"); // High
-useGLTF.preload("/models/tree/PineTrees2/PineTree2LowLODDecimated89.glb"); // Low (kept)
+// Preload both Spruce variants (high + low LOD)
+useGLTF.preload("/models/tree/Spruce_Fir/Spruce1.glb");
+useGLTF.preload("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
