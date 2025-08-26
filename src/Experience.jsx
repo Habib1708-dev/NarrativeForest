@@ -10,8 +10,12 @@ import {
   useCallback,
   useMemo,
 } from "react";
-import { useThree, useFrame } from "@react-three/fiber";
+import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
+
+// Postprocessing (regular Bloom)
+import { EffectComposer, Bloom } from "@react-three/postprocessing";
+import { KernelSize } from "postprocessing";
 
 // Scene pieces
 import Terrain from "./components/Terrain";
@@ -24,14 +28,8 @@ import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 
 export default function Experience() {
-  // Refs
-  const skyRef = useRef(); // the <Sky> mesh (layer 1)
-  const starsWrapRef = useRef(); // group for <Stars> (layer 1)
-  const skyCamRef = useRef(null); // the background camera (renders layer 1)
-
   // Three handles
-  const { gl, size } = useThree();
-  const SKY_FAR = 5000;
+  const { gl } = useThree();
 
   // One-time capture of the Terrain mesh to avoid setState loops
   const [terrainMesh, setTerrainMesh] = useState(null);
@@ -132,53 +130,14 @@ export default function Experience() {
     }),
   });
 
-  // Minimal effects: exposure + manual clear once
+  // Renderer: ACES for nice highlights, keep HDR path for bloom
   useEffect(() => {
     gl.toneMappingExposure = exposure;
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.outputColorSpace = THREE.SRGBColorSpace;
+    // Important: we’re not doing a background pre-pass anymore
+    gl.autoClear = true;
   }, [gl, exposure]);
-
-  useEffect(() => {
-    // Manual background composition pattern
-    gl.autoClear = false;
-  }, [gl]);
-
-  // One-time helper to put an object (and children) on layer 1
-  const toLayer1 = useCallback((obj) => {
-    if (!obj) return;
-    obj.layers.set(1);
-    obj.traverse?.((c) => c.layers?.set(1));
-  }, []);
-
-  // Put sky/stars on layer 1 once when they mount
-  useEffect(() => {
-    if (skyRef.current) toLayer1(skyRef.current);
-  }, [toLayer1]);
-  useEffect(() => {
-    if (starsWrapRef.current) toLayer1(starsWrapRef.current);
-  }, [toLayer1]);
-
-  // Render background (layer 1) before the main scene (layer 0)
-  useFrame((state) => {
-    const skyCam = skyCamRef.current;
-    if (!skyCam) return;
-
-    // Match the main camera’s transform & optics
-    const cam = state.camera;
-    skyCam.position.copy(cam.position);
-    skyCam.quaternion.copy(cam.quaternion);
-    skyCam.fov = cam.fov;
-    skyCam.aspect = cam.aspect;
-    skyCam.near = cam.near;
-    skyCam.far = SKY_FAR;
-    skyCam.updateProjectionMatrix();
-
-    // Clear frame, draw layer 1 background, then reset depth for the main pass
-    state.gl.clear(true, true, true);
-    skyCam.layers.set(1);
-    state.gl.render(state.scene, skyCam);
-    state.gl.clearDepth();
-    // R3F's default pass now renders layer 0
-  }, -1);
 
   // Build occluder list once refs exist
   const occluders = useMemo(
@@ -193,12 +152,6 @@ export default function Experience() {
     <>
       <Perf position="top-left" />
 
-      {/* Background camera used for sky/stars (layer 1) */}
-      <perspectiveCamera
-        ref={skyCamRef}
-        args={[50, size.width / size.height, 0.1, SKY_FAR]}
-      />
-
       {/* Scene fog (world) */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
@@ -206,27 +159,23 @@ export default function Experience() {
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
 
-      {/* Sky & Stars live on layer 1 and are rendered by skyCam in the prepass */}
+      {/* Sky & Stars rendered as part of the main pass */}
       <Sky
-        ref={skyRef}
         sunPosition={sunPosition}
         rayleigh={rayleigh}
         turbidity={turbidity}
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
       />
-      <group ref={starsWrapRef}>
-        <Stars
-          // Defaults — no Leva controls; tweak constants if you like
-          radius={360}
-          depth={2}
-          count={20000}
-          factor={4}
-          saturation={0}
-          fade={false}
-          speed={0}
-        />
-      </group>
+      <Stars
+        radius={360}
+        depth={2}
+        count={20000}
+        factor={4}
+        saturation={0}
+        fade={false}
+        speed={0}
+      />
 
       <OrbitControls
         makeDefault
@@ -241,7 +190,7 @@ export default function Experience() {
         rotateSpeed={0.5}
       />
 
-      {/* World lights (layer 0 by default) */}
+      {/* World lights */}
       <ambientLight intensity={0} color="#ffffff" />
       <directionalLight
         position={[-10, 15, -10]}
@@ -261,7 +210,7 @@ export default function Experience() {
         {/* Terrain (capture mesh) */}
         <Terrain ref={handleTerrainRef} />
 
-        {/* Scene actors (layer 0) */}
+        {/* Scene actors */}
         <Forest ref={handleForestRef} terrainMesh={terrainMesh} />
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
@@ -276,7 +225,7 @@ export default function Experience() {
         />
       </Suspense>
 
-      {/* Forward fog that targets the background (set to layer 1 to match sky) */}
+      {/* Forward fog dome now rendered in the same main pass */}
       <UnifiedForwardFog
         enabled={fEnabled}
         color={fColor}
@@ -291,8 +240,19 @@ export default function Experience() {
         lightIntensity={fLightIntensity}
         anisotropy={fAnisotropy}
         skyRadius={fSkyRadius}
-        layer={1}
+        layer={0}
       />
+
+      {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
+      <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+        <Bloom
+          intensity={1.35}
+          luminanceThreshold={0.7} // only “hot” emissive > ~0.7 bloom
+          luminanceSmoothing={0.08}
+          kernelSize={KernelSize.LARGE}
+          mipmapBlur
+        />
+      </EffectComposer>
     </>
   );
 }

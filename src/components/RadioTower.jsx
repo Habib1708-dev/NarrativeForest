@@ -35,6 +35,8 @@ export default forwardRef(function RadioTower(_, ref) {
         if (m.color && !m.userData._origColor) {
           m.userData._origColor = m.color.clone();
         }
+        // Important for Bloom Option B: allow HDR to pass through
+        m.toneMapped = false;
         mats.set(m.uuid, m);
       });
     });
@@ -111,10 +113,10 @@ export default forwardRef(function RadioTower(_, ref) {
             label: "Edge Width",
           },
           glowStrength: {
-            value: 3.0,
+            value: 10.0,
             min: 0.0,
-            max: 10,
-            step: 0.05,
+            max: 50,
+            step: 0.1,
             label: "Glow Strength",
           },
           glowColor: { value: "#ffb97d", label: "Glow Color" },
@@ -178,17 +180,16 @@ export default forwardRef(function RadioTower(_, ref) {
   useEffect(() => {
     materialsRef.current.forEach((m) => {
       if (!m || m.userData.rtPatched) return;
-      if (!(m instanceof THREE.MeshStandardMaterial)) return;
+      // Skip lines/points/custom shader mats
+      if (m.isShaderMaterial || m.isPointsMaterial || m.isLineBasicMaterial)
+        return;
 
-      // Chain any existing patch (e.g., UnifiedForwardFog) instead of overwriting it.
       const prevOnBeforeCompile = m.onBeforeCompile;
 
       m.onBeforeCompile = (shader) => {
-        // Let earlier patch(es) run first
-        if (typeof prevOnBeforeCompile === "function")
-          prevOnBeforeCompile(shader);
+        prevOnBeforeCompile?.(shader);
 
-        // Ensure shared varying only once
+        // add varying worldPos once
         if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
           shader.vertexShader = shader.vertexShader.replace(
             "#include <common>",
@@ -202,7 +203,7 @@ export default forwardRef(function RadioTower(_, ref) {
           );
         }
 
-        // Compute worldPos WITHOUT relying on `worldPosition`
+        // instancing-safe world position
         shader.vertexShader = shader.vertexShader.replace(
           "#include <worldpos_vertex>",
           `
@@ -216,73 +217,94 @@ export default forwardRef(function RadioTower(_, ref) {
           `
         );
 
-        // Add our uniforms (unique names) + helpers
-        if (!/uniform\s+float\s+uProgress\s*;/.test(shader.fragmentShader)) {
-          shader.uniforms.uProgress = { value: progressRef.current };
-          shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
-          shader.uniforms.uNoiseScale = { value: params.noiseScale };
-          shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
-          shader.uniforms.uGlowStrength = { value: params.glowStrength };
-          shader.uniforms.uGlowColor = {
-            value: new THREE.Color(params.glowColor),
-          };
-          shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
-          shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
-          shader.uniforms.uSeed = { value: params.seed };
+        // uniforms
+        shader.uniforms.uProgress = { value: progressRef.current };
+        shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
+        shader.uniforms.uNoiseScale = { value: params.noiseScale };
+        shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
+        shader.uniforms.uGlowStrength = { value: params.glowStrength };
+        shader.uniforms.uGlowColor = {
+          value: new THREE.Color(params.glowColor),
+        };
+        shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
+        shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
+        shader.uniforms.uSeed = { value: params.seed };
 
-          const fragPrelude = /* glsl */ `
-            uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uMinY, uMaxY, uSeed, uGlowStrength;
-            uniform vec3  uGlowColor;
+        const fragPrelude = /* glsl */ `
+          uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uMinY, uMaxY, uSeed, uGlowStrength;
+          uniform vec3  uGlowColor;
 
-            // Prefixed noise to avoid name collisions
-            float rt_hash(vec3 p){
-              p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
-              p += dot(p, p.yzx + 33.33);
-              return fract((p.x + p.y) * p.z);
-            }
-            float rt_vnoise(vec3 x){
-              vec3 i = floor(x);
-              vec3 f = fract(x);
-              vec3 u = f*f*(3.0-2.0*f);
-              float n000 = rt_hash(i + vec3(0,0,0));
-              float n100 = rt_hash(i + vec3(1,0,0));
-              float n010 = rt_hash(i + vec3(0,1,0));
-              float n110 = rt_hash(i + vec3(1,1,0));
-              float n001 = rt_hash(i + vec3(0,0,1));
-              float n101 = rt_hash(i + vec3(1,0,1));
-              float n011 = rt_hash(i + vec3(0,1,1));
-              float n111 = rt_hash(i + vec3(1,1,1));
-              float nx00 = mix(n000, n100, u.x);
-              float nx10 = mix(n010, n110, u.x);
-              float nx01 = mix(n001, n101, u.x);
-              float nx11 = mix(n011, n111, u.x);
-              float nxy0 = mix(nx00, nx10, u.y);
-              float nxy1 = mix(nx01, nx11, u.y);
-              return mix(nxy0, nxy1, u.z);
-            }
-          `;
+          float rt_hash(vec3 p){
+            p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+            p += dot(p, p.yzx + 33.33);
+            return fract((p.x + p.y) * p.z);
+          }
+          float rt_vnoise(vec3 x){
+            vec3 i = floor(x);
+            vec3 f = fract(x);
+            vec3 u = f*f*(3.0-2.0*f);
+            float n000 = rt_hash(i + vec3(0,0,0));
+            float n100 = rt_hash(i + vec3(1,0,0));
+            float n010 = rt_hash(i + vec3(0,1,0));
+            float n110 = rt_hash(i + vec3(1,1,0));
+            float n001 = rt_hash(i + vec3(0,0,1));
+            float n101 = rt_hash(i + vec3(1,0,1));
+            float n011 = rt_hash(i + vec3(0,1,1));
+            float n111 = rt_hash(i + vec3(1,1,1));
+            float nx00 = mix(n000, n100, u.x);
+            float nx10 = mix(n010, n110, u.x);
+            float nx01 = mix(n001, n101, u.x);
+            float nx11 = mix(n011, n111, u.x);
+            float nxy0 = mix(nx00, nx10, u.y);
+            float nxy1 = mix(nx01, nx11, u.y);
+            return mix(nxy0, nxy1, u.z);
+          }
+        `;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <common>",
+          `#include <common>\n${fragPrelude}`
+        );
+
+        // insert dissolve gate at start of main
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "void main() {",
+          `void main() {
+            float y01 = clamp((worldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
+            float n = rt_vnoise(worldPos * uNoiseScale + vec3(uSeed));
+            float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
+            if (y01 > cutoff) { discard; }
+            float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
+          `
+        );
+
+        // add glow to the final color **just before** tonemapping (works for Phong/Lambert/Basic/Standard)
+        if (shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
           shader.fragmentShader = shader.fragmentShader.replace(
-            "#include <common>",
-            `#include <common>\n${fragPrelude}`
-          );
-
-          // Insert dissolve gate early in main
-          shader.fragmentShader = shader.fragmentShader.replace(
-            "void main() {",
-            `void main() {
-              float y01 = clamp((worldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
-              float n = rt_vnoise(worldPos * uNoiseScale + vec3(uSeed));
-              float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
-              if (y01 > cutoff) { discard; }
-              float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
+            "#include <tonemapping_fragment>",
+            `
+            gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
+            #include <tonemapping_fragment>
             `
           );
-
-          // Add glow energy to the PBR emissive term
+        } else if (
+          shader.fragmentShader.includes("#include <colorspace_fragment>")
+        ) {
+          // Fallback for materials without tonemapping chunk
           shader.fragmentShader = shader.fragmentShader.replace(
-            "#include <emissivemap_fragment>",
-            `#include <emissivemap_fragment>
-             totalEmissiveRadiance += edge * uGlowColor * uGlowStrength;`
+            "#include <colorspace_fragment>",
+            `
+            gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
+            #include <colorspace_fragment>
+            `
+          );
+        } else {
+          // Last resort: append before closing brace
+          shader.fragmentShader = shader.fragmentShader.replace(
+            /}\s*$/,
+            `
+            gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
+            }
+            `
           );
         }
 
@@ -290,11 +312,12 @@ export default forwardRef(function RadioTower(_, ref) {
       };
 
       m.userData.rtPatched = true;
-      m.transparent = false; // we discard; keep depth write for nice edges
+      m.transparent = false; // keep depth writes; we use discard for the cut
       m.needsUpdate = true;
     });
   }, [params.edgeWidth, params.noiseScale, params.noiseAmp, params.glowStrength, params.glowColor, params.seed]);
 
+  // live uniform updates
   useEffect(
     () => updateUniformAll("uEdgeWidth", params.edgeWidth),
     [params.edgeWidth]
