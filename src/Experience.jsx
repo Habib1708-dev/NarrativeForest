@@ -140,15 +140,22 @@ export default function Experience() {
   useEffect(() => {
     // Manual background composition pattern
     gl.autoClear = false;
-    // no cleanup; we keep this renderer setting
   }, [gl]);
 
-  // Put sky/stars on layer 1 exactly once when they mount
-  const setLayer1 = useCallback((obj) => {
+  // One-time helper to put an object (and children) on layer 1
+  const toLayer1 = useCallback((obj) => {
     if (!obj) return;
     obj.layers.set(1);
     obj.traverse?.((c) => c.layers?.set(1));
   }, []);
+
+  // Put sky/stars on layer 1 once when they mount
+  useEffect(() => {
+    if (skyRef.current) toLayer1(skyRef.current);
+  }, [toLayer1]);
+  useEffect(() => {
+    if (starsWrapRef.current) toLayer1(starsWrapRef.current);
+  }, [toLayer1]);
 
   // Render background (layer 1) before the main scene (layer 0)
   useFrame((state) => {
@@ -167,11 +174,10 @@ export default function Experience() {
 
     // Clear frame, draw layer 1 background, then reset depth for the main pass
     state.gl.clear(true, true, true);
-    // Render ONLY layer 1 (since sky/stars are on 1 and main camera won’t see them)
     skyCam.layers.set(1);
     state.gl.render(state.scene, skyCam);
     state.gl.clearDepth();
-    // The default R3F pass will now render the world (layer 0) with depth reset
+    // R3F's default pass now renders layer 0
   }, -1);
 
   // Build occluder list once refs exist
@@ -203,16 +209,15 @@ export default function Experience() {
       {/* Sky & Stars live on layer 1 and are rendered by skyCam in the prepass */}
       <Sky
         ref={skyRef}
-        onUpdate={setLayer1}
         sunPosition={sunPosition}
         rayleigh={rayleigh}
         turbidity={turbidity}
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
       />
-      <group ref={starsWrapRef} onUpdate={setLayer1}>
+      <group ref={starsWrapRef}>
         <Stars
-          // Defaults — no Leva controls; feel free to tweak constants if you like
+          // Defaults — no Leva controls; tweak constants if you like
           radius={360}
           depth={2}
           count={20000}
