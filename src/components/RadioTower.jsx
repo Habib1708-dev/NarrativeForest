@@ -1,4 +1,4 @@
-//src/components/RadioTower.jsx
+// src/components/RadioTower.jsx
 import React, {
   forwardRef,
   useMemo,
@@ -8,8 +8,9 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
-import { useControls, folder } from "leva";
+import { useControls, folder, button } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { useFrame } from "@react-three/fiber";
 
 export default forwardRef(function RadioTower(_, ref) {
   // NOTE: path is relative to /public. Space is URL-encoded.
@@ -19,16 +20,15 @@ export default forwardRef(function RadioTower(_, ref) {
   // Deep clone so we can safely mutate materials/colors per-instance
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
 
-  // Expose a single root for external systems (e.g., fog occluders)
+  // Root for external systems
   const rootRef = useRef(null);
   useImperativeHandle(ref, () => rootRef.current, []);
 
-  // Gather unique materials, record original colors once
+  // Collect unique materials
   const materialsRef = useRef([]);
   useEffect(() => {
     if (!cloned) return;
     const mats = new Map();
-
     cloned.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
@@ -43,11 +43,100 @@ export default forwardRef(function RadioTower(_, ref) {
         mats.set(m.uuid, m);
       });
     });
-
     materialsRef.current = Array.from(mats.values());
   }, [cloned]);
 
-  // Controls
+  // ---------------------------
+  // Leva Controls
+  // ---------------------------
+  const params = useControls({
+    "Radio Tower": folder(
+      {
+        Transform: folder({
+          positionX: { value: 0.0, min: -200, max: 200, step: 0.01 },
+          positionY: { value: -4.7, min: -200, max: 200, step: 0.01 },
+          positionZ: { value: -1.9, min: -200, max: 200, step: 0.01 },
+          rotationYDeg: {
+            value: 0,
+            min: -180,
+            max: 180,
+            step: 0.1,
+            label: "Rotation Y (deg)",
+          },
+          scale: {
+            value: 0.03,
+            min: 0.001,
+            max: 5,
+            step: 0.001,
+            label: "Uniform Scale",
+          },
+          heightScale: {
+            value: 1.8,
+            min: 0.1,
+            max: 10,
+            step: 0.01,
+            label: "Height Scale (Y)",
+          },
+        }),
+        Appearance: folder({
+          tintColor: { value: "#ffffff", label: "Tint Color" },
+          tintIntensity: {
+            value: 0.0,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Tint Intensity",
+          },
+        }),
+        Dissolve: folder({
+          build: { value: false, label: "Build Tower" },
+          speed: {
+            value: 0.6,
+            min: 0.05,
+            max: 3,
+            step: 0.01,
+            label: "Speed (units/sec)",
+          },
+          noiseScale: {
+            value: 1.8,
+            min: 0.1,
+            max: 6,
+            step: 0.01,
+            label: "Noise Scale",
+          },
+          noiseAmp: {
+            value: 0.35,
+            min: 0,
+            max: 1.5,
+            step: 0.01,
+            label: "Noise Amplitude",
+          },
+          edgeWidth: {
+            value: 0.08,
+            min: 0.0,
+            max: 0.4,
+            step: 0.005,
+            label: "Edge Width",
+          },
+          glowStrength: {
+            value: 3.0,
+            min: 0.0,
+            max: 10,
+            step: 0.05,
+            label: "Glow Strength",
+          },
+          glowColor: { value: "#ffb97d", label: "Glow Color" },
+          seed: { value: 17, min: 0, max: 1000, step: 1, label: "Noise Seed" },
+          Replay: button(() => {
+            progressRef.current = -0.2;
+            updateUniformAll("uProgress", progressRef.current);
+          }),
+        }),
+      },
+      { collapsed: false }
+    ),
+  });
+
   const {
     positionX,
     positionY,
@@ -57,54 +146,14 @@ export default forwardRef(function RadioTower(_, ref) {
     heightScale,
     tintColor,
     tintIntensity,
-  } = useControls({
-    "Radio Tower": folder({
-      Transform: folder({
-        positionX: { value: 0.0, min: -200, max: 200, step: 0.01 },
-        positionY: { value: -4.7, min: -200, max: 200, step: 0.01 },
-        positionZ: { value: -1.9, min: -200, max: 200, step: 0.01 },
-        rotationYDeg: {
-          value: 0,
-          min: -180,
-          max: 180,
-          step: 0.1,
-          label: "Rotation Y (deg)",
-        },
-        scale: {
-          value: 0.03,
-          min: 0.001,
-          max: 5,
-          step: 0.001,
-          label: "Uniform Scale",
-        },
-        heightScale: {
-          value: 1.8,
-          min: 0.1,
-          max: 10,
-          step: 0.01,
-          label: "Height Scale (Y)",
-        },
-      }),
-      Appearance: folder({
-        tintColor: { value: "#ffffff", label: "Tint Color" },
-        tintIntensity: {
-          value: 0.0,
-          min: 0,
-          max: 1,
-          step: 0.01,
-          label: "Tint Intensity",
-        },
-      }),
-    }),
-  });
+  } = params;
 
-  // Apply tint
+  // Tint logic
   useEffect(() => {
     const target = new THREE.Color(tintColor);
     materialsRef.current.forEach((m) => {
       if (!m || !m.color) return;
       if (!m.userData._origColor) m.userData._origColor = m.color.clone();
-      // Lerp original -> target by intensity
       m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
       m.needsUpdate = true;
     });
@@ -123,6 +172,186 @@ export default forwardRef(function RadioTower(_, ref) {
     () => [scale, scale * heightScale, scale],
     [scale, heightScale]
   );
+
+  // ---------------------------
+  // Dissolve (onBeforeCompile)
+  // ---------------------------
+  const progressRef = useRef(-0.2); // Start fully invisible (< 0 ensures nothing passes)
+  const worldYRangeRef = useRef({ min: 0, max: 1 });
+
+  // Helper: push a uniform value to all patched materials
+  const updateUniformAll = (name, val) => {
+    materialsRef.current.forEach((m) => {
+      const sh = m?.userData?.rtShader;
+      if (sh && sh.uniforms && name in sh.uniforms) {
+        sh.uniforms[name].value = val;
+      }
+    });
+  };
+
+  // Patch materials once
+  useEffect(() => {
+    materialsRef.current.forEach((m) => {
+      if (!m || m.userData.rtPatched) return;
+      if (!(m instanceof THREE.MeshStandardMaterial)) return;
+
+      m.onBeforeCompile = (shader) => {
+        // uniforms
+        shader.uniforms.uProgress = { value: progressRef.current }; // [-0.2..1.2]
+        shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
+        shader.uniforms.uNoiseScale = { value: params.noiseScale };
+        shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
+        shader.uniforms.uGlowStrength = { value: params.glowStrength };
+        shader.uniforms.uGlowColor = {
+          value: new THREE.Color(params.glowColor),
+        };
+        shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
+        shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
+        shader.uniforms.uSeed = { value: params.seed };
+
+        // varyings + helpers (unique prefix to avoid name clashes)
+        const fragPrelude = /* glsl */ `
+          varying vec3 vWorldPos;
+          uniform float uProgress;
+          uniform float uEdgeWidth;
+          uniform float uNoiseScale;
+          uniform float uNoiseAmp;
+          uniform float uMinY;
+          uniform float uMaxY;
+          uniform float uSeed;
+          uniform vec3 uGlowColor;
+          uniform float uGlowStrength;
+
+          // Cheap 3D value-noise (rt_ prefix to avoid duplicates)
+          float rt_hash(vec3 p){
+            p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+            p += dot(p, p.yzx + 33.33);
+            return fract((p.x + p.y) * p.z);
+          }
+          float rt_vnoise(vec3 x){
+            vec3 i = floor(x);
+            vec3 f = fract(x);
+            vec3 u = f*f*(3.0-2.0*f);
+            float n000 = rt_hash(i + vec3(0,0,0));
+            float n100 = rt_hash(i + vec3(1,0,0));
+            float n010 = rt_hash(i + vec3(0,1,0));
+            float n110 = rt_hash(i + vec3(1,1,0));
+            float n001 = rt_hash(i + vec3(0,0,1));
+            float n101 = rt_hash(i + vec3(1,0,1));
+            float n011 = rt_hash(i + vec3(0,1,1));
+            float n111 = rt_hash(i + vec3(1,1,1));
+            float nx00 = mix(n000, n100, u.x);
+            float nx10 = mix(n010, n110, u.x);
+            float nx01 = mix(n001, n101, u.x);
+            float nx11 = mix(n011, n111, u.x);
+            float nxy0 = mix(nx00, nx10, u.y);
+            float nxy1 = mix(nx01, nx11, u.y);
+            return mix(nxy0, nxy1, u.z);
+          }
+        `;
+
+        const vertPrelude = `varying vec3 vWorldPos;`;
+
+        // Inject world position
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", `#include <common>\n${vertPrelude}`)
+          .replace(
+            "#include <worldpos_vertex>",
+            `#include <worldpos_vertex>\n  vWorldPos = worldPosition.xyz;`
+          );
+
+        // Inject dissolve logic + glow into MeshStandard
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", `#include <common>\n${fragPrelude}`)
+          // Compute dissolve mask at the start of main
+          .replace(
+            "void main() {",
+            `void main() {
+              // ---- RadioTower dissolve prepass ----
+              float y01 = clamp((vWorldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
+              float n = rt_vnoise(vWorldPos * uNoiseScale + vec3(uSeed));
+              float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
+              // Keep fragments below cutoff; discard above
+              if (y01 > cutoff) { discard; }
+              // Edge band for glow (visible only near front of build)
+              float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
+            `
+          )
+          // Add glow energy into PBR emissive term
+          .replace(
+            "#include <emissivemap_fragment>",
+            `#include <emissivemap_fragment>
+             totalEmissiveRadiance += edge * uGlowColor * uGlowStrength;`
+          );
+
+        // Save shader for live-uniform updates
+        m.userData.rtShader = shader;
+      };
+
+      // Prevent double-patching on re-renders
+      m.userData.rtPatched = true;
+      // We rely on discard (not alpha blend), keep depthWrite true.
+      m.transparent = false;
+      m.needsUpdate = true;
+    });
+  }, [params.edgeWidth, params.noiseScale, params.noiseAmp, params.glowStrength, params.glowColor, params.seed]);
+
+  // Update uniforms when Leva params change
+  useEffect(
+    () => updateUniformAll("uEdgeWidth", params.edgeWidth),
+    [params.edgeWidth]
+  );
+  useEffect(
+    () => updateUniformAll("uNoiseScale", params.noiseScale),
+    [params.noiseScale]
+  );
+  useEffect(
+    () => updateUniformAll("uNoiseAmp", params.noiseAmp),
+    [params.noiseAmp]
+  );
+  useEffect(
+    () => updateUniformAll("uGlowStrength", params.glowStrength),
+    [params.glowStrength]
+  );
+  useEffect(
+    () => updateUniformAll("uGlowColor", new THREE.Color(params.glowColor)),
+    [params.glowColor]
+  );
+  useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
+
+  // Compute world-space Y-range for normalized build (minY..maxY)
+  const updateWorldYRange = () => {
+    if (!rootRef.current) return;
+    // Ensure matrices are current
+    rootRef.current.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(rootRef.current);
+    worldYRangeRef.current.min = box.min.y;
+    worldYRangeRef.current.max = box.max.y;
+    updateUniformAll("uMinY", worldYRangeRef.current.min);
+    updateUniformAll("uMaxY", worldYRangeRef.current.max);
+  };
+
+  // Recompute bounds when transform changes
+  useEffect(() => {
+    updateWorldYRange();
+  }, [cloned, positionX, positionY, positionZ, rotationYDeg, scale, heightScale]);
+
+  // Animate progress (dissolve-IN). If you toggle "Build Tower" off, it will reverse.
+  useFrame((_, dt) => {
+    const target = params.build ? 1.1 : -0.2;
+    const dir = Math.sign(target - progressRef.current);
+    if (dir !== 0) {
+      const step = params.speed * dt * dir;
+      const next = progressRef.current + step;
+      // Clamp and avoid jitter
+      if ((dir > 0 && next >= target) || (dir < 0 && next <= target)) {
+        progressRef.current = target;
+      } else {
+        progressRef.current = next;
+      }
+      updateUniformAll("uProgress", progressRef.current);
+    }
+  });
 
   if (!cloned) return null;
 

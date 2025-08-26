@@ -53,8 +53,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     },
   });
 
-  // NEW: explicit exclusion rectangle around the cabin (X–Z plane)
-  // width = X size, depth = Z size
+  // Exclusion (XZ)
   const { exCenterX, exCenterZ, exWidth, exDepth } = useControls(
     "Exclusion Zone",
     {
@@ -166,7 +165,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const treeRng = useMemo(() => mulberry32((seed ^ RNG_A) >>> 0), [seed]);
   const rockRng = useMemo(() => mulberry32((seed ^ (RNG_A * 2)) >>> 0), [seed]);
 
-  // Simple, explicit exclusion AABB
   const insideExclusion = (x, z) =>
     Math.abs(x - exCenterX) <= exWidth * 0.5 &&
     Math.abs(z - exCenterZ) <= exDepth * 0.5;
@@ -221,7 +219,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     terrainMesh.updateMatrixWorld(true);
 
     const effSize = terrainMesh.getTerrainSize?.() ?? size;
-    // give a bit of extra area to reduce saturation
     const R = Math.min(plantRadius * 1.15, effSize * 0.5 - 0.001);
 
     const arr = [];
@@ -236,7 +233,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
 
     const index = makeHasher(0.25);
 
-    let radiusPerScale = 30.0; // base spacing per scale (will relax)
+    let radiusPerScale = 30.0;
     let placed = 0,
       attempts = 0;
     const maxAttempts = count * 30;
@@ -250,7 +247,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      // Exclusion rectangle (fast reject)
       if (insideExclusion(x, z)) continue;
 
       const sMin = 0.02,
@@ -282,13 +278,12 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       index.add(x, z, footprint);
       placed++;
 
-      // if we’re struggling, relax spacing every so often (up to 3x)
       if (
         attempts % (count * 4) === 0 &&
         placed < (attempts / (count * 4)) * (count * 0.6) &&
         relaxes < 3
       ) {
-        radiusPerScale *= 0.9; // -10%
+        radiusPerScale *= 0.9;
         relaxes++;
       }
     }
@@ -362,7 +357,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
-      // Exclusion rectangle (fast reject)
       if (insideExclusion(x, z)) continue;
 
       const scale = sMin + rockRng() * (sMax - sMin);
@@ -492,19 +486,34 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     return next;
   };
 
+  const shallowDifferent = (a, b) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    if (ak.length !== bk.length) return true;
+    for (const k of ak) if (a[k] !== b[k]) return true;
+    return false;
+  };
+
   // Initialize modes when chunks/knobs change (NOT on camera move)
   useEffect(() => {
+    if (!chunks.length) return;
+
     const effSize = terrainMesh?.getTerrainSize?.() ?? size;
     const cam = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     const next = computeChunkModes(chunks, cam);
-    setChunkModes(next);
-    modesRef.current = next;
+
+    if (shallowDifferent(modesRef.current, next)) {
+      setChunkModes(next);
+      modesRef.current = next;
+    }
+
     lastCam.current.copy(cam);
     lastCellRef.current = {
       cx: Math.floor((cam.x + effSize * 0.5) / chunkSize),
       cz: Math.floor((cam.z + effSize * 0.5) / chunkSize),
     };
-  }, [chunks, chunkSize, nearRadius, midRadius, viewRadius, terrainMesh, size, camera.position.x, camera.position.z]);
+    // IMPORTANT: do NOT depend on camera.position.* here
+  }, [chunks, chunkSize, nearRadius, midRadius, viewRadius, terrainMesh, size, camera]);
 
   // Recompute on cell changes or sufficient distance
   useFrame(() => {
@@ -519,8 +528,10 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     if (cx !== lastCellRef.current.cx || cz !== lastCellRef.current.cz) {
       lastCellRef.current = { cx, cz };
       const next = computeChunkModes(chunks, camXZ.current);
-      setChunkModes(next);
-      modesRef.current = next;
+      if (shallowDifferent(modesRef.current, next)) {
+        setChunkModes(next);
+        modesRef.current = next;
+      }
       lastCam.current.copy(camXZ.current);
       return;
     }
@@ -530,18 +541,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     if (dx * dx + dz * dz >= moveThreshold * moveThreshold) {
       lastCam.current.copy(camXZ.current);
       const next = computeChunkModes(chunks, camXZ.current);
-      const curr = modesRef.current;
-
-      let changed = Object.keys(next).length !== Object.keys(curr).length;
-      if (!changed) {
-        for (const k in next) {
-          if (curr[k] !== next[k]) {
-            changed = true;
-            break;
-          }
-        }
-      }
-      if (changed) {
+      if (shallowDifferent(modesRef.current, next)) {
         setChunkModes(next);
         modesRef.current = next;
       }
@@ -565,7 +565,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       ))}
     </group>
   );
-}); // <-- close forwardRef!
+});
 
 export default Forest;
 
