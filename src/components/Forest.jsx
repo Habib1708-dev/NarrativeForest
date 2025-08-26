@@ -18,13 +18,10 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     midRadius,
     viewRadius,
     plantRadius,
-    treeCabinBaseHalf, // base half-size for trees (per axis)
-    treeCabinPadFactor, // multiply tree footprint by this
-    treeCabinPadMax, // clamp the extra pad
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
-    seed: { value: 13, min: 0, max: 100, step: 1 },
-    count: { value: 1200, min: 10, max: 20000, step: 10, label: "Tree Count" },
+    seed: { value: 6, min: 0, max: 100, step: 1 },
+    count: { value: 900, min: 10, max: 20000, step: 10, label: "Tree Count" },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
       value: 1.2,
@@ -54,28 +51,31 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       step: 1,
       label: "Plant radius (m)",
     },
-    treeCabinBaseHalf: {
-      value: 0.48,
-      min: 0.3,
-      max: 0.8,
-      step: 0.01,
-      label: "Tree base half (m)",
-    },
-    treeCabinPadFactor: {
-      value: 0.01,
-      min: 0.0,
-      max: 1.0,
-      step: 0.01,
-      label: "Tree pad factor × footprint",
-    },
-    treeCabinPadMax: {
-      value: 0.01,
-      min: 0.0,
-      max: 1.0,
-      step: 0.01,
-      label: "Tree pad max (m)",
-    },
   });
+
+  // NEW: explicit exclusion rectangle around the cabin (X–Z plane)
+  // width = X size, depth = Z size
+  const { exCenterX, exCenterZ, exWidth, exDepth } = useControls(
+    "Exclusion Zone",
+    {
+      exCenterX: { value: -1.4, step: 0.01, label: "Center X (m)" },
+      exCenterZ: { value: -2.7, step: 0.01, label: "Center Z (m)" },
+      exWidth: {
+        value: 1.1,
+        min: 0,
+        max: 20,
+        step: 0.01,
+        label: "Box width X (m)",
+      },
+      exDepth: {
+        value: 1.1,
+        min: 0,
+        max: 20,
+        step: 0.01,
+        label: "Box depth Z (m)",
+      },
+    }
+  );
 
   const { tintColor, tintIntensity } = useControls("Tree Tint", {
     tintColor: { value: "#000000ff", label: "Tint Color" },
@@ -166,30 +166,10 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   const treeRng = useMemo(() => mulberry32((seed ^ RNG_A) >>> 0), [seed]);
   const rockRng = useMemo(() => mulberry32((seed ^ (RNG_A * 2)) >>> 0), [seed]);
 
-  // Cabin center
-  const CABIN_X = -1.8;
-  const CABIN_Z = -2.7;
-
-  // Rocks use the bigger doubled box:
-  const CABIN_HALF_X = 0.6;
-  const CABIN_HALF_Z = 0.6;
-
-  // Trees use a smaller base box (tunable via Leva):
-  const TREE_HALF_X = treeCabinBaseHalf;
-  const TREE_HALF_Z = treeCabinBaseHalf;
-
-  // Generic AABB test with optional padding
-  const insideAABB = (x, z, cx, cz, hx, hz, pad = 0) =>
-    x >= cx - (hx + pad) &&
-    x <= cx + (hx + pad) &&
-    z >= cz - (hz + pad) &&
-    z <= cz + (hz + pad);
-
-  // Type-specific helpers
-  const insideCabinTrees = (x, z, pad = 0) =>
-    insideAABB(x, z, CABIN_X, CABIN_Z, TREE_HALF_X, TREE_HALF_Z, pad);
-  const insideCabinRocks = (x, z, pad = 0) =>
-    insideAABB(x, z, CABIN_X, CABIN_Z, CABIN_HALF_X, CABIN_HALF_Z, pad);
+  // Simple, explicit exclusion AABB
+  const insideExclusion = (x, z) =>
+    Math.abs(x - exCenterX) <= exWidth * 0.5 &&
+    Math.abs(z - exCenterZ) <= exDepth * 0.5;
 
   const makeHasher = (cellSize) => {
     const map = new Map();
@@ -241,7 +221,8 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     terrainMesh.updateMatrixWorld(true);
 
     const effSize = terrainMesh.getTerrainSize?.() ?? size;
-    const R = Math.min(plantRadius, effSize * 0.5 - 0.001);
+    // give a bit of extra area to reduce saturation
+    const R = Math.min(plantRadius * 1.15, effSize * 0.5 - 0.001);
 
     const arr = [];
     const ray = new THREE.Raycaster();
@@ -254,11 +235,12 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     const rayFar = Math.max(10, bbox.max.y - bbox.min.y + 20);
 
     const index = makeHasher(0.25);
-    const radiusPerScale = 30.0;
 
+    let radiusPerScale = 30.0; // base spacing per scale (will relax)
     let placed = 0,
-      attempts = 0,
-      maxAttempts = count * 20;
+      attempts = 0;
+    const maxAttempts = count * 30;
+    let relaxes = 0;
 
     while (placed < count && attempts < maxAttempts) {
       attempts++;
@@ -268,13 +250,14 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
+      // Exclusion rectangle (fast reject)
+      if (insideExclusion(x, z)) continue;
+
       const sMin = 0.02,
         sMax = 0.037;
       const scale = sMin + treeRng() * (sMax - sMin);
       const footprint = radiusPerScale * scale;
 
-      const treePad = Math.min(treeCabinPadMax, footprint * treeCabinPadFactor);
-      if (insideCabinTrees(x, z, treePad)) continue;
       if (!index.canPlace(x, z, footprint)) continue;
 
       origin.set(x, originY, z);
@@ -298,6 +281,16 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
 
       index.add(x, z, footprint);
       placed++;
+
+      // if we’re struggling, relax spacing every so often (up to 3x)
+      if (
+        attempts % (count * 4) === 0 &&
+        placed < (attempts / (count * 4)) * (count * 0.6) &&
+        relaxes < 3
+      ) {
+        radiusPerScale *= 0.9; // -10%
+        relaxes++;
+      }
     }
 
     if (attempts >= maxAttempts && placed < count) {
@@ -306,7 +299,19 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       }
     }
     return arr;
-  }, [terrainMesh, seed, size, count, plantRadius, treeBaseMinY, treeRng]);
+  }, [
+    terrainMesh,
+    seed,
+    size,
+    count,
+    plantRadius,
+    treeBaseMinY,
+    treeRng,
+    exCenterX,
+    exCenterZ,
+    exWidth,
+    exDepth,
+  ]);
 
   // ---------------------------
   // Rocks
@@ -346,8 +351,8 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     const sMax = Math.max(RANGE_MIN, Math.min(sMaxRaw, RANGE_MAX));
 
     let placed = 0,
-      attempts = 0,
-      maxAttempts = rockCount * 30;
+      attempts = 0;
+    const maxAttempts = rockCount * 30;
 
     while (placed < rockCount && attempts < maxAttempts) {
       attempts++;
@@ -357,10 +362,12 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       const x = r * Math.cos(theta);
       const z = r * Math.sin(theta);
 
+      // Exclusion rectangle (fast reject)
+      if (insideExclusion(x, z)) continue;
+
       const scale = sMin + rockRng() * (sMax - sMin);
       const ROCK_RADIUS = 0.12 * (scale / Math.max(0.001, sMax));
 
-      if (insideCabinRocks(x, z, ROCK_RADIUS)) continue;
       if (!index.canPlace(x, z, ROCK_RADIUS)) continue;
 
       origin.set(x, originY, z);
@@ -405,6 +412,10 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     rockScaleMax,
     treeTransforms,
     rockRng,
+    exCenterX,
+    exCenterZ,
+    exWidth,
+    exDepth,
   ]);
 
   // ---------------------------
@@ -505,7 +516,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     const cx = Math.floor((camXZ.current.x + effSize * 0.5) / chunkSize);
     const cz = Math.floor((camXZ.current.z + effSize * 0.5) / chunkSize);
 
-    // If we entered a new cell, recompute immediately
     if (cx !== lastCellRef.current.cx || cz !== lastCellRef.current.cz) {
       lastCellRef.current = { cx, cz };
       const next = computeChunkModes(chunks, camXZ.current);
@@ -515,7 +525,6 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       return;
     }
 
-    // Otherwise, update on larger translations (keeps behavior smooth)
     const dx = camXZ.current.x - lastCam.current.x;
     const dz = camXZ.current.z - lastCam.current.z;
     if (dx * dx + dz * dz >= moveThreshold * moveThreshold) {
