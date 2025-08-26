@@ -23,7 +23,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     treeCabinPadMax, // clamp the extra pad
   } = useControls("Forest", {
     size: { value: 20, min: 10, max: 200, step: 5 },
-    seed: { value: 2, min: 0, max: 100, step: 1 },
+    seed: { value: 13, min: 0, max: 100, step: 1 },
     count: { value: 1200, min: 10, max: 20000, step: 10, label: "Tree Count" },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
@@ -62,14 +62,14 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       label: "Tree base half (m)",
     },
     treeCabinPadFactor: {
-      value: 0.1,
+      value: 0.01,
       min: 0.0,
       max: 1.0,
       step: 0.01,
       label: "Tree pad factor × footprint",
     },
     treeCabinPadMax: {
-      value: 0.25,
+      value: 0.01,
       min: 0.0,
       max: 1.0,
       step: 0.01,

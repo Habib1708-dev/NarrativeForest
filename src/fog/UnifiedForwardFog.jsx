@@ -17,13 +17,13 @@ export default function UnifiedForwardFog({
   lightIntensity = 0.0,
   anisotropy = 0.0,
   skyRadius = 100,
-  // NEW: which layer the sky-dome should render on (background pass)
-  layer = 1,
+  layer = 1, // sky/stars layer
 }) {
-  const { scene, camera } = useThree();
-  const patched = useRef(new Map());
-  const group = useRef();
+  const { scene, camera, gl } = useThree();
+  const patched = useRef(new WeakSet());
+  const domeRef = useRef();
 
+  // Stable uniforms (mutate .value only)
   const uniforms = useMemo(
     () => ({
       uFogColor: { value: new THREE.Color(color) },
@@ -41,6 +41,7 @@ export default function UnifiedForwardFog({
     []
   );
 
+  // keep in sync
   useEffect(() => {
     uniforms.uFogColor.value.set(color);
   }, [color, uniforms]);
@@ -75,101 +76,140 @@ export default function UnifiedForwardFog({
     uniforms.uAnisotropy.value = THREE.MathUtils.clamp(anisotropy, -0.9, 0.9);
   }, [anisotropy, uniforms]);
 
+  // Shared GLSL
   const GLSL_COMMON = `
-    uniform vec3  uFogColor;
-    uniform float uDensity;
-    uniform float uExtinction;
-    uniform float uFogHeight;
-    uniform float uFadeStart;
-    uniform float uFadeEnd;
-    uniform float uDistFadeStart;
-    uniform float uDistFadeEnd;
-    uniform vec3  uLightDir;
-    uniform float uLightIntensity;
-    uniform float uAnisotropy;
-    float henyeyGreenstein(float mu, float g){
-      float g2 = g*g;
-      float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
-      return (1.0 - g2) / (4.0 * 3.14159265 * denom);
-    }
-    void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
-      vec3  V = fragWorld - camPos;
-      float d = length(V);
-      float yRel = fragWorld.y - uFogHeight;
-      float heightMask = 1.0 - smoothstep(uFadeStart, uFadeEnd, yRel);
-      heightMask = clamp(heightMask, 0.0, 1.0);
-      float sigma = max(1e-6, uExtinction * uDensity);
-      float trans = exp(-sigma * d);
-      float df = smoothstep(uDistFadeStart, uDistFadeEnd, d);
-      trans = mix(trans, 0.0, df);
-      fogFactor = (1.0 - trans) * heightMask;
-      vec3 viewDir = normalize(V);
-      float mu   = dot(viewDir, -normalize(uLightDir));
-      float phase = henyeyGreenstein(mu, uAnisotropy);
-      fogCol = uFogColor * mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
-    }
-  `;
+uniform vec3  uFogColor;
+uniform float uDensity;
+uniform float uExtinction;
+uniform float uFogHeight;
+uniform float uFadeStart;
+uniform float uFadeEnd;
+uniform float uDistFadeStart;
+uniform float uDistFadeEnd;
+uniform vec3  uLightDir;
+uniform float uLightIntensity;
+uniform float uAnisotropy;
 
+float henyeyGreenstein(float mu, float g){
+  float g2 = g*g;
+  float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
+  return (1.0 - g2) / (4.0 * 3.141592653589793 * denom);
+}
+
+void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
+  vec3  V = fragWorld - camPos;
+  float d = length(V);
+
+  float yRel = fragWorld.y - uFogHeight;
+  float heightMask = 1.0 - smoothstep(uFadeStart, uFadeEnd, yRel);
+  heightMask = clamp(heightMask, 0.0, 1.0);
+
+  float sigma = max(1e-6, uExtinction * uDensity);
+  float trans = exp(-sigma * d);
+
+  float df = smoothstep(uDistFadeStart, uDistFadeEnd, d);
+  trans = mix(trans, 0.0, df);
+
+  fogFactor = (1.0 - trans) * heightMask;
+
+  vec3 viewDir = normalize(V);
+  float mu   = dot(viewDir, -normalize(uLightDir));
+  float phase = henyeyGreenstein(mu, uAnisotropy);
+  fogCol = uFogColor * mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
+}
+`.trim();
+
+  // Patch each MeshStandard/Physical/etc once
   const patchMaterial = (mat) => {
     if (!enabled || !mat || patched.current.has(mat)) return;
-    if (mat.isShaderMaterial) return;
-    if (mat.isPointsMaterial) return;
+    if (mat.isShaderMaterial || mat.isPointsMaterial || mat.isLineBasicMaterial)
+      return;
+
     mat.fog = true;
+
+    const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms = { ...shader.uniforms, ...uniforms };
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `#include <common>\nvarying vec3 vWorldPos;`
-        )
-        .replace(
-          "#include <worldpos_vertex>",
-          `#include <worldpos_vertex>\nvWorldPos = worldPosition.xyz;`
-        );
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `#include <common>\nvarying vec3 vWorldPos;\n${GLSL_COMMON}`
-        )
-        .replace(
-          "#include <fog_fragment>",
-          `#ifdef USE_FOG
-             float fogFactor; vec3 fogCol;
-             evalFog(vWorldPos, cameraPosition, fogFactor, fogCol);
-             gl_FragColor.rgb = mix(gl_FragColor.rgb, fogCol, clamp(fogFactor, 0.0, 1.0));
-           #endif`
-        );
-      patched.current.set(mat, shader.uniforms);
+      prev?.(shader);
+      Object.assign(shader.uniforms, uniforms);
+
+      // Declare our varying at the top (Three will handle GLSL1/2 transpile)
+      shader.vertexShader =
+        `varying vec3 uFog_vWorldPos;\n` + shader.vertexShader;
+
+      // Compute world position ourselves AFTER project step (instancing-safe)
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <project_vertex>",
+        `
+#include <project_vertex>
+vec4 uFog_wp = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+  uFog_wp = instanceMatrix * uFog_wp;
+#endif
+uFog_wp = modelMatrix * uFog_wp;
+uFog_vWorldPos = uFog_wp.xyz;
+`
+      );
+
+      shader.fragmentShader =
+        `varying vec3 uFog_vWorldPos;\n${GLSL_COMMON}\n` +
+        shader.fragmentShader;
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <fog_fragment>",
+        `
+#ifdef USE_FOG
+  float fogFactor; vec3 fogCol;
+  evalFog(uFog_vWorldPos, cameraPosition, fogFactor, fogCol);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogCol, clamp(fogFactor, 0.0, 1.0));
+#endif
+`
+      );
+
+      mat.needsUpdate = true;
     };
+
+    patched.current.add(mat);
     mat.needsUpdate = true;
   };
 
+  // Traverse & patch; keep dome centered
   useFrame(() => {
     if (!enabled) return;
-    // Patch built-ins
-    scene.traverse((obj) => {
-      if (!obj.isMesh) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) patchMaterial(m);
     });
-    // Keep sky dome at camera
-    if (group.current) group.current.position.copy(camera.position);
+    if (domeRef.current) domeRef.current.position.copy(camera.position);
   });
 
-  useEffect(() => () => patched.current.clear(), []);
-
-  // Put the sky-dome and all its children on the requested layer
+  // Cleanup (force program rebuild)
   useEffect(() => {
-    if (!group.current) return;
-    const setLayersRecursive = (obj, idx) => {
-      obj.layers.set(idx);
-      for (const c of obj.children) setLayersRecursive(c, idx);
+    return () => {
+      patched.current = new WeakSet();
+      scene.traverse((o) => {
+        if (o.isMesh) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach((m) => m && (m.needsUpdate = true));
+        }
+      });
+      gl.info.programs?.forEach((p) => p?.program?.dispose?.());
     };
-    setLayersRecursive(group.current, layer);
+  }, [scene, gl]);
+
+  // Put the dome & children on the requested layer
+  useEffect(() => {
+    if (!domeRef.current) return;
+    const setLayers = (obj, idx) => {
+      obj.layers.set(idx);
+      obj.children?.forEach((c) => setLayers(c, idx));
+    };
+    setLayers(domeRef.current, layer);
   }, [layer]);
 
+  // Sky dome that visualizes fog at infinity (optional)
   return (
-    <group ref={group} layers={layer}>
+    <group ref={domeRef} layers={layer}>
       <mesh frustumCulled={false}>
         <sphereGeometry args={[skyRadius, 32, 18]} />
         <shaderMaterial
@@ -181,21 +221,21 @@ export default function UnifiedForwardFog({
           uniforms={uniforms}
           vertexShader={
             /* glsl */ `
-            varying vec3 vWorldPos;
+            varying vec3 uFog_vWorldPos;
             void main(){
               vec4 wp = modelMatrix * vec4(position, 1.0);
-              vWorldPos = wp.xyz;
+              uFog_vWorldPos = wp.xyz;
               gl_Position = projectionMatrix * viewMatrix * wp;
             }
           `
           }
           fragmentShader={
             /* glsl */ `
-            varying vec3 vWorldPos;
+            varying vec3 uFog_vWorldPos;
             ${GLSL_COMMON}
             void main(){
               float fogFactor; vec3 fogCol;
-              evalFog(vWorldPos, cameraPosition, fogFactor, fogCol);
+              evalFog(uFog_vWorldPos, cameraPosition, fogFactor, fogCol);
               gl_FragColor = vec4(fogCol, clamp(fogFactor, 0.0, 1.0));
             }
           `
