@@ -18,7 +18,7 @@ import Man from "./components/Man";
 import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
-import TestTree from "./components/TestTree";
+import RadioTower from "./components/RadioTower";
 
 export default function Experience() {
   const skyRef = useRef();
@@ -40,6 +40,7 @@ export default function Experience() {
   const [manObj, setManObj] = useState(null);
   const [catObj, setCatObj] = useState(null);
   const [forestObj, setForestObj] = useState(null);
+  const [radioTowerObj, setRadioTowerObj] = useState(null);
 
   const handleCabinRef = useCallback((obj) => {
     if (obj) setCabinObj(obj);
@@ -52,6 +53,9 @@ export default function Experience() {
   }, []);
   const handleForestRef = useCallback((obj) => {
     if (obj) setForestObj(obj);
+  }, []);
+  const handleRadioTowerRef = useCallback((obj) => {
+    if (obj) setRadioTowerObj(obj);
   }, []);
 
   // --- two-camera layered background pass ---
@@ -201,8 +205,11 @@ export default function Experience() {
 
   // Build occluder list once each ref is available
   const occluders = useMemo(
-    () => [terrainMesh, cabinObj, manObj, catObj, forestObj].filter(Boolean),
-    [terrainMesh, cabinObj, manObj, catObj, forestObj]
+    () =>
+      [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(
+        Boolean
+      ),
+    [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj]
   );
 
   return (
@@ -281,6 +288,7 @@ export default function Experience() {
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
+        <RadioTower ref={handleRadioTowerRef} />
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem
