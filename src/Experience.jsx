@@ -1,5 +1,6 @@
+// src/Experience.jsx
 import { Perf } from "r3f-perf";
-import { OrbitControls, Sky, Stars, Billboard } from "@react-three/drei";
+import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import {
   useRef,
@@ -11,6 +12,8 @@ import {
 } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+
+// Scene pieces
 import Terrain from "./components/Terrain";
 import Forest from "./components/Forest";
 import Cabin from "./components/Cabin";
@@ -20,57 +23,15 @@ import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 
-// --- small additive, soft-edged disk that fakes local bloom ---
-function TowerHalo({ color = "#ffb97d", radius = 3, intensity = 1 }) {
-  const mat = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        transparent: true,
-        depthWrite: false,
-        depthTest: true,
-        blending: THREE.AdditiveBlending,
-        uniforms: {
-          uColor: { value: new THREE.Color(color) },
-          uIntensity: { value: intensity },
-        },
-        vertexShader: /* glsl */ `
-          varying vec2 vUv;
-          void main(){
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          varying vec2 vUv;
-          uniform vec3 uColor;
-          uniform float uIntensity;
-          void main(){
-            // circular falloff (soft edge)
-            vec2 d = vUv - 0.5;
-            float r = length(d) * 2.0;
-            float alpha = smoothstep(1.0, 0.0, r); // 1 at center -> 0 at edge
-            gl_FragColor = vec4(uColor * uIntensity * alpha, alpha);
-          }
-        `,
-      }),
-    [color, intensity]
-  );
-
-  // billboard facing camera, horizontal disk on ground (rotate -90° around X)
-  return (
-    <Billboard follow={true} lockX={false} lockY={true} lockZ={false}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[radius * 2, radius * 2, 1, 1]} />
-        <primitive attach="material" object={mat} />
-      </mesh>
-    </Billboard>
-  );
-}
-
 export default function Experience() {
-  const skyRef = useRef();
-  const starsRef = useRef(null);
-  const starsWrapRef = useRef(null);
+  // Refs
+  const skyRef = useRef(); // the <Sky> mesh (layer 1)
+  const starsWrapRef = useRef(); // group for <Stars> (layer 1)
+  const skyCamRef = useRef(null); // the background camera (renders layer 1)
+
+  // Three handles
+  const { gl, size } = useThree();
+  const SKY_FAR = 5000;
 
   // One-time capture of the Terrain mesh to avoid setState loops
   const [terrainMesh, setTerrainMesh] = useState(null);
@@ -82,82 +43,40 @@ export default function Experience() {
     }
   }, []);
 
-  // Capture Cabin/Man/Cat root objects via callback refs (once each)
+  // Collect important objects via callback refs (no re-renders after first set)
   const [cabinObj, setCabinObj] = useState(null);
   const [manObj, setManObj] = useState(null);
   const [catObj, setCatObj] = useState(null);
   const [forestObj, setForestObj] = useState(null);
   const [radioTowerObj, setRadioTowerObj] = useState(null);
 
-  const handleCabinRef = useCallback((obj) => {
-    if (obj) setCabinObj(obj);
-  }, []);
-  const handleManRef = useCallback((obj) => {
-    if (obj) setManObj(obj);
-  }, []);
-  const handleCatRef = useCallback((obj) => {
-    if (obj) setCatObj(obj);
-  }, []);
-  const handleForestRef = useCallback((obj) => {
-    if (obj) setForestObj(obj);
-  }, []);
-  const handleRadioTowerRef = useCallback((obj) => {
-    if (obj) setRadioTowerObj(obj);
-  }, []);
+  const handleCabinRef = useCallback((obj) => obj && setCabinObj(obj), []);
+  const handleManRef = useCallback((obj) => obj && setManObj(obj), []);
+  const handleCatRef = useCallback((obj) => obj && setCatObj(obj), []);
+  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []);
+  const handleRadioTowerRef = useCallback(
+    (obj) => obj && setRadioTowerObj(obj),
+    []
+  );
 
-  // --- two-camera layered background pass ---
-  const skyCamRef = useRef(null);
-  const { gl, camera, size } = useThree();
-  const SKY_FAR = 5000;
-
-  useEffect(() => {
-    camera.layers.enable(0);
-    camera.layers.disable(1);
-    camera.updateProjectionMatrix();
-    gl.autoClear = false;
-  }, [camera, gl]);
-
-  useFrame((state) => {
-    const skyCam = skyCamRef.current;
-    if (!skyCam) return;
-
-    skyCam.position.copy(state.camera.position);
-    skyCam.quaternion.copy(state.camera.quaternion);
-    skyCam.fov = state.camera.fov;
-    skyCam.aspect = state.camera.aspect;
-    skyCam.near = state.camera.near;
-    skyCam.far = SKY_FAR;
-    skyCam.updateProjectionMatrix();
-
-    skyCam.layers.set(1);
-    state.gl.clear(true, true, true);
-    state.gl.render(state.scene, skyCam);
-    state.gl.clearDepth();
-    state.camera.layers.set(0);
-  }, -1);
-  // -------------------------------------------
-
+  // Controls (no Stars folder here — stars use defaults)
   const {
     fogColor,
     fogNear,
     fogFar,
     fogMode,
     fogDensity,
+
     sunPosition,
     rayleigh,
     turbidity,
     mieCoefficient,
     mieDirectionalG,
-    showStars,
-    starsRadius,
-    starsDepth,
-    starsCount,
-    starsFactor,
-    starsSaturation,
-    starsFade,
-    starsSpeed,
+
     exposure,
+
     dirLightIntensity,
+
     fEnabled,
     fColor,
     fDensity,
@@ -173,14 +92,6 @@ export default function Experience() {
     fLightIntensity,
     fAnisotropy,
     fSkyRadius,
-
-    // Local glow controls (instead of SelectiveBloom)
-    towerGlow,
-    towerGlowRadius,
-    towerGlowIntensity,
-    towerLightIntensity,
-    towerLightDistance,
-    towerLightHeight,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -195,16 +106,6 @@ export default function Experience() {
       turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
       mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
       mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
-    }),
-    Stars: folder({
-      showStars: { value: true },
-      starsRadius: { value: 360, min: 10, max: 1000, step: 1 },
-      starsDepth: { value: 2, min: 1, max: 200, step: 1 },
-      starsCount: { value: 20000, min: 0, max: 20000, step: 100 },
-      starsFactor: { value: 4, min: 0.1, max: 20, step: 0.1 },
-      starsSaturation: { value: 0, min: -1, max: 1, step: 0.01 },
-      starsFade: { value: false },
-      starsSpeed: { value: 0, min: 0, max: 10, step: 0.1 },
     }),
     Render: folder({
       exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
@@ -229,46 +130,51 @@ export default function Experience() {
       fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
       fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
     }),
-    "Tower FX (Local Glow)": folder({
-      towerGlow: { value: true, label: "Enable Local Glow" },
-      towerGlowRadius: { value: 3, min: 0.5, max: 10, step: 0.1 },
-      towerGlowIntensity: { value: 1.2, min: 0, max: 5, step: 0.05 },
-      towerLightIntensity: { value: 0.25, min: 0, max: 3, step: 0.01 },
-      towerLightDistance: { value: 6, min: 0.1, max: 30, step: 0.1 },
-      towerLightHeight: { value: 1.2, min: -2, max: 5, step: 0.05 },
-    }),
   });
 
-  const kernelMap = {}; // (kept only to avoid removing your import accidentally)
-
-  useEffect(() => {
-    const setLayersRecursive = (obj, idx) => {
-      if (!obj) return;
-      obj.layers?.set(idx);
-      obj.children?.forEach((c) => setLayersRecursive(c, idx));
-    };
-    if (showStars) {
-      setLayersRecursive(starsRef.current, 1);
-      setLayersRecursive(skyRef.current, 1);
-      setLayersRecursive(starsWrapRef.current, 1);
-    }
-  }, [showStars]);
-
+  // Minimal effects: exposure + manual clear once
   useEffect(() => {
     gl.toneMappingExposure = exposure;
   }, [gl, exposure]);
 
   useEffect(() => {
-    const mat = starsRef.current?.material;
-    if (!mat) return;
-    mat.transparent = false;
-    mat.blending = THREE.NormalBlending;
-    mat.depthTest = true;
-    mat.depthWrite = false;
-    mat.needsUpdate = true;
-  }, [showStars]);
+    // Manual background composition pattern
+    gl.autoClear = false;
+    // no cleanup; we keep this renderer setting
+  }, [gl]);
 
-  // Build occluder list once each ref is available
+  // Put sky/stars on layer 1 exactly once when they mount
+  const setLayer1 = useCallback((obj) => {
+    if (!obj) return;
+    obj.layers.set(1);
+    obj.traverse?.((c) => c.layers?.set(1));
+  }, []);
+
+  // Render background (layer 1) before the main scene (layer 0)
+  useFrame((state) => {
+    const skyCam = skyCamRef.current;
+    if (!skyCam) return;
+
+    // Match the main camera’s transform & optics
+    const cam = state.camera;
+    skyCam.position.copy(cam.position);
+    skyCam.quaternion.copy(cam.quaternion);
+    skyCam.fov = cam.fov;
+    skyCam.aspect = cam.aspect;
+    skyCam.near = cam.near;
+    skyCam.far = SKY_FAR;
+    skyCam.updateProjectionMatrix();
+
+    // Clear frame, draw layer 1 background, then reset depth for the main pass
+    state.gl.clear(true, true, true);
+    // Render ONLY layer 1 (since sky/stars are on 1 and main camera won’t see them)
+    skyCam.layers.set(1);
+    state.gl.render(state.scene, skyCam);
+    state.gl.clearDepth();
+    // The default R3F pass will now render the world (layer 0) with depth reset
+  }, -1);
+
+  // Build occluder list once refs exist
   const occluders = useMemo(
     () =>
       [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(
@@ -277,58 +183,45 @@ export default function Experience() {
     [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj]
   );
 
-  // Follow the tower with a small light + halo without causing React re-renders
-  const haloGroupRef = useRef(null);
-  const tmpBox = useMemo(() => new THREE.Box3(), []);
-  const tmpVec = useMemo(() => new THREE.Vector3(), []);
-  useFrame(() => {
-    if (!radioTowerObj || !haloGroupRef.current) return;
-    radioTowerObj.updateMatrixWorld(true);
-    tmpBox.setFromObject(radioTowerObj);
-    tmpBox.getCenter(tmpVec);
-    haloGroupRef.current.position
-      .copy(tmpVec)
-      .add({ x: 0, y: towerLightHeight, z: 0 });
-  });
-
   return (
     <>
       <Perf position="top-left" />
 
+      {/* Background camera used for sky/stars (layer 1) */}
       <perspectiveCamera
         ref={skyCamRef}
         args={[50, size.width / size.height, 0.1, SKY_FAR]}
       />
 
+      {/* Scene fog (world) */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
 
+      {/* Sky & Stars live on layer 1 and are rendered by skyCam in the prepass */}
       <Sky
         ref={skyRef}
+        onUpdate={setLayer1}
         sunPosition={sunPosition}
         rayleigh={rayleigh}
         turbidity={turbidity}
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
       />
-
-      {showStars && (
-        <group ref={starsWrapRef}>
-          <Stars
-            ref={starsRef}
-            radius={starsRadius}
-            depth={starsDepth}
-            count={starsCount}
-            factor={starsFactor}
-            saturation={starsSaturation}
-            fade={starsFade}
-            speed={starsSpeed}
-          />
-        </group>
-      )}
+      <group ref={starsWrapRef} onUpdate={setLayer1}>
+        <Stars
+          // Defaults — no Leva controls; feel free to tweak constants if you like
+          radius={360}
+          depth={2}
+          count={20000}
+          factor={4}
+          saturation={0}
+          fade={false}
+          speed={0}
+        />
+      </group>
 
       <OrbitControls
         makeDefault
@@ -343,7 +236,7 @@ export default function Experience() {
         rotateSpeed={0.5}
       />
 
-      {/* world lights */}
+      {/* World lights (layer 0 by default) */}
       <ambientLight intensity={0} color="#ffffff" />
       <directionalLight
         position={[-10, 15, -10]}
@@ -363,27 +256,12 @@ export default function Experience() {
         {/* Terrain (capture mesh) */}
         <Terrain ref={handleTerrainRef} />
 
-        {/* Scene actors */}
+        {/* Scene actors (layer 0) */}
         <Forest ref={handleForestRef} terrainMesh={terrainMesh} />
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
-
-        {/* Local glow that follows the tower */}
-        {towerGlow && (
-          <group ref={haloGroupRef}>
-            <TowerHalo
-              radius={towerGlowRadius}
-              intensity={towerGlowIntensity}
-            />
-            <pointLight
-              intensity={towerLightIntensity}
-              distance={towerLightDistance}
-              decay={2}
-            />
-          </group>
-        )}
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem
@@ -393,6 +271,7 @@ export default function Experience() {
         />
       </Suspense>
 
+      {/* Forward fog that targets the background (set to layer 1 to match sky) */}
       <UnifiedForwardFog
         enabled={fEnabled}
         color={fColor}
