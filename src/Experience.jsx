@@ -1,5 +1,5 @@
 import { Perf } from "r3f-perf";
-import { OrbitControls, Sky, Stars } from "@react-three/drei";
+import { OrbitControls, Sky, Stars, Billboard } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import {
   useRef,
@@ -19,6 +19,53 @@ import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
+
+// --- small additive, soft-edged disk that fakes local bloom ---
+function TowerHalo({ color = "#ffb97d", radius = 3, intensity = 1 }) {
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uColor: { value: new THREE.Color(color) },
+          uIntensity: { value: intensity },
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+          void main(){
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          varying vec2 vUv;
+          uniform vec3 uColor;
+          uniform float uIntensity;
+          void main(){
+            // circular falloff (soft edge)
+            vec2 d = vUv - 0.5;
+            float r = length(d) * 2.0;
+            float alpha = smoothstep(1.0, 0.0, r); // 1 at center -> 0 at edge
+            gl_FragColor = vec4(uColor * uIntensity * alpha, alpha);
+          }
+        `,
+      }),
+    [color, intensity]
+  );
+
+  // billboard facing camera, horizontal disk on ground (rotate -90° around X)
+  return (
+    <Billboard follow={true} lockX={false} lockY={true} lockZ={false}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[radius * 2, radius * 2, 1, 1]} />
+        <primitive attach="material" object={mat} />
+      </mesh>
+    </Billboard>
+  );
+}
 
 export default function Experience() {
   const skyRef = useRef();
@@ -126,6 +173,14 @@ export default function Experience() {
     fLightIntensity,
     fAnisotropy,
     fSkyRadius,
+
+    // Local glow controls (instead of SelectiveBloom)
+    towerGlow,
+    towerGlowRadius,
+    towerGlowIntensity,
+    towerLightIntensity,
+    towerLightDistance,
+    towerLightHeight,
   } = useControls({
     Atmosphere: folder({
       fogColor: { value: "#585858" },
@@ -174,7 +229,17 @@ export default function Experience() {
       fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
       fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
     }),
+    "Tower FX (Local Glow)": folder({
+      towerGlow: { value: true, label: "Enable Local Glow" },
+      towerGlowRadius: { value: 3, min: 0.5, max: 10, step: 0.1 },
+      towerGlowIntensity: { value: 1.2, min: 0, max: 5, step: 0.05 },
+      towerLightIntensity: { value: 0.25, min: 0, max: 3, step: 0.01 },
+      towerLightDistance: { value: 6, min: 0.1, max: 30, step: 0.1 },
+      towerLightHeight: { value: 1.2, min: -2, max: 5, step: 0.05 },
+    }),
   });
+
+  const kernelMap = {}; // (kept only to avoid removing your import accidentally)
 
   useEffect(() => {
     const setLayersRecursive = (obj, idx) => {
@@ -211,6 +276,20 @@ export default function Experience() {
       ),
     [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj]
   );
+
+  // Follow the tower with a small light + halo without causing React re-renders
+  const haloGroupRef = useRef(null);
+  const tmpBox = useMemo(() => new THREE.Box3(), []);
+  const tmpVec = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    if (!radioTowerObj || !haloGroupRef.current) return;
+    radioTowerObj.updateMatrixWorld(true);
+    tmpBox.setFromObject(radioTowerObj);
+    tmpBox.getCenter(tmpVec);
+    haloGroupRef.current.position
+      .copy(tmpVec)
+      .add({ x: 0, y: towerLightHeight, z: 0 });
+  });
 
   return (
     <>
@@ -264,6 +343,7 @@ export default function Experience() {
         rotateSpeed={0.5}
       />
 
+      {/* world lights */}
       <ambientLight intensity={0} color="#ffffff" />
       <directionalLight
         position={[-10, 15, -10]}
@@ -289,6 +369,21 @@ export default function Experience() {
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
+
+        {/* Local glow that follows the tower */}
+        {towerGlow && (
+          <group ref={haloGroupRef}>
+            <TowerHalo
+              radius={towerGlowRadius}
+              intensity={towerGlowIntensity}
+            />
+            <pointLight
+              intensity={towerLightIntensity}
+              distance={towerLightDistance}
+              decay={2}
+            />
+          </group>
+        )}
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem
