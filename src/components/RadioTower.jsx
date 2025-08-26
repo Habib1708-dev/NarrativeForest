@@ -13,18 +13,14 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 import { useFrame } from "@react-three/fiber";
 
 export default forwardRef(function RadioTower(_, ref) {
-  // NOTE: path is relative to /public. Space is URL-encoded.
   const glbPath = "/models/radioTower/Radio%20tower.glb";
   const { scene } = useGLTF(glbPath);
 
-  // Deep clone so we can safely mutate materials/colors per-instance
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
 
-  // Root for external systems
   const rootRef = useRef(null);
   useImperativeHandle(ref, () => rootRef.current, []);
 
-  // Collect unique materials
   const materialsRef = useRef([]);
   useEffect(() => {
     if (!cloned) return;
@@ -33,7 +29,6 @@ export default forwardRef(function RadioTower(_, ref) {
       if (!o.isMesh) return;
       o.castShadow = true;
       o.receiveShadow = true;
-
       const arr = Array.isArray(o.material) ? o.material : [o.material];
       arr.forEach((m) => {
         if (!m) return;
@@ -46,9 +41,6 @@ export default forwardRef(function RadioTower(_, ref) {
     materialsRef.current = Array.from(mats.values());
   }, [cloned]);
 
-  // ---------------------------
-  // Leva Controls
-  // ---------------------------
   const params = useControls({
     "Radio Tower": folder(
       {
@@ -148,7 +140,6 @@ export default forwardRef(function RadioTower(_, ref) {
     tintIntensity,
   } = params;
 
-  // Tint logic
   useEffect(() => {
     const target = new THREE.Color(tintColor);
     materialsRef.current.forEach((m) => {
@@ -159,7 +150,6 @@ export default forwardRef(function RadioTower(_, ref) {
     });
   }, [tintColor, tintIntensity]);
 
-  // Compose transforms
   const position = useMemo(
     () => [positionX, positionY, positionZ],
     [positionX, positionY, positionZ]
@@ -173,130 +163,138 @@ export default forwardRef(function RadioTower(_, ref) {
     [scale, heightScale]
   );
 
-  // ---------------------------
-  // Dissolve (onBeforeCompile)
-  // ---------------------------
-  const progressRef = useRef(-0.2); // Start fully invisible (< 0 ensures nothing passes)
+  // -------- Dissolve (robust, chainable) --------
+  const progressRef = useRef(-0.2);
   const worldYRangeRef = useRef({ min: 0, max: 1 });
 
-  // Helper: push a uniform value to all patched materials
   const updateUniformAll = (name, val) => {
     materialsRef.current.forEach((m) => {
       const sh = m?.userData?.rtShader;
-      if (sh && sh.uniforms && name in sh.uniforms) {
+      if (sh && sh.uniforms && name in sh.uniforms)
         sh.uniforms[name].value = val;
-      }
     });
   };
 
-  // Patch materials once
   useEffect(() => {
     materialsRef.current.forEach((m) => {
       if (!m || m.userData.rtPatched) return;
       if (!(m instanceof THREE.MeshStandardMaterial)) return;
 
+      // Chain any existing patch (e.g., UnifiedForwardFog) instead of overwriting it.
+      const prevOnBeforeCompile = m.onBeforeCompile;
+
       m.onBeforeCompile = (shader) => {
-        // uniforms
-        shader.uniforms.uProgress = { value: progressRef.current }; // [-0.2..1.2]
-        shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
-        shader.uniforms.uNoiseScale = { value: params.noiseScale };
-        shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
-        shader.uniforms.uGlowStrength = { value: params.glowStrength };
-        shader.uniforms.uGlowColor = {
-          value: new THREE.Color(params.glowColor),
-        };
-        shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
-        shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
-        shader.uniforms.uSeed = { value: params.seed };
+        // Let earlier patch(es) run first
+        if (typeof prevOnBeforeCompile === "function")
+          prevOnBeforeCompile(shader);
 
-        // varyings + helpers (unique prefix to avoid name clashes)
-        const fragPrelude = /* glsl */ `
-          varying vec3 vWorldPos;
-          uniform float uProgress;
-          uniform float uEdgeWidth;
-          uniform float uNoiseScale;
-          uniform float uNoiseAmp;
-          uniform float uMinY;
-          uniform float uMaxY;
-          uniform float uSeed;
-          uniform vec3 uGlowColor;
-          uniform float uGlowStrength;
+        // Ensure shared varying only once
+        if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
+          shader.vertexShader = shader.vertexShader.replace(
+            "#include <common>",
+            "#include <common>\n varying vec3 worldPos;"
+          );
+        }
+        if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.fragmentShader)) {
+          shader.fragmentShader = shader.fragmentShader.replace(
+            "#include <common>",
+            "#include <common>\n varying vec3 worldPos;"
+          );
+        }
 
-          // Cheap 3D value-noise (rt_ prefix to avoid duplicates)
-          float rt_hash(vec3 p){
-            p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
-            p += dot(p, p.yzx + 33.33);
-            return fract((p.x + p.y) * p.z);
-          }
-          float rt_vnoise(vec3 x){
-            vec3 i = floor(x);
-            vec3 f = fract(x);
-            vec3 u = f*f*(3.0-2.0*f);
-            float n000 = rt_hash(i + vec3(0,0,0));
-            float n100 = rt_hash(i + vec3(1,0,0));
-            float n010 = rt_hash(i + vec3(0,1,0));
-            float n110 = rt_hash(i + vec3(1,1,0));
-            float n001 = rt_hash(i + vec3(0,0,1));
-            float n101 = rt_hash(i + vec3(1,0,1));
-            float n011 = rt_hash(i + vec3(0,1,1));
-            float n111 = rt_hash(i + vec3(1,1,1));
-            float nx00 = mix(n000, n100, u.x);
-            float nx10 = mix(n010, n110, u.x);
-            float nx01 = mix(n001, n101, u.x);
-            float nx11 = mix(n011, n111, u.x);
-            float nxy0 = mix(nx00, nx10, u.y);
-            float nxy1 = mix(nx01, nx11, u.y);
-            return mix(nxy0, nxy1, u.z);
-          }
-        `;
+        // Compute worldPos WITHOUT relying on `worldPosition`
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <worldpos_vertex>",
+          `
+          #include <worldpos_vertex>
+          #ifdef USE_INSTANCING
+            mat4 rtModel = instanceMatrix * modelMatrix;
+          #else
+            mat4 rtModel = modelMatrix;
+          #endif
+          worldPos = (rtModel * vec4(transformed, 1.0)).xyz;
+          `
+        );
 
-        const vertPrelude = `varying vec3 vWorldPos;`;
+        // Add our uniforms (unique names) + helpers
+        if (!/uniform\s+float\s+uProgress\s*;/.test(shader.fragmentShader)) {
+          shader.uniforms.uProgress = { value: progressRef.current };
+          shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
+          shader.uniforms.uNoiseScale = { value: params.noiseScale };
+          shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
+          shader.uniforms.uGlowStrength = { value: params.glowStrength };
+          shader.uniforms.uGlowColor = {
+            value: new THREE.Color(params.glowColor),
+          };
+          shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
+          shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
+          shader.uniforms.uSeed = { value: params.seed };
 
-        // Inject world position
-        shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", `#include <common>\n${vertPrelude}`)
-          .replace(
-            "#include <worldpos_vertex>",
-            `#include <worldpos_vertex>\n  vWorldPos = worldPosition.xyz;`
+          const fragPrelude = /* glsl */ `
+            uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uMinY, uMaxY, uSeed, uGlowStrength;
+            uniform vec3  uGlowColor;
+
+            // Prefixed noise to avoid name collisions
+            float rt_hash(vec3 p){
+              p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+              p += dot(p, p.yzx + 33.33);
+              return fract((p.x + p.y) * p.z);
+            }
+            float rt_vnoise(vec3 x){
+              vec3 i = floor(x);
+              vec3 f = fract(x);
+              vec3 u = f*f*(3.0-2.0*f);
+              float n000 = rt_hash(i + vec3(0,0,0));
+              float n100 = rt_hash(i + vec3(1,0,0));
+              float n010 = rt_hash(i + vec3(0,1,0));
+              float n110 = rt_hash(i + vec3(1,1,0));
+              float n001 = rt_hash(i + vec3(0,0,1));
+              float n101 = rt_hash(i + vec3(1,0,1));
+              float n011 = rt_hash(i + vec3(0,1,1));
+              float n111 = rt_hash(i + vec3(1,1,1));
+              float nx00 = mix(n000, n100, u.x);
+              float nx10 = mix(n010, n110, u.x);
+              float nx01 = mix(n001, n101, u.x);
+              float nx11 = mix(n011, n111, u.x);
+              float nxy0 = mix(nx00, nx10, u.y);
+              float nxy1 = mix(nx01, nx11, u.y);
+              return mix(nxy0, nxy1, u.z);
+            }
+          `;
+          shader.fragmentShader = shader.fragmentShader.replace(
+            "#include <common>",
+            `#include <common>\n${fragPrelude}`
           );
 
-        // Inject dissolve logic + glow into MeshStandard
-        shader.fragmentShader = shader.fragmentShader
-          .replace("#include <common>", `#include <common>\n${fragPrelude}`)
-          // Compute dissolve mask at the start of main
-          .replace(
+          // Insert dissolve gate early in main
+          shader.fragmentShader = shader.fragmentShader.replace(
             "void main() {",
             `void main() {
-              // ---- RadioTower dissolve prepass ----
-              float y01 = clamp((vWorldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
-              float n = rt_vnoise(vWorldPos * uNoiseScale + vec3(uSeed));
+              float y01 = clamp((worldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
+              float n = rt_vnoise(worldPos * uNoiseScale + vec3(uSeed));
               float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
-              // Keep fragments below cutoff; discard above
               if (y01 > cutoff) { discard; }
-              // Edge band for glow (visible only near front of build)
               float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
             `
-          )
-          // Add glow energy into PBR emissive term
-          .replace(
+          );
+
+          // Add glow energy to the PBR emissive term
+          shader.fragmentShader = shader.fragmentShader.replace(
             "#include <emissivemap_fragment>",
             `#include <emissivemap_fragment>
              totalEmissiveRadiance += edge * uGlowColor * uGlowStrength;`
           );
+        }
 
-        // Save shader for live-uniform updates
         m.userData.rtShader = shader;
       };
 
-      // Prevent double-patching on re-renders
       m.userData.rtPatched = true;
-      // We rely on discard (not alpha blend), keep depthWrite true.
-      m.transparent = false;
+      m.transparent = false; // we discard; keep depth write for nice edges
       m.needsUpdate = true;
     });
   }, [params.edgeWidth, params.noiseScale, params.noiseAmp, params.glowStrength, params.glowColor, params.seed]);
 
-  // Update uniforms when Leva params change
   useEffect(
     () => updateUniformAll("uEdgeWidth", params.edgeWidth),
     [params.edgeWidth]
@@ -319,10 +317,8 @@ export default forwardRef(function RadioTower(_, ref) {
   );
   useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
 
-  // Compute world-space Y-range for normalized build (minY..maxY)
   const updateWorldYRange = () => {
     if (!rootRef.current) return;
-    // Ensure matrices are current
     rootRef.current.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(rootRef.current);
     worldYRangeRef.current.min = box.min.y;
@@ -331,24 +327,17 @@ export default forwardRef(function RadioTower(_, ref) {
     updateUniformAll("uMaxY", worldYRangeRef.current.max);
   };
 
-  // Recompute bounds when transform changes
   useEffect(() => {
     updateWorldYRange();
   }, [cloned, positionX, positionY, positionZ, rotationYDeg, scale, heightScale]);
 
-  // Animate progress (dissolve-IN). If you toggle "Build Tower" off, it will reverse.
   useFrame((_, dt) => {
     const target = params.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = params.speed * dt * dir;
       const next = progressRef.current + step;
-      // Clamp and avoid jitter
-      if ((dir > 0 && next >= target) || (dir < 0 && next <= target)) {
-        progressRef.current = target;
-      } else {
-        progressRef.current = next;
-      }
+      progressRef.current = (dir > 0 ? Math.min : Math.max)(next, target);
       updateUniformAll("uProgress", progressRef.current);
     }
   });
