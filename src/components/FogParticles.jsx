@@ -114,20 +114,25 @@ export default function FogParticles({
     if (!srcMat) return depthMatOpaque;
     let cached = cutoutDepthCache.current.get(srcMat.uuid);
     if (cached) return cached;
+
+    // Create with supported options only
     const dm = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: srcMat.map || null,
       alphaMap: srcMat.alphaMap || null,
-      skinning: !!srcMat.skinning,
-      morphTargets: !!srcMat.morphTargets,
-      morphNormals: !!srcMat.morphNormals,
     });
-    dm.alphaTest = srcMat.alphaTest ?? 0;
+    // Assign these as properties (constructor setValues would warn)
+    dm.skinning = !!srcMat.skinning;
+    dm.morphTargets = !!srcMat.morphTargets;
+    // NOTE: MeshDepthMaterial has no morphNormals
+
+    dm.alphaTest = srcMat.alphaTest ?? 0.0;
     dm.side = srcMat.side ?? THREE.FrontSide;
     dm.transparent = false;
     dm.depthWrite = true;
     dm.depthTest = true;
     dm.blending = THREE.NoBlending;
+
     cutoutDepthCache.current.set(srcMat.uuid, dm);
     return dm;
   };
@@ -234,8 +239,7 @@ export default function FogParticles({
         for (const [n, orig] of matSwapStash) n.material = orig;
       } finally {
         restoreLayers(layerStash);
-        // Restore framebuffer safely (avoid stale target after resize)
-        gl.setRenderTarget(prevTarget || null);
+        gl.setRenderTarget(prevTarget || null); // restore framebuffer
         scene.overrideMaterial = prevOverride || null;
       }
     }
@@ -293,7 +297,9 @@ export default function FogParticles({
     uniform float sizeFactor;
     uniform vec3 fogColor;
 
-    float linearizeDepth(float z) {
+    // Convert [0..1] depth to linear eye space; z01 must be converted to NDC first.
+    float linearizeDepth(float z01) {
+      float z = z01 * 2.0 - 1.0; // NDC
       return (2.0 * near * far) / (far + near - z * (far - near));
     }
 
@@ -302,14 +308,15 @@ export default function FogParticles({
       if (c.a <= 0.001) discard;
 
       vec2 screenUV = gl_FragCoord.xy / resolution;
-      float sceneZ = texture2D(depthTex, screenUV).x;
-      float particleZ = gl_FragCoord.z;
 
-      float sceneLin = linearizeDepth(sceneZ);
-      float particleLin = linearizeDepth(particleZ);
-      float delta = sceneLin - particleLin;
+      float sceneZ01    = texture2D(depthTex, screenUV).x;
+      float particleZ01 = gl_FragCoord.z;
 
-      float eff = max(1e-4, falloff * sizeFactor);
+      float sceneLin    = linearizeDepth(sceneZ01);
+      float particleLin = linearizeDepth(particleZ01);
+      float delta       = sceneLin - particleLin;
+
+      float eff  = max(1e-4, falloff * sizeFactor);
       float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
 
       vec3 tinted = c.rgb * fogColor;
@@ -367,7 +374,7 @@ export default function FogParticles({
                 uniforms={{
                   map: { value: tex },
                   depthTex: uDepthTex.current, // stays valid; .value updates
-                  resolution: { value: uResolution.current }, // same object; values update
+                  resolution: { value: uResolution.current },
                   opacity: { value: opacity },
                   near: { value: camera.near },
                   far: { value: camera.far },
