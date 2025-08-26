@@ -27,7 +27,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     count: { value: 1200, min: 10, max: 20000, step: 10, label: "Tree Count" },
     chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
     nearRadius: {
-      value: 0.2,
+      value: 1.2,
       min: 0.01,
       max: 10,
       step: 0.01,
