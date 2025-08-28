@@ -1,3 +1,4 @@
+// src/components/FogParticles.jsx
 import { useMemo, useRef, useEffect, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture, Billboard } from "@react-three/drei";
@@ -5,18 +6,17 @@ import { useControls } from "leva";
 import * as THREE from "three";
 
 /**
- * FogParticles — soft billboards with two-pass depth prepass.
- * Now matches UnifiedForwardFog via shared uniforms & evalFog,
- * uses linearized texture sampling and premultiplied alpha.
+ * FogParticles — single-pass soft billboards with prepass depth.
+ * Adds "smart occlusion" that attenuates particles where scene geometry is in front,
+ * while preserving soft-particle edges and UFF-consistent fog fade.
  */
 export default function FogParticles({
   count = 5,
   positions = null,
   occluders = [],
-  // Optional: pass UFF params to exactly match scene fog. If omitted, uses sane defaults.
   fogParams,
 }) {
-  // Controls for particle look (kept from your version)
+  // Look controls
   const {
     size,
     opacity,
@@ -28,16 +28,46 @@ export default function FogParticles({
     "Fog Particles",
     {
       size: { value: 2, min: 0.1, max: 20, step: 0.1 },
-      opacity: { value: 1, min: 0.0, max: 1.0, step: 0.01 },
-      falloff: { value: 0.8, min: 0.01, max: 5.0, step: 0.01 },
+      opacity: { value: 1, min: 0, max: 1, step: 0.01 },
+      falloff: { value: 0.8, min: 0.01, max: 5, step: 0.01 },
       scaleFalloffWithSize: { value: true },
       rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
-      fogTint: { value: "#c1c1c1" }, // base tint for sprite texture
+      fogTint: { value: "#c1c1c1" },
     },
     { collapsed: false }
   );
 
-  // === UFF params (pull from prop or use defaults that match your Experience.jsx ranges) ===
+  // Smart occlusion controls
+  const { occlusionThreshold, occlusionSoftness, fogBehindObjects } =
+    useControls(
+      "Smart Fog Occlusion",
+      {
+        occlusionThreshold: {
+          value: 1.5,
+          min: 0.05,
+          max: 5.0,
+          step: 0.05,
+          label: "Occlusion Distance",
+        },
+        occlusionSoftness: {
+          value: 2.0,
+          min: 0.05,
+          max: 5.0,
+          step: 0.05,
+          label: "Occlusion Softness",
+        },
+        fogBehindObjects: {
+          value: 0.0,
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          label: "Fog Behind Objects",
+        },
+      },
+      { collapsed: false }
+    );
+
+  // UFF params (defaults aligned to your Experience.jsx)
   const {
     color: fogColorHex = "#98a0a5",
     density = 1.96,
@@ -58,20 +88,18 @@ export default function FogParticles({
     [lightArr]
   );
 
-  // Texture & tint (tint is your art-direction color for the particle)
+  // Texture & tint
   const tex = useTexture("/textures/fog/fog.png");
   const uTint = useMemo(() => new THREE.Color(fogTint), [fogTint]);
 
   const groupRef = useRef();
   const meshRefs = useRef([]);
-  const spriteRefs = useRef([]);
   const billboardRefs = useRef([]);
   const angleRef = useRef(0);
 
   const { gl, size: viewport, camera, scene } = useThree();
   const dpr = gl.getPixelRatio ? gl.getPixelRatio() : 1;
 
-  // Keep particles on layer 0 (outside prepass layer)
   useEffect(() => {
     groupRef.current?.traverse?.((o) => o.layers.set(0));
   }, []);
@@ -118,7 +146,7 @@ export default function FogParticles({
     };
   }, [gl, viewport.width, viewport.height, dpr]);
 
-  // Depth material (opaque override)
+  // Depth-only materials for prepass
   const depthMatOpaque = useMemo(() => {
     const m = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
@@ -129,7 +157,6 @@ export default function FogParticles({
     return m;
   }, []);
 
-  // Depth-only materials for alpha-cut meshes (cache)
   const cutoutDepthCache = useRef(new Map());
   const getCutoutDepthMat = (srcMat) => {
     if (!srcMat) return depthMatOpaque;
@@ -141,8 +168,7 @@ export default function FogParticles({
       map: srcMat.map || null,
       alphaMap: srcMat.alphaMap || null,
     });
-    dm.skinning = !!srcMat.skinning;
-    dm.morphTargets = !!srcMat.morphTargets;
+    // Do NOT set dm.skinning / dm.morphTargets; Three handles this automatically.
     dm.alphaTest = srcMat.alphaTest ?? 0.0;
     dm.side = srcMat.side ?? THREE.FrontSide;
     dm.transparent = false;
@@ -158,7 +184,7 @@ export default function FogParticles({
   useEffect(() => {
     if (!tex) return;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace; // we'll linearize manually in shader
+    tex.colorSpace = THREE.SRGBColorSpace; // linearize in shader
     tex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy?.() ?? 1);
     tex.needsUpdate = true;
   }, [tex, gl]);
@@ -197,7 +223,6 @@ export default function FogParticles({
   // Prepass + rotation
   useFrame((_, dt) => {
     if (rt) {
-      // Collect occluders
       const occ = [];
       for (let i = 0; i < occluders.length; i++) {
         const obj = getObject(occluders[i]);
@@ -219,11 +244,10 @@ export default function FogParticles({
       const layerStash = [];
 
       try {
-        for (let i = 0; i < occ.length; i++) {
+        for (let i = 0; i < occ.length; i++)
           setSubtreeToLayer(occ[i], PREPASS_LAYER, layerStash);
-        }
 
-        // Collect cutouts
+        // Hide cutouts for the opaque depth pass
         const cutoutMeshes = [];
         for (let i = 0; i < occ.length; i++) {
           occ[i].traverse((node) => {
@@ -231,7 +255,6 @@ export default function FogParticles({
           });
         }
 
-        // PASS 1: opaque (hide cutouts)
         const visStash = [];
         for (const n of cutoutMeshes) {
           visStash.push([n, n.visible]);
@@ -243,7 +266,7 @@ export default function FogParticles({
         gl.render(scene, depthCam);
         for (const [n, v] of visStash) n.visible = v;
 
-        // PASS 2: cutout (swap to depth-only mats)
+        // Cutout pass with depth-only mats
         scene.overrideMaterial = null;
         const matSwapStash = [];
         for (const n of cutoutMeshes) {
@@ -265,9 +288,6 @@ export default function FogParticles({
     angleRef.current += rotationSpeedZ * dt;
     const angle = angleRef.current;
     meshRefs.current.forEach((m) => m && (m.rotation.z = angle));
-    spriteRefs.current.forEach(
-      (s) => s?.material && (s.material.rotation = angle)
-    );
   }, -2);
 
   // Instance positions
@@ -292,7 +312,7 @@ export default function FogParticles({
     return offsets;
   }, [positions, offsets]);
 
-  // === Shaders (carry world pos, UFF fog, premultiplied output) ===
+  // === Shaders (world pos, soft particles, UFF fog, smart occlusion) ===
   const vertexShader = /* glsl */ `
     varying vec2 vUv;
     varying vec3 vWorldPos;
@@ -317,9 +337,12 @@ export default function FogParticles({
     uniform float far;
     uniform float falloff;
     uniform float sizeFactor;
-
-    // Particle art-direction tint (user control)
     uniform vec3 uTint;
+
+    // Smart occlusion params
+    uniform float occlusionThreshold; // world-depth delta where occlusion begins
+    uniform float occlusionSoftness;  // smooth ramp width
+    uniform float fogBehindObjects;   // residual visibility when occluded [0..1]
 
     // UFF fog uniforms
     uniform vec3  uFogColor;
@@ -371,30 +394,37 @@ export default function FogParticles({
       vec4 texel = texture2D(map, vUv);
       if (texel.a <= 0.001) discard;
 
-      // Linearize sampled sRGB texture (ShaderMaterial doesn't auto-convert)
+      // linearize sRGB texture (ShaderMaterial doesn't do it)
       vec3 texL = pow(texel.rgb, vec3(2.2));
 
-      // Soft-particle edge using depth prepass
+      // Soft particles against scene prepass
       vec2 screenUV = gl_FragCoord.xy / resolution;
       float sceneZ01    = texture2D(depthTex, screenUV).x;
       float particleZ01 = gl_FragCoord.z;
+
       float sceneLin    = linearizeDepth(sceneZ01);
       float particleLin = linearizeDepth(particleZ01);
-      float delta       = sceneLin - particleLin;
-      float eff         = max(1e-4, falloff * sizeFactor);
-      float soft        = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
+      float delta       = sceneLin - particleLin; // <0: scene in front (occludes), >0: particle in front
 
-      // Evaluate scene fog at particle position
+      float eff  = max(1e-4, falloff * sizeFactor);
+      float soft = clamp(smoothstep(0.0, eff, delta), 0.0, 1.0);
+
+      // Smart occlusion: attenuate when scene is in front by a margin
+      // We measure "how much closer the scene is" as positive value:
+      float closerAmt = max(0.0, particleLin - sceneLin); // >0 means scene is closer to camera
+      float occAmt = smoothstep(occlusionThreshold, occlusionThreshold + occlusionSoftness, closerAmt);
+      float occlusionFactor = mix(1.0, fogBehindObjects, occAmt);
+
+      // Evaluate scene fog at particle position (for color & vanish-in-fog)
       float fogFactor; vec3 fogCol;
       evalFog(vWorldPos, cameraPosition, fogFactor, fogCol);
 
-      // Bring particle color toward fog in heavy fog; alpha vanishes with fog
+      // Color towards scene fog as fog gets dense; alpha also vanishes with fog
       vec3 baseCol = texL * uTint;
       vec3 outCol  = mix(baseCol, fogCol, fogFactor);
-      float alpha  = texel.a * opacity * soft * (1.0 - fogFactor);
+      float alpha  = texel.a * opacity * soft * occlusionFactor * (1.0 - fogFactor);
 
-      // Premultiplied alpha output prevents background "lightening"
-      gl_FragColor = vec4(outCol * alpha, alpha);
+      gl_FragColor = vec4(outCol * alpha, alpha); // premultiplied output
       if (gl_FragColor.a < 0.001) discard;
     }
   `;
@@ -408,27 +438,27 @@ export default function FogParticles({
         const pos = [position[0], position[1], position[2]];
 
         if (fallback) {
-          // Simple fallback: still premultiplied to reduce halos
+          // Minimal fallback (no prepass soft), still premultiplied
           return (
-            <sprite
+            <Billboard
               key={i}
               position={pos}
-              scale={[s, s, 1]}
-              ref={(el) => (spriteRefs.current[i] = el)}
+              follow
+              ref={(el) => (billboardRefs.current[i] = el)}
             >
-              <spriteMaterial
-                attach="material"
-                map={tex}
-                depthWrite={false}
-                depthTest
-                transparent
-                opacity={opacity}
-                color={uTint}
-                premultipliedAlpha
-                toneMapped
-                blending={THREE.NormalBlending}
-              />
-            </sprite>
+              <mesh scale={[s, s, 1]} ref={(el) => (meshRefs.current[i] = el)}>
+                <planeGeometry args={[1, 1]} />
+                <meshBasicMaterial
+                  map={tex}
+                  color={uTint}
+                  transparent
+                  premultipliedAlpha
+                  depthTest
+                  depthWrite={false}
+                  opacity={opacity}
+                />
+              </mesh>
+            </Billboard>
           );
         }
 
@@ -459,9 +489,14 @@ export default function FogParticles({
                   far: { value: camera.far },
                   falloff: { value: falloff },
                   sizeFactor: { value: scaleFalloffWithSize ? s : 1.0 },
-
-                  // Tint + UFF fog (match UnifiedForwardFog)
                   uTint: { value: uTint },
+
+                  // Smart occlusion uniforms
+                  occlusionThreshold: { value: occlusionThreshold },
+                  occlusionSoftness: { value: occlusionSoftness },
+                  fogBehindObjects: { value: fogBehindObjects },
+
+                  // UFF fog (match UnifiedForwardFog)
                   uFogColor: { value: uFogColor },
                   uDensity: { value: density },
                   uExtinction: { value: extinction },
