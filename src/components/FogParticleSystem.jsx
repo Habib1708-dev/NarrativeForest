@@ -10,10 +10,11 @@ import FogParticles from "./FogParticles";
  */
 export default function FogParticleSystem({
   terrainMesh,
-  occluders = [], // <-- NEW: array of occluders (e.g., [terrain, cabin, man, cat])
+  occluders = [],
   cellSize = 2,
   includeEdges = true,
-  visibleRadiusCells = 1, // square radius (1 => 3x3)
+  visibleRadiusCells = 1,
+  fogParams,
 }) {
   const { camera } = useThree();
 
@@ -164,6 +165,7 @@ export default function FogParticleSystem({
       count={visiblePositions.length}
       positions={visiblePositions}
       occluders={occluders}
+      fogParams={fogParams}
     />
   );
 }

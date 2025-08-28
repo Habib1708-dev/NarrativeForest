@@ -222,6 +222,19 @@ export default function Experience() {
           terrainMesh={terrainMesh}
           cellSize={2}
           occluders={occluders}
+          fogParams={{
+            color: fColor,
+            density: fDensity,
+            extinction: fExtinction,
+            fogHeight: fFogHeight,
+            fadeStart: fFadeStart,
+            fadeEnd: fFadeEnd,
+            distFadeStart: fDistStart,
+            distFadeEnd: fDistEnd,
+            lightDir: [fLightDirX, fLightDirY, fLightDirZ],
+            lightIntensity: fLightIntensity,
+            anisotropy: fAnisotropy,
+          }}
         />
       </Suspense>
 

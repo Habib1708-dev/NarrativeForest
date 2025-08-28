@@ -1,5 +1,4 @@
-
-
+//src/shaders/terrain/vertex.glsl
 uniform float uTime;
 uniform float uPositionFrequency;
 uniform float uStrength;
