@@ -26,6 +26,7 @@ import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
+import Aurora from "./components/Aurora";
 
 export default function Experience() {
   // Three handles
@@ -216,6 +217,7 @@ export default function Experience() {
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
+        <Aurora />
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem
@@ -257,7 +259,7 @@ export default function Experience() {
       />
 
       {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
-      <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+      {/* <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
         <Bloom
           intensity={1.35}
           luminanceThreshold={0.7} // only “hot” emissive > ~0.7 bloom
@@ -265,7 +267,7 @@ export default function Experience() {
           kernelSize={KernelSize.LARGE}
           mipmapBlur
         />
-      </EffectComposer>
+      </EffectComposer> */}
     </>
   );
 }

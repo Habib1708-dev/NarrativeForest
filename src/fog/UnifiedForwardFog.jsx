@@ -1,280 +1,396 @@
 // src/fog/UnifiedForwardFog.jsx
-//
-// Unified Forward Fog (UFF)
-// - Injects a consistent physically-inspired height & distance fog into forward materials
-// - Provides correct cutout depth/distance override materials (no skinning/morphTargets props)
-// - Avoids Three.js warnings by NOT setting `skinning`/`morphTargets` on MeshDepthMaterial/MeshDistanceMaterial
-//
-// Drop this file in and mount <UnifiedForwardFog /> once in your scene.
-//
-// Example:
-// <Canvas>
-//   <UnifiedForwardFog color="#98a0a5" density={1.96} extinction={0.1} fogHeight={-12.7} />
-//   ...
-// </Canvas>
-
-import React, { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { useThree } from "@react-three/fiber";
-
-const MATERIAL_TAG = "__UFF_patched__";
-
-function makeDepthOverride(srcMat) {
-  // Depth override (RGBA packed). Respect cutouts but DO NOT set skinning/morphTargets.
-  const m = new THREE.MeshDepthMaterial({
-    depthPacking: THREE.RGBADepthPacking,
-  });
-  // Respect alpha cutouts if present on the source material
-  m.map = srcMat?.map || null;
-  m.alphaMap = srcMat?.alphaMap || null;
-  m.alphaTest = srcMat?.alphaTest ?? 0.0;
-  m.side = srcMat?.side ?? THREE.FrontSide;
-  m.depthWrite = true;
-  m.depthTest = true;
-  m.blending = THREE.NoBlending;
-  // No m.skinning / m.morphTargets here — Three handles these automatically.
-  return m;
-}
-
-function makeDistanceOverride(srcMat) {
-  // Distance override for point/spot shadow maps. Respect cutouts. Do NOT set skinning/morphTargets.
-  const m = new THREE.MeshDistanceMaterial();
-  m.map = srcMat?.map || null;
-  m.alphaMap = srcMat?.alphaMap || null;
-  m.alphaTest = srcMat?.alphaTest ?? 0.0;
-  m.side = srcMat?.side ?? THREE.FrontSide;
-  m.depthWrite = true;
-  m.depthTest = true;
-  m.blending = THREE.NoBlending;
-  // No m.skinning / m.morphTargets here — Three handles these automatically.
-  return m;
-}
+import { useThree, useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
 
 export default function UnifiedForwardFog({
-  // Visual look (match your FogParticles defaults if desired)
+  enabled = true,
+
   color = "#98a0a5",
   density = 1.96,
   extinction = 0.1,
-  fogHeight = -12.7,
-  fadeStart = 0.0,
-  fadeEnd = 51.8,
+  fogHeight = -3.9,
+  fadeStart = 3.9,
+  fadeEnd = 41.3,
   distFadeStart = 0.0,
   distFadeEnd = 92.0,
   lightDir = [-0.5, 0.8, -0.4],
   lightIntensity = 0.0,
   anisotropy = 0.0,
-  // Target filter (optional)
-  include = () => true, // (obj, material) => boolean
+
+  // NEW: fog-driven dither discard controls
+  clipEnable = true,
+  clipStart = 0.69,
+  clipEnd = 0.79,
+
+  skyRadius = 100,
+  layer = 1, // sky/stars layer
 }) {
-  const { scene } = useThree();
+  const { scene, camera, gl } = useThree();
+  const patched = useRef(new WeakSet());
+  const domeRef = useRef();
 
-  // Shared uniform values (objects reused across all patched materials)
-  const uFogColor = useMemo(() => new THREE.Color(color), [color]);
-  const uLightDir = useMemo(
-    () => new THREE.Vector3().fromArray(lightDir).normalize(),
-    [lightDir]
+  // Stable uniforms shared across all patched materials
+  const uniforms = useMemo(
+    () => ({
+      uFogColor: { value: new THREE.Color(color) },
+      uDensity: { value: density },
+      uExtinction: { value: extinction },
+      uFogHeight: { value: fogHeight },
+      uFadeStart: { value: fadeStart },
+      uFadeEnd: { value: fadeEnd },
+      uDistFadeStart: { value: distFadeStart },
+      uDistFadeEnd: { value: distFadeEnd },
+      uLightDir: { value: new THREE.Vector3().fromArray(lightDir).normalize() },
+      uLightIntensity: { value: lightIntensity },
+      uAnisotropy: { value: THREE.MathUtils.clamp(anisotropy, -0.9, 0.9) },
+
+      // dither clip as uniforms so you can tweak live without rebuilding
+      uClipEnable: { value: clipEnable ? 1.0 : 0.0 },
+      uClipStart: { value: clipStart },
+      uClipEnd: { value: clipEnd },
+    }),
+    [] // stable object
   );
 
-  // Track patched materials + their shader uniform references to update live
-  const patched = useRef(
-    new Map() // material -> { shaderUniforms, original: { onBeforeCompile, customDepth, customDist } }
+  // keep uniforms in sync with props
+  useEffect(() => {
+    uniforms.uFogColor.value.set(color);
+  }, [color, uniforms]);
+  useEffect(
+    () => void (uniforms.uDensity.value = density),
+    [density, uniforms]
   );
+  useEffect(
+    () => void (uniforms.uExtinction.value = extinction),
+    [extinction, uniforms]
+  );
+  useEffect(
+    () => void (uniforms.uFogHeight.value = fogHeight),
+    [fogHeight, uniforms]
+  );
+  useEffect(
+    () => void (uniforms.uFadeStart.value = fadeStart),
+    [fadeStart, uniforms]
+  );
+  useEffect(
+    () => void (uniforms.uFadeEnd.value = fadeEnd),
+    [fadeEnd, uniforms]
+  );
+  useEffect(
+    () => void (uniforms.uDistFadeStart.value = distFadeStart),
+    [distFadeStart, uniforms]
+  );
+  useEffect(
+    () => void (uniforms.uDistFadeEnd.value = distFadeEnd),
+    [distFadeEnd, uniforms]
+  );
+  useEffect(() => {
+    uniforms.uLightDir.value.fromArray(lightDir).normalize();
+  }, [lightDir, uniforms]);
+  useEffect(
+    () => void (uniforms.uLightIntensity.value = lightIntensity),
+    [lightIntensity, uniforms]
+  );
+  useEffect(() => {
+    uniforms.uAnisotropy.value = THREE.MathUtils.clamp(anisotropy, -0.9, 0.9);
+  }, [anisotropy, uniforms]);
 
-  // Build a function to patch one material
-  const patchMaterial = (mesh, mat) => {
-    if (!mat || mat[MATERIAL_TAG]) return;
-    // Optional filter
-    if (!include(mesh, mat)) return;
+  // dither clip live updates
+  useEffect(() => {
+    uniforms.uClipEnable.value = clipEnable ? 1.0 : 0.0;
+    uniforms.uClipStart.value = clipStart;
+    uniforms.uClipEnd.value = clipEnd;
+  }, [clipEnable, clipStart, clipEnd, uniforms]);
 
-    const original = {
-      onBeforeCompile: mat.onBeforeCompile,
-      customDepthMaterial: mesh.customDepthMaterial || null,
-      customDistanceMaterial: mesh.customDistanceMaterial || null,
-    };
+  // Shared GLSL (fog eval + small screen-space noise)
+  const GLSL_COMMON = `
+uniform vec3  uFogColor;
+uniform float uDensity;
+uniform float uExtinction;
+uniform float uFogHeight;
+uniform float uFadeStart;
+uniform float uFadeEnd;
+uniform float uDistFadeStart;
+uniform float uDistFadeEnd;
+uniform vec3  uLightDir;
+uniform float uLightIntensity;
+uniform float uAnisotropy;
 
-    mat.onBeforeCompile = (shader) => {
-      // Inject world position varying
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `
-          #include <common>
-          varying vec3 vUFFWorldPos;
+uniform float uClipEnable;
+uniform float uClipStart;
+uniform float uClipEnd;
+
+float henyeyGreenstein(float mu, float g){
+  float g2 = g*g;
+  float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
+  return (1.0 - g2) / (4.0 * 3.141592653589793 * denom);
+}
+
+// Cheap interleaved gradient noise based on pixel coords (stable & fast)
+float fogDither(vec2 p){
+  return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
+void evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
+  vec3  V = fragWorld - camPos;
+  float d = length(V);
+
+  float yRel = fragWorld.y - uFogHeight;
+  float heightMask = 1.0 - smoothstep(uFadeStart, uFadeEnd, yRel);
+  heightMask = clamp(heightMask, 0.0, 1.0);
+
+  float sigma = max(1e-6, uExtinction * uDensity);
+  float trans = exp(-sigma * d);
+
+  float df = smoothstep(uDistFadeStart, uDistFadeEnd, d);
+  trans = mix(trans, 0.0, df);
+
+  fogFactor = (1.0 - trans) * heightMask;
+
+  vec3 viewDir = normalize(V);
+  float mu   = dot(viewDir, -normalize(uLightDir));
+  float phase = henyeyGreenstein(mu, clamp(uAnisotropy, -0.9, 0.9));
+  fogCol = uFogColor * mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
+}
+`.trim();
+
+  // === Depth & distance material caches (for shadow passes) ===
+  const depthMatCache = useRef(new WeakMap());
+  const distMatCache = useRef(new WeakMap());
+
+  function getFogDepthMaterial(srcMat) {
+    if (depthMatCache.current.has(srcMat))
+      return depthMatCache.current.get(srcMat);
+    const m = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      skinning: !!srcMat?.skinning,
+      morphTargets: !!srcMat?.morphTargets,
+    });
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader =
         `
-        )
-        .replace(
+varying vec3 uFog_vWorldPosDepth;
+` +
+        shader.vertexShader.replace(
           "#include <project_vertex>",
           `
-          vUFFWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
-          #include <project_vertex>
+#include <project_vertex>
+vec4 uFog_wp = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+  uFog_wp = instanceMatrix * uFog_wp;
+#endif
+uFog_wp = modelMatrix * uFog_wp;
+uFog_vWorldPosDepth = uFog_wp.xyz;
+`
+        );
+      shader.fragmentShader =
         `
+varying vec3 uFog_vWorldPosDepth;
+${GLSL_COMMON}
+` +
+        shader.fragmentShader.replace(
+          "gl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );",
+          `
+// Fog-driven discard in shadow depth pass
+float fogFactor; vec3 fogCol;
+evalFog(uFog_vWorldPosDepth, cameraPosition, fogFactor, fogCol);
+if (uClipEnable > 0.5) {
+  float clipT = smoothstep(uClipStart, uClipEnd, clamp(fogFactor, 0.0, 1.0));
+  if (clipT > fogDither(gl_FragCoord.xy)) discard;
+}
+gl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );
+`
+        );
+      m.needsUpdate = true;
+    };
+    depthMatCache.current.set(srcMat, m);
+    return m;
+  }
+
+  function getFogDistanceMaterial(srcMat) {
+    if (distMatCache.current.has(srcMat))
+      return distMatCache.current.get(srcMat);
+    const m = new THREE.MeshDistanceMaterial({
+      skinning: !!srcMat?.skinning,
+      morphTargets: !!srcMat?.morphTargets,
+    });
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader =
+        `
+varying vec3 uFog_vWorldPosDepth;
+` +
+        shader.vertexShader.replace(
+          "#include <project_vertex>",
+          `
+#include <project_vertex>
+vec4 uFog_wp = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+  uFog_wp = instanceMatrix * uFog_wp;
+#endif
+uFog_wp = modelMatrix * uFog_wp;
+uFog_vWorldPosDepth = uFog_wp.xyz;
+`
+        );
+      shader.fragmentShader =
+        `
+varying vec3 uFog_vWorldPosDepth;
+${GLSL_COMMON}
+` +
+        shader.fragmentShader.replace(
+          "gl_FragColor = packDepthToRGBA( fragCoordZ );",
+          `
+// Fog-driven discard in shadow distance pass
+float fogFactor; vec3 fogCol;
+evalFog(uFog_vWorldPosDepth, cameraPosition, fogFactor, fogCol);
+if (uClipEnable > 0.5) {
+  float clipT = smoothstep(uClipStart, uClipEnd, clamp(fogFactor, 0.0, 1.0));
+  if (clipT > fogDither(gl_FragCoord.xy)) discard;
+}
+gl_FragColor = packDepthToRGBA( fragCoordZ );
+`
+        );
+      m.needsUpdate = true;
+    };
+    distMatCache.current.set(srcMat, m);
+    return m;
+  }
+
+  // === Patch each *built-in* mesh material once ===
+  const patchMaterial = (mat, mesh) => {
+    if (!enabled || !mat || patched.current.has(mat)) return;
+    if (mat.isShaderMaterial || mat.isPointsMaterial || mat.isLineBasicMaterial)
+      return;
+
+    mat.fog = true;
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = (shader) => {
+      prev?.(shader);
+      Object.assign(shader.uniforms, uniforms);
+
+      // world pos varying (instancing-safe)
+      shader.vertexShader =
+        `varying vec3 uFog_vWorldPos;\n` +
+        shader.vertexShader.replace(
+          "#include <project_vertex>",
+          `
+#include <project_vertex>
+vec4 uFog_wp = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+  uFog_wp = instanceMatrix * uFog_wp;
+#endif
+uFog_wp = modelMatrix * uFog_wp;
+uFog_vWorldPos = uFog_wp.xyz;
+`
         );
 
-      // Inject our uniforms + fog evaluation and replace the stock fog chunk
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `
-          #include <common>
-          varying vec3 vUFFWorldPos;
-
-          uniform vec3  uFogColor;
-          uniform float uDensity;
-          uniform float uExtinction;
-          uniform float uFogHeight;
-          uniform float uFadeStart;
-          uniform float uFadeEnd;
-          uniform float uDistFadeStart;
-          uniform float uDistFadeEnd;
-          uniform vec3  uLightDir;
-          uniform float uLightIntensity;
-          uniform float uAnisotropy;
-
-          float henyeyGreenstein(float mu, float g){
-            float g2 = g*g;
-            float denom = pow(1.0 + g2 - 2.0*g*mu, 1.5);
-            return (1.0 - g2) / (4.0 * 3.141592653589793 * denom);
-          }
-
-          void UFF_evalFog(in vec3 fragWorld, in vec3 camPos, out float fogFactor, out vec3 fogCol){
-            vec3  V = fragWorld - camPos;
-            float d = length(V);
-
-            float yRel = fragWorld.y - uFogHeight;
-            float heightMask = 1.0 - smoothstep(uFadeStart, uFadeEnd, yRel);
-            heightMask = clamp(heightMask, 0.0, 1.0);
-
-            float sigma = max(1e-6, uExtinction * uDensity);
-            float trans = exp(-sigma * d);
-
-            float df = smoothstep(uDistFadeStart, uDistFadeEnd, d);
-            trans = mix(trans, 0.0, df);
-
-            fogFactor = (1.0 - trans) * heightMask;
-
-            vec3 viewDir = normalize(V);
-            float mu   = dot(viewDir, -normalize(uLightDir));
-            float phase = henyeyGreenstein(mu, clamp(uAnisotropy, -0.9, 0.9));
-            fogCol = uFogColor * mix(1.0, (0.4 + 1.6*phase), uLightIntensity);
-          }
-        `
-        )
-        .replace(
+      // inject fog eval + dither discard before mixing color
+      shader.fragmentShader =
+        `varying vec3 uFog_vWorldPos;\n${GLSL_COMMON}\n` +
+        shader.fragmentShader.replace(
           "#include <fog_fragment>",
           `
-          {
-            float fogF; vec3 fogC;
-            UFF_evalFog(vUFFWorldPos, cameraPosition, fogF, fogC);
-            // Blend scene color towards fog color
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, fogC, clamp(fogF, 0.0, 1.0));
-          }
-        `
+#ifdef USE_FOG
+  float fogFactor; vec3 fogCol;
+  evalFog(uFog_vWorldPos, cameraPosition, fogFactor, fogCol);
+  // Optional fog-driven dithered clip
+  if (uClipEnable > 0.5) {
+    float clipT = smoothstep(uClipStart, uClipEnd, clamp(fogFactor, 0.0, 1.0));
+    if (clipT > fogDither(gl_FragCoord.xy)) discard;
+  }
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogCol, clamp(fogFactor, 0.0, 1.0));
+#endif
+`
         );
 
-      // Wire uniforms
-      shader.uniforms.uFogColor = { value: uFogColor };
-      shader.uniforms.uDensity = { value: density };
-      shader.uniforms.uExtinction = { value: extinction };
-      shader.uniforms.uFogHeight = { value: fogHeight };
-      shader.uniforms.uFadeStart = { value: fadeStart };
-      shader.uniforms.uFadeEnd = { value: fadeEnd };
-      shader.uniforms.uDistFadeStart = { value: distFadeStart };
-      shader.uniforms.uDistFadeEnd = { value: distFadeEnd };
-      shader.uniforms.uLightDir = { value: uLightDir };
-      shader.uniforms.uLightIntensity = { value: lightIntensity };
-      shader.uniforms.uAnisotropy = { value: anisotropy };
-
-      // Store reference for live updates later
-      patched.current.set(mat, {
-        shaderUniforms: shader.uniforms,
-        original,
-      });
+      mat.needsUpdate = true;
     };
 
-    // Provide override materials for correct depth/shadow behavior (cutouts supported)
-    mesh.customDepthMaterial = makeDepthOverride(mat);
-    mesh.customDistanceMaterial = makeDistanceOverride(mat);
+    // Mirror same discard in shadow passes so clipped pixels stop casting shadows
+    if (mesh) {
+      mesh.customDepthMaterial = getFogDepthMaterial(mat);
+      mesh.customDistanceMaterial = getFogDistanceMaterial(mat);
+    }
 
-    // Mark as patched and trigger recompile
-    Object.defineProperty(mat, MATERIAL_TAG, {
-      value: true,
-      configurable: true,
-    });
+    patched.current.add(mat);
     mat.needsUpdate = true;
   };
 
-  // Initial traversal + patch
-  useEffect(() => {
-    const toUnpatch = [];
-    scene.traverse((obj) => {
-      if (!obj.isMesh || !obj.material) return;
-
-      // Handle multi-material meshes
-      const materials = Array.isArray(obj.material)
-        ? obj.material
-        : [obj.material];
-      materials.forEach((m) => patchMaterial(obj, m));
-
-      toUnpatch.push(obj);
+  // Traverse & patch; keep dome centered
+  useFrame(() => {
+    if (!enabled) return;
+    scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) patchMaterial(m, o);
     });
+    if (domeRef.current) domeRef.current.position.copy(camera.position);
+  });
 
-    // Cleanup: restore original hooks and remove our tag/overrides
+  // Cleanup (force program rebuild)
+  useEffect(() => {
     return () => {
-      toUnpatch.forEach((obj) => {
-        if (!obj.isMesh || !obj.material) return;
-        const materials = Array.isArray(obj.material)
-          ? obj.material
-          : [obj.material];
-        materials.forEach((m) => {
-          const record = patched.current.get(m);
-          if (record) {
-            // Restore original onBeforeCompile
-            m.onBeforeCompile =
-              record.original.onBeforeCompile || ((/*shader*/) => {});
-            // Remove our tag
-            try {
-              delete m[MATERIAL_TAG];
-            } catch (_) {
-              // ignore
-            }
-            patched.current.delete(m);
-          }
-        });
-        obj.customDepthMaterial = null;
-        obj.customDistanceMaterial = null;
+      patched.current = new WeakSet();
+      scene.traverse((o) => {
+        if (o.isMesh) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach((m) => m && (m.needsUpdate = true));
+          // remove custom depth/distance if you want to fully revert (optional)
+          o.customDepthMaterial = undefined;
+          o.customDistanceMaterial = undefined;
+        }
       });
+      gl.info.programs?.forEach((p) => p?.program?.dispose?.());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene]);
+  }, [scene, gl]);
 
-  // Live-update uniforms when props change (no recompile)
+  // Put the dome & children on the requested layer
   useEffect(() => {
-    patched.current.forEach(({ shaderUniforms }) => {
-      shaderUniforms.uFogColor.value.copy(uFogColor);
-      shaderUniforms.uDensity.value = density;
-      shaderUniforms.uExtinction.value = extinction;
-      shaderUniforms.uFogHeight.value = fogHeight;
-      shaderUniforms.uFadeStart.value = fadeStart;
-      shaderUniforms.uFadeEnd.value = fadeEnd;
-      shaderUniforms.uDistFadeStart.value = distFadeStart;
-      shaderUniforms.uDistFadeEnd.value = distFadeEnd;
-      shaderUniforms.uLightDir.value.copy(uLightDir);
-      shaderUniforms.uLightIntensity.value = lightIntensity;
-      shaderUniforms.uAnisotropy.value = anisotropy;
-    });
-  }, [
-    uFogColor,
-    density,
-    extinction,
-    fogHeight,
-    fadeStart,
-    fadeEnd,
-    distFadeStart,
-    distFadeEnd,
-    uLightDir,
-    lightIntensity,
-    anisotropy,
-  ]);
+    if (!domeRef.current) return;
+    const setLayers = (obj, idx) => {
+      obj.layers.set(idx);
+      obj.children?.forEach((c) => setLayers(c, idx));
+    };
+    setLayers(domeRef.current, layer);
+  }, [layer]);
 
-  return null;
+  // Sky dome that visualizes fog at infinity (no dither here)
+  return (
+    <group ref={domeRef} layers={layer}>
+      <mesh frustumCulled={false}>
+        <sphereGeometry args={[skyRadius, 32, 18]} />
+        <shaderMaterial
+          side={THREE.BackSide}
+          transparent
+          depthWrite={false}
+          depthTest
+          blending={THREE.NormalBlending}
+          uniforms={uniforms}
+          vertexShader={
+            /* glsl */ `
+            varying vec3 uFog_vWorldPos;
+            void main(){
+              vec4 wp = modelMatrix * vec4(position, 1.0);
+              uFog_vWorldPos = wp.xyz;
+              gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+          `
+          }
+          fragmentShader={
+            /* glsl */ `
+            varying vec3 uFog_vWorldPos;
+            ${GLSL_COMMON}
+            void main(){
+              float fogFactor; vec3 fogCol;
+              evalFog(uFog_vWorldPos, cameraPosition, fogFactor, fogCol);
+              gl_FragColor = vec4(fogCol, clamp(fogFactor, 0.0, 1.0));
+            }
+          `
+          }
+        />
+      </mesh>
+    </group>
+  );
 }
