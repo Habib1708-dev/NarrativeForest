@@ -259,7 +259,7 @@ export default function Experience() {
       />
 
       {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
-      {/* <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+      <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
         <Bloom
           intensity={1.35}
           luminanceThreshold={0.7} // only “hot” emissive > ~0.7 bloom
@@ -267,7 +267,7 @@ export default function Experience() {
           kernelSize={KernelSize.LARGE}
           mipmapBlur
         />
-      </EffectComposer> */}
+      </EffectComposer>
     </>
   );
 }

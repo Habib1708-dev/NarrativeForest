@@ -10,7 +10,7 @@ import { TrailFluid } from "../fx/TrailFluid";
 export default function Lake({
   position = [-2, 0.0, -2], // <- keep above terrain a bit
   rotation = [Math.PI * 0.5, 0, 0],
-  resolution = 52,
+  resolution = 32,
   envMap = null, // optional CubeTexture
 }) {
   const meshRef = useRef();
@@ -52,15 +52,15 @@ export default function Lake({
     fadeWindow,
   } = useControls("Lake", {
     Waves: folder({
-      uWavesAmplitude: { value: 0.025, min: 0, max: 0.1, step: 0.001 },
-      uWavesFrequency: { value: 1.07, min: 0.1, max: 3, step: 0.01 },
+      uWavesAmplitude: { value: 0.018, min: 0, max: 0.1, step: 0.001 },
+      uWavesFrequency: { value: 3.0, min: 0.1, max: 3, step: 0.01 },
       uWavesPersistence: { value: 0.3, min: 0, max: 1, step: 0.01 },
       uWavesLacunarity: { value: 2.18, min: 1, max: 4, step: 0.01 },
-      uWavesIterations: { value: 8, min: 1, max: 16, step: 1 },
-      uWavesSpeed: { value: 0.4, min: 0, max: 2, step: 0.01 },
+      uWavesIterations: { value: 3, min: 1, max: 16, step: 1 },
+      uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
     Colors: folder({
-      uTroughColor: { value: "#186691" },
+      uTroughColor: { value: "#b1c9d6ff" },
       uSurfaceColor: { value: "#9bd8c0" },
       uPeakColor: { value: "#bbd8e0" },
     }),
@@ -71,21 +71,21 @@ export default function Lake({
       uTroughTransition: { value: 0.15, min: 0.001, max: 0.3, step: 0.001 },
     }),
     Material: folder({
-      uOpacity: { value: 0.85, min: 0, max: 1, step: 0.01 },
+      uOpacity: { value: 1.0, min: 0, max: 1, step: 0.01 },
       uFresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
-      uFresnelPower: { value: 0.5, min: 0.1, max: 2, step: 0.01 },
+      uFresnelPower: { value: 1.0, min: 0.1, max: 2, step: 0.01 },
     }),
     Bioluminescence: folder({
       bioColor: { value: "#2cc3ff" },
-      bioIntensity: { value: 1.2, min: 0, max: 3, step: 0.05 },
+      bioIntensity: { value: 3, min: 0, max: 3, step: 0.05 },
       decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
       diffusion: { value: 0.15, min: 0.0, max: 0.5, step: 0.01 },
       flowScale: { value: 0.0035, min: 0.0, max: 0.01, step: 0.0001 },
       flowFrequency: { value: 3.0, min: 0.5, max: 6.0, step: 0.1 },
-      splatRadius: { value: 0.04, min: 0.005, max: 0.15, step: 0.005 },
-      splatStrength: { value: 0.9, min: 0.1, max: 3.0, step: 0.05 },
+      splatRadius: { value: 0.02, min: 0.005, max: 0.15, step: 0.005 },
+      splatStrength: { value: 3, min: 0.1, max: 3.0, step: 0.05 },
     }),
-    fadeWindow: { value: 1.25, min: 0.2, max: 4.0, step: 0.05 },
+    fadeWindow: { value: 12, min: 0.2, max: 16.0, step: 0.05 },
   });
 
   // Fluid trail buffer
