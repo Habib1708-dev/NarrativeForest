@@ -9,7 +9,7 @@ export class TrailFluid {
   constructor(
     renderer,
     {
-      size = 512,
+      size = 128,
       decay = 0.975, // multiplicative fade of dye
       diffusion = 0.15, // Laplacian strength on dye
       stampDiffusion = 0.02, // slight blur so stamp isn't too blocky

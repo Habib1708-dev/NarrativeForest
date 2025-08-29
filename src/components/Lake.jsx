@@ -9,7 +9,7 @@ import { TrailFluid } from "../fx/TrailFluid";
 export default function Lake({
   position = [-2, 0.0, -2], // <- keep above terrain a bit
   rotation = [Math.PI * 0.5, 0, 0],
-  resolution = 32,
+  resolution = 64,
   envMap = null, // optional CubeTexture
 }) {
   const meshRef = useRef();
@@ -96,7 +96,7 @@ export default function Lake({
   // Fluid trail buffer
   const trail = useMemo(() => {
     const t = new TrailFluid(gl, {
-      size: 512,
+      size: 128,
       decay,
       diffusion,
       flowScale,
