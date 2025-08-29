@@ -26,7 +26,7 @@ import Cat from "./components/Cat";
 import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
-import Aurora from "./components/Aurora";
+import Lake from "./components/Lake";
 
 export default function Experience() {
   // Three handles
@@ -217,7 +217,7 @@ export default function Experience() {
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
-        <Aurora />
+        <Lake position={[-2, -2, -2]} />
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem

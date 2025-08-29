@@ -15,6 +15,7 @@
     "vite-plugin-restart": "^1.0.0"
   },
   "dependencies": {
+    "@funtech-inc/use-shader-fx": "^2.0.5",
     "@react-three/drei": "^10.6.1",
     "@react-three/fiber": "^9.3.0",
     "@react-three/postprocessing": "^3.0.4",

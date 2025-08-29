@@ -85,28 +85,28 @@ export default forwardRef(function RadioTower(_, ref) {
         Dissolve: folder({
           build: { value: false, label: "Build Tower" },
           speed: {
-            value: 0.6,
+            value: 0.24,
             min: 0.05,
             max: 3,
             step: 0.01,
             label: "Speed (units/sec)",
           },
           noiseScale: {
-            value: 1.8,
+            value: 4.72,
             min: 0.1,
             max: 6,
             step: 0.01,
             label: "Noise Scale",
           },
           noiseAmp: {
-            value: 0.35,
+            value: 0.8,
             min: 0,
             max: 1.5,
             step: 0.01,
             label: "Noise Amplitude",
           },
           edgeWidth: {
-            value: 0.08,
+            value: 0.15,
             min: 0.0,
             max: 0.4,
             step: 0.005,
@@ -120,7 +120,7 @@ export default forwardRef(function RadioTower(_, ref) {
             label: "Glow Strength",
           },
           glowColor: { value: "#ffb97d", label: "Glow Color" },
-          seed: { value: 17, min: 0, max: 1000, step: 1, label: "Noise Seed" },
+          seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
           Replay: button(() => {
             progressRef.current = -0.2;
             updateUniformAll("uProgress", progressRef.current);

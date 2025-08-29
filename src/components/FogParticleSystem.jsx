@@ -14,7 +14,7 @@ export default function FogParticleSystem({
   occluders = [],
   cellSize = 2,
   includeEdges = true,
-  visibleRadiusCells = 1,
+  visibleRadiusCells = 2,
   fogParams,
 }) {
   const { camera } = useThree();

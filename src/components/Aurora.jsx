@@ -40,6 +40,11 @@ const Aurora = forwardRef(function Aurora(
     driftSpeed = 0.004,
     driftJitter = 0.02,
     driftFreq = 0.2,
+
+    // Perlin fragment controls
+    noiseScale = 3.0, // overall tiling density
+    noiseSpeed = 0.15, // animation speed
+    stretchY = 0.15, // < 1.0 => elongated features along Y (vertically stretched)
   },
   ref
 ) {
@@ -96,6 +101,7 @@ const Aurora = forwardRef(function Aurora(
       shader.defines = shader.defines || {};
       shader.defines.MAX_BENDS = String(MAX_BENDS);
 
+      // shared uniforms
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uWidth = { value: width };
       shader.uniforms.uBendCount = { value: bendParams.N };
@@ -116,6 +122,12 @@ const Aurora = forwardRef(function Aurora(
       shader.uniforms.uSign = { value: bendParams.sign };
       shader.uniforms.uPhase = { value: bendParams.phase };
 
+      // fragment-only Perlin uniforms
+      shader.uniforms.uNoiseScale = { value: noiseScale };
+      shader.uniforms.uNoiseSpeed = { value: noiseSpeed };
+      shader.uniforms.uStretchY = { value: stretchY };
+
+      // ===== Vertex: keep your existing curling logic intact =====
       shader.vertexShader =
         `
         uniform float uTime;
@@ -220,7 +232,73 @@ const Aurora = forwardRef(function Aurora(
         `
       );
 
-      // keep shader ref for animation
+      // ===== Fragment: Perlin noise (animated), grayscale output =====
+      // Add Perlin helpers
+      shader.fragmentShader =
+        `
+        uniform float uTime;
+        uniform float uNoiseScale;
+        uniform float uNoiseSpeed;
+        uniform float uStretchY;
+
+        // --- 2D/3D Perlin noise (compact GLSL) ---
+        vec3 fade(vec3 t){ return t*t*t*(t*(t*6.0-15.0)+10.0); }
+        float rand3(vec3 p){
+          // hash to 0..1
+          return fract(sin(dot(p, vec3(127.1,311.7, 74.7)))*43758.5453123);
+        }
+        vec3 grad3(vec3 p){
+          // pseudo-gradient from hash
+          float r = rand3(p)*6.28318530718; // 2π
+          return vec3(cos(r), sin(r), cos(r*0.7)); // not unit, but fine
+        }
+        float perlin3(vec3 P){
+          vec3 Pi = floor(P);
+          vec3 Pf = P - Pi;
+          vec3 w = fade(Pf);
+
+          float n000 = dot(grad3(Pi + vec3(0.0,0.0,0.0)), Pf - vec3(0.0,0.0,0.0));
+          float n100 = dot(grad3(Pi + vec3(1.0,0.0,0.0)), Pf - vec3(1.0,0.0,0.0));
+          float n010 = dot(grad3(Pi + vec3(0.0,1.0,0.0)), Pf - vec3(0.0,1.0,0.0));
+          float n110 = dot(grad3(Pi + vec3(1.0,1.0,0.0)), Pf - vec3(1.0,1.0,0.0));
+          float n001 = dot(grad3(Pi + vec3(0.0,0.0,1.0)), Pf - vec3(0.0,0.0,1.0));
+          float n101 = dot(grad3(Pi + vec3(1.0,0.0,1.0)), Pf - vec3(1.0,0.0,1.0));
+          float n011 = dot(grad3(Pi + vec3(0.0,1.0,1.0)), Pf - vec3(0.0,1.0,1.0));
+          float n111 = dot(grad3(Pi + vec3(1.0,1.0,1.0)), Pf - vec3(1.0,1.0,1.0));
+
+          float nx00 = mix(n000, n100, w.x);
+          float nx10 = mix(n010, n110, w.x);
+          float nx01 = mix(n001, n101, w.x);
+          float nx11 = mix(n011, n111, w.x);
+
+          float nxy0 = mix(nx00, nx10, w.y);
+          float nxy1 = mix(nx01, nx11, w.y);
+
+          float nxyz = mix(nxy0, nxy1, w.z);
+          return nxyz; // ~[-1,1]
+        }
+        ` + shader.fragmentShader;
+
+      // Replace the base diffuse color with our grayscale from Perlin
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "vec4 diffuseColor = vec4( diffuse, opacity );",
+        `
+        // Compute vertically stretched Perlin noise in fragment
+        vec2 uvN = vUv;
+        // stretch along Y: smaller factor = elongated vertical features
+        uvN = vec2(uvN.x, uvN.y * uStretchY);
+
+        // animate over time (z uses time for evolving noise; also slide in x)
+        vec3 p = vec3(uvN * uNoiseScale + vec2(uTime * uNoiseSpeed, 0.0), uTime * 0.2);
+
+        float n = perlin3(p);        // [-1,1]
+        float g = 0.5 + 0.5 * n;     // [0,1] grayscale
+
+        vec4 diffuseColor = vec4(vec3(g), opacity);
+        `
+      );
+
+      // keep ref for animation
       m.userData.shader = shader;
     };
 
@@ -238,6 +316,9 @@ const Aurora = forwardRef(function Aurora(
     driftSpeed,
     driftJitter,
     driftFreq,
+    noiseScale,
+    noiseSpeed,
+    stretchY,
   ]);
 
   // animate time uniform (no recursive onBeforeCompile!)
