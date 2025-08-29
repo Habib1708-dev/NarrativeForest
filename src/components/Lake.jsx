@@ -48,6 +48,8 @@ export default function Lake({
     flowFrequency,
     splatRadius,
     splatStrength,
+    //gradual decay
+    fadeWindow,
   } = useControls("Lake", {
     Waves: folder({
       uWavesAmplitude: { value: 0.025, min: 0, max: 0.1, step: 0.001 },
@@ -83,6 +85,7 @@ export default function Lake({
       splatRadius: { value: 0.04, min: 0.005, max: 0.15, step: 0.005 },
       splatStrength: { value: 0.9, min: 0.1, max: 3.0, step: 0.05 },
     }),
+    fadeWindow: { value: 1.25, min: 0.2, max: 4.0, step: 0.05 },
   });
 
   // Fluid trail buffer
@@ -99,8 +102,8 @@ export default function Lake({
   }, [gl]); // create once; params set below in an effect
 
   useEffect(() => {
-    trail.setParams({ decay, diffusion, flowScale, flowFrequency });
-  }, [trail, decay, diffusion, flowScale, flowFrequency]);
+    trail.setParams({ decay, diffusion, flowScale, flowFrequency, fadeWindow });
+  }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow]);
 
   // Shader material
   const material = useMemo(() => {
