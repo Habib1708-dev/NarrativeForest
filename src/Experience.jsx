@@ -241,7 +241,7 @@ export default function Experience() {
       </Suspense>
 
       {/* Forward fog dome now rendered in the same main pass */}
-      <UnifiedForwardFog
+      {/* <UnifiedForwardFog
         enabled={fEnabled}
         color={fColor}
         density={fDensity}
@@ -256,7 +256,7 @@ export default function Experience() {
         anisotropy={fAnisotropy}
         skyRadius={fSkyRadius}
         layer={0}
-      />
+      /> */}
 
       {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
       <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>

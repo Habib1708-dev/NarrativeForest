@@ -1,6 +1,7 @@
 precision highp float;
 
 uniform float uOpacity;
+uniform float uTime;
 
 uniform vec3 uTroughColor;
 uniform vec3 uSurfaceColor;
@@ -16,10 +17,16 @@ uniform float uFresnelPower;
 
 uniform samplerCube uEnvironmentMap;
 
-// Bioluminescent dye map
-uniform sampler2D uTrailMap;      // 0..1 intensity
-uniform vec3 uBioBlueColor;       // dye color
-uniform float uBioIntensity;      // emissive boost
+// Bioluminescent dye + stamp (age) maps
+uniform sampler2D uTrailMap;      // R: dye intensity 0..1
+uniform sampler2D uStampMap;      // R: last-write time in seconds
+
+// Alternating color controls
+uniform vec3  uBioColorA;
+uniform vec3  uBioColorB;
+uniform float uBioIntensity;      // emissive boost multiplier
+uniform float uBioAltFreq;        // radians per second of age
+uniform float uBioAltPhase;       // phase offset in radians
 
 varying vec3 vNormalW;
 varying vec3 vWorldPosition;
@@ -54,8 +61,19 @@ void main(){
   float d4 = texture2D(uTrailMap, vUv0 - vec2(0.0, texel.y)).r * 0.16;
   float dye = clamp(d0 + d1 + d2 + d3 + d4, 0.0, 1.0);
 
-  // Additive emission for glow; keep some color mixing
-  vec3 emission = uBioBlueColor * (dye * uBioIntensity);
+  // --- Alternation between two colors along the trail's age ---
+  // Stamp encodes the time (seconds) the pixel was last splatted.
+  float stamp = texture2D(uStampMap, vUv0).r;
+  // Age in seconds (0 near the head/front of the trail)
+  float ageSec = max(uTime - stamp, 0.0);
+
+  // Smooth oscillation between two colors: 0.5 + 0.5 * sin(...)
+  float w = 0.5 + 0.5 * sin(ageSec * uBioAltFreq + uBioAltPhase);
+  vec3 dyeColor = mix(uBioColorA, uBioColorB, w);
+
+  // Additive emission for glow; multiplied by dye coverage
+  vec3 emission = dyeColor * (dye * uBioIntensity);
+
   vec3 finalColor = baseColor + emission;
 
   gl_FragColor = vec4(finalColor, uOpacity);

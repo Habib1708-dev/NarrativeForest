@@ -1,4 +1,3 @@
-// src/components/Lake.jsx
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
@@ -40,15 +39,18 @@ export default function Lake({
     uFresnelScale,
     uFresnelPower,
     // bioluminescence (fluid map)
-    bioColor,
+    bioColorA,
+    bioColorB,
     bioIntensity,
+    bioAltFreq,
+    bioAltPhase,
     decay,
     diffusion,
     flowScale,
     flowFrequency,
     splatRadius,
     splatStrength,
-    //gradual decay
+    // gradual decay
     fadeWindow,
   } = useControls("Lake", {
     Waves: folder({
@@ -76,8 +78,11 @@ export default function Lake({
       uFresnelPower: { value: 1.0, min: 0.1, max: 2, step: 0.01 },
     }),
     Bioluminescence: folder({
-      bioColor: { value: "#2cc3ff" },
-      bioIntensity: { value: 3, min: 0, max: 3, step: 0.05 },
+      bioColorA: { value: "#2cc3ff" }, // cyan-ish
+      bioColorB: { value: "#00ff88" }, // green-ish
+      bioIntensity: { value: 3, min: 0, max: 4, step: 0.05 },
+      bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 }, // 2π rad/s by age
+      bioAltPhase: { value: 0.0, min: -6.28318, max: 6.28318, step: 0.01 },
       decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
       diffusion: { value: 0.15, min: 0.0, max: 0.5, step: 0.01 },
       flowScale: { value: 0.0035, min: 0.0, max: 0.01, step: 0.0001 },
@@ -96,14 +101,34 @@ export default function Lake({
       diffusion,
       flowScale,
       flowFrequency,
+      fadeWindow,
+      splatRadius,
+      splatStrength,
     });
     return t;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl]); // create once; params set below in an effect
 
   useEffect(() => {
-    trail.setParams({ decay, diffusion, flowScale, flowFrequency, fadeWindow });
-  }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow]);
+    trail.setParams({
+      decay,
+      diffusion,
+      flowScale,
+      flowFrequency,
+      fadeWindow,
+      splatRadius,
+      splatStrength,
+    });
+  }, [
+    trail,
+    decay,
+    diffusion,
+    flowScale,
+    flowFrequency,
+    fadeWindow,
+    splatRadius,
+    splatStrength,
+  ]);
 
   // Shader material
   const material = useMemo(() => {
@@ -134,10 +159,14 @@ export default function Lake({
         uFresnelScale: { value: uFresnelScale },
         uFresnelPower: { value: uFresnelPower },
 
-        // bioluminescent dye map
-        uTrailMap: { value: trail.texture },
-        uBioBlueColor: { value: new THREE.Color(bioColor) },
+        // bioluminescent dye + stamp maps
+        uTrailMap: { value: null }, // filled per-frame
+        uStampMap: { value: null }, // filled per-frame
+        uBioColorA: { value: new THREE.Color(bioColorA) },
+        uBioColorB: { value: new THREE.Color(bioColorB) },
         uBioIntensity: { value: bioIntensity },
+        uBioAltFreq: { value: bioAltFreq },
+        uBioAltPhase: { value: bioAltPhase },
       },
       transparent: true,
       depthTest: true,
@@ -170,8 +199,11 @@ export default function Lake({
     material.uniforms.uFresnelScale.value = uFresnelScale;
     material.uniforms.uFresnelPower.value = uFresnelPower;
 
-    material.uniforms.uBioBlueColor.value.setStyle(bioColor);
+    material.uniforms.uBioColorA.value.setStyle(bioColorA);
+    material.uniforms.uBioColorB.value.setStyle(bioColorB);
     material.uniforms.uBioIntensity.value = bioIntensity;
+    material.uniforms.uBioAltFreq.value = bioAltFreq;
+    material.uniforms.uBioAltPhase.value = bioAltPhase;
   }, [
     material,
     uOpacity,
@@ -190,8 +222,11 @@ export default function Lake({
     uTroughTransition,
     uFresnelScale,
     uFresnelPower,
-    bioColor,
+    bioColorA,
+    bioColorB,
     bioIntensity,
+    bioAltFreq,
+    bioAltPhase,
   ]);
 
   // geometry
@@ -228,7 +263,10 @@ export default function Lake({
   useFrame((_, dt) => {
     if (trail) {
       trail.update(Math.min(dt, 1 / 30)); // clamp dt for stability
-      if (material) material.uniforms.uTrailMap.value = trail.texture;
+      if (material) {
+        material.uniforms.uTrailMap.value = trail.texture;
+        material.uniforms.uStampMap.value = trail.stampTexture; // NEW: pass age field
+      }
     }
     if (material) material.uniforms.uTime.value += dt;
   });
