@@ -1,390 +1,238 @@
 // src/components/Lake.jsx
-import React, {
-  useRef,
-  useMemo,
-  forwardRef,
-  useImperativeHandle,
-  useEffect,
-  useState,
-  useCallback,
-} from "react";
-import { useFrame, useThree } from "@react-three/fiber";
-import { useControls, folder } from "leva";
+import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
+import { useThree, useFrame } from "@react-three/fiber";
+import { useControls, folder } from "leva";
 import lakeVertexShader from "../shaders/lake/vertex.glsl?raw";
 import lakeFragmentShader from "../shaders/lake/fragment.glsl?raw";
+import { TrailFluid } from "../fx/TrailFluid";
 
-export default forwardRef(function Lake(props, ref) {
+export default function Lake({
+  position = [-2, 0.0, -2], // <- keep above terrain a bit
+  rotation = [Math.PI * 0.5, 0, 0],
+  resolution = 52,
+  envMap = null, // optional CubeTexture
+}) {
   const meshRef = useRef();
-  const { scene, camera, gl } = useThree();
-
-  // Trail system state
-  const maxTrailPoints = 50;
-  const [trailPoints, setTrailPoints] = useState([]);
-  const trailDecayTime = useRef(2.0);
-  const trailSpreadSpeed = useRef(0.3);
-  const lastCleanupTime = useRef(0);
-  const cleanupInterval = 0.1;
-
-  // Mouse interaction
+  const matRef = useRef();
   const raycaster = useRef(new THREE.Raycaster());
-  const mouse = useRef(new THREE.Vector2());
-  const lastTrailTime = useRef(0);
-  const trailSpacing = 0.016; // Small spacing for smooth trail
+  const mouseNDC = useRef(new THREE.Vector2());
+  const { gl, camera } = useThree();
 
-  useImperativeHandle(ref, () => meshRef.current, []);
-
-  // Controls - original water properties + simple biobluemessence trail
+  // Controls
   const {
-    opacity,
-    wavesAmplitude,
-    wavesFrequency,
-    wavesPersistence,
-    wavesLacunarity,
-    wavesIterations,
-    wavesSpeed,
-    troughColor,
-    surfaceColor,
-    peakColor,
-    peakThreshold,
-    peakTransition,
-    troughThreshold,
-    troughTransition,
-    fresnelScale,
-    fresnelPower,
-    resolution,
-    // Simple biobluemessence trail controls
-    bioBlueColor,
-    bioBlueIntensity,
-    trailDecayTimeControl,
-    trailSpreadSpeedControl,
-    trailMaxRadius,
-  } = useControls({
-    Lake: folder({
-      "Wave Properties": folder({
-        wavesAmplitude: { value: 0.025, min: 0, max: 0.1, step: 0.001 },
-        wavesFrequency: { value: 1.07, min: 0.1, max: 3, step: 0.01 },
-        wavesPersistence: { value: 0.3, min: 0, max: 1, step: 0.01 },
-        wavesLacunarity: { value: 2.18, min: 1, max: 4, step: 0.01 },
-        wavesIterations: { value: 8, min: 1, max: 12, step: 1 },
-        wavesSpeed: { value: 0.4, min: 0, max: 2, step: 0.01 },
-      }),
-      Colors: folder({
-        troughColor: { value: "#186691" },
-        surfaceColor: { value: "#9bd8c0" },
-        peakColor: { value: "#bbd8e0" },
-      }),
-      Thresholds: folder({
-        peakThreshold: { value: 0.08, min: -0.1, max: 0.2, step: 0.001 },
-        peakTransition: { value: 0.05, min: 0.001, max: 0.1, step: 0.001 },
-        troughThreshold: { value: -0.01, min: -0.1, max: 0.1, step: 0.001 },
-        troughTransition: { value: 0.15, min: 0.001, max: 0.3, step: 0.001 },
-      }),
-      Material: folder({
-        opacity: { value: 0.8, min: 0, max: 1, step: 0.01 },
-        fresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
-        fresnelPower: { value: 0.5, min: 0.1, max: 2, step: 0.01 },
-      }),
-      Geometry: folder({
-        resolution: { value: 52, min: 64, max: 1024, step: 64 },
-      }),
-      "Biobluemessence Trail": folder({
-        bioBlueColor: { value: "#00FFFF", label: "Trail Color" },
-        bioBlueIntensity: {
-          value: 0.5,
-          min: 0,
-          max: 2,
-          step: 0.1,
-          label: "Intensity",
-        },
-        trailDecayTimeControl: {
-          value: 2.0,
-          min: 0.5,
-          max: 5,
-          step: 0.1,
-          label: "Decay Time",
-        },
-        trailSpreadSpeedControl: {
-          value: 0.3,
-          min: 0.1,
-          max: 1,
-          step: 0.05,
-          label: "Spread Speed",
-        },
-        trailMaxRadius: {
-          value: 0.3,
-          min: 0.1,
-          max: 1,
-          step: 0.05,
-          label: "Max Radius",
-        },
-      }),
+    // waves
+    uWavesAmplitude,
+    uWavesFrequency,
+    uWavesPersistence,
+    uWavesLacunarity,
+    uWavesIterations,
+    uWavesSpeed,
+    // colors/thresholds
+    uTroughColor,
+    uSurfaceColor,
+    uPeakColor,
+    uPeakThreshold,
+    uPeakTransition,
+    uTroughThreshold,
+    uTroughTransition,
+    uOpacity,
+    uFresnelScale,
+    uFresnelPower,
+    // bioluminescence (fluid map)
+    bioColor,
+    bioIntensity,
+    decay,
+    diffusion,
+    flowScale,
+    flowFrequency,
+    splatRadius,
+    splatStrength,
+  } = useControls("Lake", {
+    Waves: folder({
+      uWavesAmplitude: { value: 0.025, min: 0, max: 0.1, step: 0.001 },
+      uWavesFrequency: { value: 1.07, min: 0.1, max: 3, step: 0.01 },
+      uWavesPersistence: { value: 0.3, min: 0, max: 1, step: 0.01 },
+      uWavesLacunarity: { value: 2.18, min: 1, max: 4, step: 0.01 },
+      uWavesIterations: { value: 8, min: 1, max: 16, step: 1 },
+      uWavesSpeed: { value: 0.4, min: 0, max: 2, step: 0.01 },
+    }),
+    Colors: folder({
+      uTroughColor: { value: "#186691" },
+      uSurfaceColor: { value: "#9bd8c0" },
+      uPeakColor: { value: "#bbd8e0" },
+    }),
+    Thresholds: folder({
+      uPeakThreshold: { value: 0.08, min: -0.1, max: 0.2, step: 0.001 },
+      uPeakTransition: { value: 0.05, min: 0.001, max: 0.1, step: 0.001 },
+      uTroughThreshold: { value: -0.01, min: -0.1, max: 0.1, step: 0.001 },
+      uTroughTransition: { value: 0.15, min: 0.001, max: 0.3, step: 0.001 },
+    }),
+    Material: folder({
+      uOpacity: { value: 0.85, min: 0, max: 1, step: 0.01 },
+      uFresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
+      uFresnelPower: { value: 0.5, min: 0.1, max: 2, step: 0.01 },
+    }),
+    Bioluminescence: folder({
+      bioColor: { value: "#2cc3ff" },
+      bioIntensity: { value: 1.2, min: 0, max: 3, step: 0.05 },
+      decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
+      diffusion: { value: 0.15, min: 0.0, max: 0.5, step: 0.01 },
+      flowScale: { value: 0.0035, min: 0.0, max: 0.01, step: 0.0001 },
+      flowFrequency: { value: 3.0, min: 0.5, max: 6.0, step: 0.1 },
+      splatRadius: { value: 0.04, min: 0.005, max: 0.15, step: 0.005 },
+      splatStrength: { value: 0.9, min: 0.1, max: 3.0, step: 0.05 },
     }),
   });
 
-  // Update refs when controls change
-  useEffect(() => {
-    trailDecayTime.current = trailDecayTimeControl;
-    trailSpreadSpeed.current = trailSpreadSpeedControl;
-  }, [trailDecayTimeControl, trailSpreadSpeedControl]);
-
-  // Mouse interaction - only on mouse move (not clicks)
-  const onMouseMove = useCallback(
-    (event) => {
-      if (!camera || !gl) return;
-
-      const rect = gl.domElement.getBoundingClientRect();
-      mouse.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      checkWaterIntersection();
-    },
-    [camera, gl]
-  );
-
-  const checkWaterIntersection = useCallback(() => {
-    if (!meshRef.current || !camera) return;
-
-    const currentTime = performance.now() / 1000;
-
-    // Throttle trail creation for smooth trails
-    if (currentTime - lastTrailTime.current < trailSpacing) {
-      return;
-    }
-
-    raycaster.current.setFromCamera(mouse.current, camera);
-    const intersects = raycaster.current.intersectObject(
-      meshRef.current,
-      false
-    );
-
-    if (intersects.length > 0) {
-      const point = intersects[0].point;
-      addTrailPoint(point.x, point.z, currentTime);
-      lastTrailTime.current = currentTime;
-    }
-  }, [camera]);
-
-  const addTrailPoint = useCallback((x, z, timestamp) => {
-    setTrailPoints((prev) => {
-      const newPoints = [...prev];
-
-      // Remove oldest point if we're at capacity
-      if (newPoints.length >= maxTrailPoints) {
-        newPoints.shift();
-      }
-
-      newPoints.push({
-        x,
-        z,
-        timestamp,
-        intensity: 1.0,
-        initialRadius: 0.05, // Small initial radius for subtle effect
-      });
-
-      return newPoints;
+  // Fluid trail buffer
+  const trail = useMemo(() => {
+    const t = new TrailFluid(gl, {
+      size: 512,
+      decay,
+      diffusion,
+      flowScale,
+      flowFrequency,
     });
-  }, []);
+    return t;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gl]); // create once; params set below in an effect
 
-  const cleanupExpiredTrails = useCallback((currentTime) => {
-    setTrailPoints((prev) =>
-      prev.filter((trail) => {
-        const age = currentTime - trail.timestamp;
-        return age < trailDecayTime.current;
-      })
-    );
-  }, []);
-
-  // Setup mouse event listeners
   useEffect(() => {
-    if (!gl) return;
+    trail.setParams({ decay, diffusion, flowScale, flowFrequency });
+  }, [trail, decay, diffusion, flowScale, flowFrequency]);
 
-    const canvas = gl.domElement;
-    canvas.addEventListener("mousemove", onMouseMove);
-
-    return () => {
-      canvas.removeEventListener("mousemove", onMouseMove);
-    };
-  }, [gl, onMouseMove]);
-
-  // Create a simple environment map for reflections
-  const environmentMap = useMemo(() => {
-    const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
-      format: THREE.RGBFormat,
-      generateMipmaps: true,
-      minFilter: THREE.LinearMipmapLinearFilter,
-    });
-
-    const cubeCamera = new THREE.CubeCamera(0.1, 1000, cubeRenderTarget);
-    cubeCamera.position.set(0, 0, 0);
-
-    return cubeRenderTarget.texture;
-  }, []);
-
-  // Shader material with uniforms for both vertex and fragment shaders
+  // Shader material
   const material = useMemo(() => {
     return new THREE.ShaderMaterial({
       vertexShader: lakeVertexShader,
       fragmentShader: lakeFragmentShader,
       uniforms: {
-        // Original water uniforms (used by vertex shader)
         uTime: { value: 0 },
-        uOpacity: { value: opacity },
-        uEnvironmentMap: { value: environmentMap },
-        uWavesAmplitude: { value: wavesAmplitude },
-        uWavesFrequency: { value: wavesFrequency },
-        uWavesPersistence: { value: wavesPersistence },
-        uWavesLacunarity: { value: wavesLacunarity },
-        uWavesIterations: { value: wavesIterations },
-        uWavesSpeed: { value: wavesSpeed },
-        uTroughColor: { value: new THREE.Color(troughColor) },
-        uSurfaceColor: { value: new THREE.Color(surfaceColor) },
-        uPeakColor: { value: new THREE.Color(peakColor) },
-        uPeakThreshold: { value: peakThreshold },
-        uPeakTransition: { value: peakTransition },
-        uTroughThreshold: { value: troughThreshold },
-        uTroughTransition: { value: troughTransition },
-        uFresnelScale: { value: fresnelScale },
-        uFresnelPower: { value: fresnelPower },
+        uOpacity: { value: uOpacity },
+        uEnvironmentMap: { value: envMap },
 
-        // Biobluemessence trail uniforms (used by fragment shader only)
-        uTrailPositions: { value: new Float32Array(maxTrailPoints * 2) },
-        uTrailData: { value: new Float32Array(maxTrailPoints * 3) },
-        uTrailCount: { value: 0 },
-        uTrailDecayTime: { value: trailDecayTimeControl },
-        uBioBlueColor: { value: new THREE.Color(bioBlueColor) },
-        uBioBlueIntensity: { value: bioBlueIntensity },
-        uTrailSpreadSpeed: { value: trailSpreadSpeedControl },
-        uTrailMaxRadius: { value: trailMaxRadius },
+        uWavesAmplitude: { value: uWavesAmplitude },
+        uWavesFrequency: { value: uWavesFrequency },
+        uWavesPersistence: { value: uWavesPersistence },
+        uWavesLacunarity: { value: uWavesLacunarity },
+        uWavesIterations: { value: uWavesIterations },
+        uWavesSpeed: { value: uWavesSpeed },
+
+        uTroughColor: { value: new THREE.Color(uTroughColor) },
+        uSurfaceColor: { value: new THREE.Color(uSurfaceColor) },
+        uPeakColor: { value: new THREE.Color(uPeakColor) },
+
+        uPeakThreshold: { value: uPeakThreshold },
+        uPeakTransition: { value: uPeakTransition },
+        uTroughThreshold: { value: uTroughThreshold },
+        uTroughTransition: { value: uTroughTransition },
+
+        uFresnelScale: { value: uFresnelScale },
+        uFresnelPower: { value: uFresnelPower },
+
+        // bioluminescent dye map
+        uTrailMap: { value: trail.texture },
+        uBioBlueColor: { value: new THREE.Color(bioColor) },
+        uBioIntensity: { value: bioIntensity },
       },
       transparent: true,
       depthTest: true,
       side: THREE.DoubleSide,
     });
-  }, [
-    environmentMap,
-    opacity,
-    wavesAmplitude,
-    wavesFrequency,
-    wavesPersistence,
-    wavesLacunarity,
-    wavesIterations,
-    wavesSpeed,
-    troughColor,
-    surfaceColor,
-    peakColor,
-    peakThreshold,
-    peakTransition,
-    troughThreshold,
-    troughTransition,
-    fresnelScale,
-    fresnelPower,
-    bioBlueColor,
-    bioBlueIntensity,
-    trailDecayTimeControl,
-    trailSpreadSpeedControl,
-    trailMaxRadius,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // build once; we'll live-update uniforms below
 
-  // Update trail uniforms when trail points change
-  const updateTrailUniforms = useCallback(() => {
-    if (!material) return;
-
-    const positions = material.uniforms.uTrailPositions.value;
-    const data = material.uniforms.uTrailData.value;
-    const currentTime = performance.now() / 1000;
-
-    for (let i = 0; i < maxTrailPoints; i++) {
-      if (i < trailPoints.length) {
-        const trail = trailPoints[i];
-        const age = currentTime - trail.timestamp;
-        const normalizedAge = age / trailDecayTime.current;
-
-        // Position
-        positions[i * 2] = trail.x;
-        positions[i * 2 + 1] = trail.z;
-
-        // Data: timestamp, intensity, radius
-        data[i * 3] = trail.timestamp;
-        data[i * 3 + 1] = Math.max(0, 1.0 - normalizedAge); // intensity fades over time
-        data[i * 3 + 2] = trail.initialRadius + age * trailSpreadSpeed.current; // radius grows over time
-      } else {
-        // Clear unused slots
-        positions[i * 2] = 0;
-        positions[i * 2 + 1] = 0;
-        data[i * 3] = 0;
-        data[i * 3 + 1] = 0;
-        data[i * 3 + 2] = 0;
-      }
-    }
-
-    material.uniforms.uTrailCount.value = trailPoints.length;
-    material.uniforms.uTrailPositions.needsUpdate = true;
-    material.uniforms.uTrailData.needsUpdate = true;
-  }, [material, trailPoints]);
-
-  // Update uniforms when controls change
+  // live-update uniforms on control changes
   useEffect(() => {
     if (!material) return;
+    material.uniforms.uOpacity.value = uOpacity;
 
-    // Original water uniforms
-    material.uniforms.uOpacity.value = opacity;
-    material.uniforms.uWavesAmplitude.value = wavesAmplitude;
-    material.uniforms.uWavesFrequency.value = wavesFrequency;
-    material.uniforms.uWavesPersistence.value = wavesPersistence;
-    material.uniforms.uWavesLacunarity.value = wavesLacunarity;
-    material.uniforms.uWavesIterations.value = wavesIterations;
-    material.uniforms.uWavesSpeed.value = wavesSpeed;
-    material.uniforms.uTroughColor.value.setStyle(troughColor);
-    material.uniforms.uSurfaceColor.value.setStyle(surfaceColor);
-    material.uniforms.uPeakColor.value.setStyle(peakColor);
-    material.uniforms.uPeakThreshold.value = peakThreshold;
-    material.uniforms.uPeakTransition.value = peakTransition;
-    material.uniforms.uTroughThreshold.value = troughThreshold;
-    material.uniforms.uTroughTransition.value = troughTransition;
-    material.uniforms.uFresnelScale.value = fresnelScale;
-    material.uniforms.uFresnelPower.value = fresnelPower;
+    material.uniforms.uWavesAmplitude.value = uWavesAmplitude;
+    material.uniforms.uWavesFrequency.value = uWavesFrequency;
+    material.uniforms.uWavesPersistence.value = uWavesPersistence;
+    material.uniforms.uWavesLacunarity.value = uWavesLacunarity;
+    material.uniforms.uWavesIterations.value = uWavesIterations;
+    material.uniforms.uWavesSpeed.value = uWavesSpeed;
 
-    // Biobluemessence trail uniforms
-    material.uniforms.uTrailDecayTime.value = trailDecayTimeControl;
-    material.uniforms.uBioBlueColor.value.setStyle(bioBlueColor);
-    material.uniforms.uBioBlueIntensity.value = bioBlueIntensity;
-    material.uniforms.uTrailSpreadSpeed.value = trailSpreadSpeedControl;
-    material.uniforms.uTrailMaxRadius.value = trailMaxRadius;
-  }, [material, opacity, wavesAmplitude, wavesFrequency, wavesPersistence, wavesLacunarity, wavesIterations, wavesSpeed, troughColor, surfaceColor, peakColor, peakThreshold, peakTransition, troughThreshold, troughTransition, fresnelScale, fresnelPower, bioBlueColor, bioBlueIntensity, trailDecayTimeControl, trailSpreadSpeedControl, trailMaxRadius]);
+    material.uniforms.uTroughColor.value.setStyle(uTroughColor);
+    material.uniforms.uSurfaceColor.value.setStyle(uSurfaceColor);
+    material.uniforms.uPeakColor.value.setStyle(uPeakColor);
 
-  // Geometry
-  const geometry = useMemo(() => {
-    return new THREE.PlaneGeometry(1, 1, resolution, resolution);
-  }, [resolution]);
+    material.uniforms.uPeakThreshold.value = uPeakThreshold;
+    material.uniforms.uPeakTransition.value = uPeakTransition;
+    material.uniforms.uTroughThreshold.value = uTroughThreshold;
+    material.uniforms.uTroughTransition.value = uTroughTransition;
 
-  // Animation loop - update time uniform and manage trails
-  useFrame(({ clock }) => {
-    if (material) {
-      material.uniforms.uTime.value = clock.getElapsedTime();
+    material.uniforms.uFresnelScale.value = uFresnelScale;
+    material.uniforms.uFresnelPower.value = uFresnelPower;
 
-      // Cleanup expired trails periodically
-      const currentTime = clock.getElapsedTime();
-      if (currentTime - lastCleanupTime.current > cleanupInterval) {
-        cleanupExpiredTrails(currentTime);
-        lastCleanupTime.current = currentTime;
+    material.uniforms.uBioBlueColor.value.setStyle(bioColor);
+    material.uniforms.uBioIntensity.value = bioIntensity;
+  }, [
+    material,
+    uOpacity,
+    uWavesAmplitude,
+    uWavesFrequency,
+    uWavesPersistence,
+    uWavesLacunarity,
+    uWavesIterations,
+    uWavesSpeed,
+    uTroughColor,
+    uSurfaceColor,
+    uPeakColor,
+    uPeakThreshold,
+    uPeakTransition,
+    uTroughThreshold,
+    uTroughTransition,
+    uFresnelScale,
+    uFresnelPower,
+    bioColor,
+    bioIntensity,
+  ]);
+
+  // geometry
+  const geom = useMemo(
+    () => new THREE.PlaneGeometry(1, 1, resolution, resolution),
+    [resolution]
+  );
+
+  // pointer → UV → splat
+  const onPointerMove = useCallback(
+    (e) => {
+      if (!meshRef.current) return;
+      const rect = gl.domElement.getBoundingClientRect();
+      mouseNDC.current.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.current.setFromCamera(mouseNDC.current, camera);
+      const hit = raycaster.current.intersectObject(meshRef.current, false)[0];
+      if (hit && hit.uv) {
+        trail.splat(hit.uv, splatStrength, splatRadius);
       }
+    },
+    [camera, gl, trail, splatStrength, splatRadius]
+  );
 
-      // Update trail uniforms for animation
-      if (trailPoints.length > 0) {
-        updateTrailUniforms();
-      }
+  useEffect(() => {
+    const el = gl.domElement;
+    el.addEventListener("pointermove", onPointerMove, { passive: true });
+    return () => el.removeEventListener("pointermove", onPointerMove);
+  }, [gl, onPointerMove]);
+
+  // frame loop
+  useFrame((_, dt) => {
+    if (trail) {
+      trail.update(Math.min(dt, 1 / 30)); // clamp dt for stability
+      if (material) material.uniforms.uTrailMap.value = trail.texture;
     }
+    if (material) material.uniforms.uTime.value += dt;
   });
 
   return (
-    <mesh
-      ref={meshRef}
-      geometry={geometry}
-      material={material}
-      position={[-2, -2, -2]}
-      rotation={[Math.PI * 0.5, 0, 0]}
-      {...props}
-    />
+    <mesh ref={meshRef} position={position} rotation={rotation} geometry={geom}>
+      <primitive object={material} attach="material" ref={matRef} />
+    </mesh>
   );
-});
+}

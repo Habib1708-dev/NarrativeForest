@@ -1,6 +1,5 @@
 precision highp float;
 
-uniform float uTime;
 uniform float uOpacity;
 
 uniform vec3 uTroughColor;
@@ -15,106 +14,49 @@ uniform float uTroughTransition;
 uniform float uFresnelScale;
 uniform float uFresnelPower;
 
-// Biobluemessence trail uniforms
-uniform float uTrailPositions[100]; // maxTrailPoints * 2
-uniform float uTrailData[150]; // maxTrailPoints * 3
-uniform int uTrailCount;
-uniform float uTrailDecayTime;
-uniform vec3 uBioBlueColor;
-uniform float uBioBlueIntensity;
-uniform float uTrailSpreadSpeed;
-uniform float uTrailMaxRadius;
-uniform float uPulseFrequency;
-uniform float uRippleFrequency;
-
-varying vec3 vNormal;
-varying vec3 vWorldPosition;
-
 uniform samplerCube uEnvironmentMap;
 
-// Calculate biobluemessence trail intensity
-float getBioBlueIntensity(vec2 position) {
-  float totalIntensity = 0.0;
-  
-  for(int i = 0; i < 50; i++) { // maxTrailPoints
-    if(i >= uTrailCount) break;
-    
-    // Get trail data
-    vec2 trailPos = vec2(uTrailPositions[i * 2], uTrailPositions[i * 2 + 1]);
-    float timestamp = uTrailData[i * 3];
-    float intensity = uTrailData[i * 3 + 1];
-    float radius = uTrailData[i * 3 + 2];
-    
-    if(intensity <= 0.0) continue;
-    
-    // Calculate distance to trail point
-    float dist = distance(position, trailPos);
-    
-    // Create radial falloff
-    float radialFactor = 1.0 - smoothstep(0.0, min(radius, uTrailMaxRadius), dist);
-    
-    // Add pulsing effect
-    float pulsePhase = timestamp * uPulseFrequency;
-    float pulse = 0.5 + 0.5 * sin(uTime * uPulseFrequency + pulsePhase);
-    
-    // Create fluid ripple effect
-    float ripplePhase = dist * uRippleFrequency - uTime * 2.0 + timestamp;
-    float ripple = 0.5 + 0.5 * sin(ripplePhase);
-    
-    // Add swirling motion for fluid-like appearance
-    float swirl = sin(atan(position.y - trailPos.y, position.x - trailPos.x) * 3.0 + uTime + timestamp) * 0.5 + 0.5;
-    
-    // Combine effects for distorted fluid appearance
-    float trailIntensity = intensity * radialFactor * (0.6 + 0.2 * pulse) * (0.7 + 0.2 * ripple) * (0.8 + 0.2 * swirl);
-    totalIntensity += trailIntensity;
-  }
-  
-  return min(totalIntensity, 1.0);
-}
+// Bioluminescent dye map
+uniform sampler2D uTrailMap;      // 0..1 intensity
+uniform vec3 uBioBlueColor;       // dye color
+uniform float uBioIntensity;      // emissive boost
 
-void main() {
-  // Calculate vector from camera to the vertex
-  vec3 viewDirection = normalize(vWorldPosition - cameraPosition);
-  vec3 reflectedDirection = reflect(viewDirection, vNormal);
-  reflectedDirection.x = -reflectedDirection.x;
+varying vec3 vNormalW;
+varying vec3 vWorldPosition;
+varying vec2 vUv0;
 
-  // Sample environment map to get the reflected color
-  vec4 reflectionColor = textureCube(uEnvironmentMap, reflectedDirection);
+void main(){
+  vec3 N = normalize(vNormalW);
+  vec3 V = normalize(vWorldPosition - cameraPosition);
 
-  // Calculate fresnel effect
-  float fresnel = uFresnelScale * pow(1.0 - clamp(dot(viewDirection, vNormal), 0.0, 1.0), uFresnelPower);
+  vec3 R = reflect(V, N);
+  R.x = -R.x; // handedness fix to match your original
 
-  // Calculate elevation-based color
+  vec3 reflection = textureCube(uEnvironmentMap, R).rgb;
+
+  float NoV = clamp(dot(N, V), 0.0, 1.0);
+  float fresnel = uFresnelScale * pow(1.0 - NoV, uFresnelPower);
+
   float elevation = vWorldPosition.y;
+  float peak   = smoothstep(uPeakThreshold - uPeakTransition,   uPeakThreshold + uPeakTransition,   elevation);
+  float trough = smoothstep(uTroughThreshold - uTroughTransition, uTroughThreshold + uTroughTransition, elevation);
 
-  // Calculate transition factors using smoothstep
-  float peakFactor = smoothstep(uPeakThreshold - uPeakTransition, uPeakThreshold + uPeakTransition, elevation);
-  float troughFactor = smoothstep(uTroughThreshold - uTroughTransition, uTroughThreshold + uTroughTransition, elevation);
+  vec3 base1 = mix(uTroughColor, uSurfaceColor, trough);
+  vec3 base2 = mix(base1,        uPeakColor,    peak);
+  vec3 baseColor = mix(base2, reflection, fresnel);
 
-  // Mix between trough and surface colors based on trough transition
-  vec3 mixedColor1 = mix(uTroughColor, uSurfaceColor, troughFactor);
+  // --- Bioluminescent dye sampling (soft watercolor look) ---
+  vec2 texel = 1.0 / vec2(textureSize(uTrailMap, 0));
+  float d0 = texture2D(uTrailMap, vUv0).r * 0.36;
+  float d1 = texture2D(uTrailMap, vUv0 + vec2(texel.x, 0.0)).r * 0.16;
+  float d2 = texture2D(uTrailMap, vUv0 - vec2(texel.x, 0.0)).r * 0.16;
+  float d3 = texture2D(uTrailMap, vUv0 + vec2(0.0, texel.y)).r * 0.16;
+  float d4 = texture2D(uTrailMap, vUv0 - vec2(0.0, texel.y)).r * 0.16;
+  float dye = clamp(d0 + d1 + d2 + d3 + d4, 0.0, 1.0);
 
-  // Mix between surface and peak colors based on peak transition 
-  vec3 mixedColor2 = mix(mixedColor1, uPeakColor, peakFactor);
-
-  // Mix the final color with the reflection color
-  vec3 baseColor = mix(mixedColor2, reflectionColor.rgb, fresnel);
-
-  // Calculate biobluemessence effect
-  vec2 waterPos = vWorldPosition.xz;
-  float bioIntensity = getBioBlueIntensity(waterPos);
-  
-  // Create fluid-like color mixing
-  vec3 bioEffect = uBioBlueColor * bioIntensity;
-  
-  // Mix bio effect with base water color using additive blending for glow
-  vec3 finalColor = baseColor + bioEffect * 0.8;
-  
-  // Add emissive glow for bloom effect
-  finalColor += bioEffect * uBioBlueIntensity * 0.5;
-  
-  // Apply subtle color shift in bio areas
-  finalColor = mix(finalColor, finalColor * vec3(0.7, 0.9, 1.2), bioIntensity * 0.3);
+  // Additive emission for glow; keep some color mixing
+  vec3 emission = uBioBlueColor * (dye * uBioIntensity);
+  vec3 finalColor = baseColor + emission;
 
   gl_FragColor = vec4(finalColor, uOpacity);
 }
