@@ -1,3 +1,4 @@
+// src/components/Lake.jsx
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
@@ -7,10 +8,10 @@ import lakeFragmentShader from "../shaders/lake/fragment.glsl?raw";
 import { TrailFluid } from "../fx/TrailFluid";
 
 export default function Lake({
-  position = [-2, 0.0, -2], // <- keep above terrain a bit
+  position = [-2, 0.0, -2], // keep slightly above terrain
   rotation = [Math.PI * 0.5, 0, 0],
   resolution = 64,
-  envMap = null, // optional CubeTexture
+  envMap = null, // optional THREE.CubeTexture
 }) {
   const meshRef = useRef();
   const matRef = useRef();
@@ -35,6 +36,7 @@ export default function Lake({
     uPeakTransition,
     uTroughThreshold,
     uTroughTransition,
+    // fresnel/opacity
     uOpacity,
     uFresnelScale,
     uFresnelPower,
@@ -50,7 +52,7 @@ export default function Lake({
     flowFrequency,
     splatRadius,
     splatStrength,
-    // gradual decay
+    // gradual decay window
     fadeWindow,
   } = useControls("Lake", {
     Waves: folder({
@@ -81,7 +83,7 @@ export default function Lake({
       bioColorA: { value: "#2cc3ff" }, // cyan-ish
       bioColorB: { value: "#00ff88" }, // green-ish
       bioIntensity: { value: 3, min: 0, max: 4, step: 0.05 },
-      bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 }, // 2π rad/s by age
+      bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 }, // 2π rad/s
       bioAltPhase: { value: 0.0, min: -6.28318, max: 6.28318, step: 0.01 },
       decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
       diffusion: { value: 0.15, min: 0.0, max: 0.5, step: 0.01 },
@@ -107,8 +109,9 @@ export default function Lake({
     });
     return t;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gl]); // create once; params set below in an effect
+  }, [gl]); // create once
 
+  // Sync runtime params into the fluid
   useEffect(() => {
     trail.setParams({
       decay,
@@ -140,6 +143,7 @@ export default function Lake({
         uOpacity: { value: uOpacity },
         uEnvironmentMap: { value: envMap },
 
+        // Waves
         uWavesAmplitude: { value: uWavesAmplitude },
         uWavesFrequency: { value: uWavesFrequency },
         uWavesPersistence: { value: uWavesPersistence },
@@ -147,39 +151,51 @@ export default function Lake({
         uWavesIterations: { value: uWavesIterations },
         uWavesSpeed: { value: uWavesSpeed },
 
+        // Colors
         uTroughColor: { value: new THREE.Color(uTroughColor) },
         uSurfaceColor: { value: new THREE.Color(uSurfaceColor) },
         uPeakColor: { value: new THREE.Color(uPeakColor) },
 
+        // Thresholds
         uPeakThreshold: { value: uPeakThreshold },
         uPeakTransition: { value: uPeakTransition },
         uTroughThreshold: { value: uTroughThreshold },
         uTroughTransition: { value: uTroughTransition },
 
+        // Fresnel
         uFresnelScale: { value: uFresnelScale },
         uFresnelPower: { value: uFresnelPower },
 
-        // bioluminescent dye + stamp maps
-        uTrailMap: { value: null }, // filled per-frame
-        uStampMap: { value: null }, // filled per-frame
+        // Fluid maps
+        uTrailMap: { value: null },
+        uStampMap: { value: null },
+
+        // Bioluminescent color alt
         uBioColorA: { value: new THREE.Color(bioColorA) },
         uBioColorB: { value: new THREE.Color(bioColorB) },
         uBioIntensity: { value: bioIntensity },
         uBioAltFreq: { value: bioAltFreq },
         uBioAltPhase: { value: bioAltPhase },
+
+        // (Optional future-proofing, used if your fragment expects them)
+        uTrailTexSize: { value: new THREE.Vector2(trail.size, trail.size) },
+        uReflectionStrength: { value: envMap ? 1.0 : 0.0 },
       },
       transparent: true,
       depthTest: true,
-      side: THREE.DoubleSide,
+      side: THREE.DoubleSide, // one-sided surface
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // build once; we'll live-update uniforms below
+  }, []);
 
-  // live-update uniforms on control changes
+  // Live-update uniforms from controls
   useEffect(() => {
     if (!material) return;
+
+    // Material
     material.uniforms.uOpacity.value = uOpacity;
 
+    // Waves
     material.uniforms.uWavesAmplitude.value = uWavesAmplitude;
     material.uniforms.uWavesFrequency.value = uWavesFrequency;
     material.uniforms.uWavesPersistence.value = uWavesPersistence;
@@ -187,23 +203,30 @@ export default function Lake({
     material.uniforms.uWavesIterations.value = uWavesIterations;
     material.uniforms.uWavesSpeed.value = uWavesSpeed;
 
+    // Colors
     material.uniforms.uTroughColor.value.setStyle(uTroughColor);
     material.uniforms.uSurfaceColor.value.setStyle(uSurfaceColor);
     material.uniforms.uPeakColor.value.setStyle(uPeakColor);
 
+    // Thresholds
     material.uniforms.uPeakThreshold.value = uPeakThreshold;
     material.uniforms.uPeakTransition.value = uPeakTransition;
     material.uniforms.uTroughThreshold.value = uTroughThreshold;
     material.uniforms.uTroughTransition.value = uTroughTransition;
 
+    // Fresnel
     material.uniforms.uFresnelScale.value = uFresnelScale;
     material.uniforms.uFresnelPower.value = uFresnelPower;
 
+    // Bio
     material.uniforms.uBioColorA.value.setStyle(bioColorA);
     material.uniforms.uBioColorB.value.setStyle(bioColorB);
     material.uniforms.uBioIntensity.value = bioIntensity;
     material.uniforms.uBioAltFreq.value = bioAltFreq;
     material.uniforms.uBioAltPhase.value = bioAltPhase;
+
+    // Optional future-proofing
+    material.uniforms.uReflectionStrength.value = envMap ? 1.0 : 0.0;
   }, [
     material,
     uOpacity,
@@ -227,23 +250,32 @@ export default function Lake({
     bioIntensity,
     bioAltFreq,
     bioAltPhase,
+    envMap,
   ]);
 
-  // geometry
+  // Geometry (unit plane, displaced in shader)
   const geom = useMemo(
     () => new THREE.PlaneGeometry(1, 1, resolution, resolution),
     [resolution]
   );
 
-  // pointer → UV → splat
+  // --- Throttled pointer → UV → splat
+  const lastSplatT = useRef(0);
   const onPointerMove = useCallback(
     (e) => {
       if (!meshRef.current) return;
+
+      const now = performance.now();
+      // Throttle to ~83 Hz to avoid dense over-splats while keeping input snappy
+      if (now - lastSplatT.current < 12) return;
+      lastSplatT.current = now;
+
       const rect = gl.domElement.getBoundingClientRect();
       mouseNDC.current.set(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1
       );
+
       raycaster.current.setFromCamera(mouseNDC.current, camera);
       const hit = raycaster.current.intersectObject(meshRef.current, false)[0];
       if (hit && hit.uv) {
@@ -259,13 +291,15 @@ export default function Lake({
     return () => el.removeEventListener("pointermove", onPointerMove);
   }, [gl, onPointerMove]);
 
-  // frame loop
+  // Frame loop
   useFrame((_, dt) => {
     if (trail) {
       trail.update(Math.min(dt, 1 / 30)); // clamp dt for stability
       if (material) {
         material.uniforms.uTrailMap.value = trail.texture;
-        material.uniforms.uStampMap.value = trail.stampTexture; // NEW: pass age field
+        material.uniforms.uStampMap.value = trail.stampTexture;
+        // If your fragment uses uTrailTexSize, keep it in sync:
+        material.uniforms.uTrailTexSize.value.set(trail.size, trail.size);
       }
     }
     if (material) material.uniforms.uTime.value += dt;
