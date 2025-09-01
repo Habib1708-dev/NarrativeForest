@@ -51,12 +51,36 @@ export class TrailFluid {
 
     // --- Common flow function in both shaders
     const flowGLSL = `
-      vec2 flow(vec2 uv, float t, float freq, float scale){
-        float a = sin((uv.y + t*0.05)*freq) * 1.3;
-        float b = cos((uv.x - t*0.06)*freq) * 1.1;
-        return vec2(a, b) * scale;
-      }
-    `;
+  // 2D value noise (cheap) and its gradient; rotate gradient by 90° to get a pseudo-curl
+  float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+  float noise(vec2 p){
+    vec2 i = floor(p), f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+  vec2 gradNoise(vec2 p){
+    // finite diff gradient
+    float e = 0.001;
+    float n0 = noise(p);
+    float dx = noise(p + vec2(e, 0.0)) - n0;
+    float dy = noise(p + vec2(0.0, e)) - n0;
+    return vec2(dx, dy) / e;
+  }
+  vec2 flow(vec2 uv, float t, float freq, float scale){
+    // animate domain, sum a couple of octaves
+    vec2 p = uv * freq + vec2(t*0.07, -t*0.05);
+    vec2 g1 = gradNoise(p);
+    vec2 g2 = gradNoise(p*1.93 + 17.3);
+    vec2 g = g1 + 0.5*g2;
+    // rotate gradient by 90° (perp) for a divergence-free field
+    vec2 v = vec2(-g.y, g.x);
+    return normalize(v) * scale;
+  }
+`;
 
     // STAMP material (advect timestamps; write now inside splats)
     this.matStamp = new THREE.ShaderMaterial({
