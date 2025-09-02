@@ -9,7 +9,7 @@ import { TrailFluid } from "../fx/TrailFluid";
 export default function Lake({
   position = [-2, 0.0, -2], // initial position
   rotation = [Math.PI * 0.5, 0, 0],
-  resolution = 64,
+  resolution = 128,
   envMap = null, // optional THREE.CubeTexture
 }) {
   const meshRef = useRef();
@@ -20,9 +20,9 @@ export default function Lake({
   // 1) Transform (X/Y/Z) via Leva
   const { lakePosX, lakePosY, lakePosZ } = useControls("Lake", {
     Transform: folder({
-      lakePosX: { value: position[0], min: -20, max: 20, step: 0.01 },
-      lakePosY: { value: position[1], min: -5, max: 5, step: 0.01 },
-      lakePosZ: { value: position[2], min: -20, max: 20, step: 0.01 },
+      lakePosX: { value: -1.3, min: -20, max: 20, step: 0.01 },
+      lakePosY: { value: -4.89, min: -5, max: 5, step: 0.01 },
+      lakePosZ: { value: -3.87, min: -20, max: 20, step: 0.01 },
     }),
   });
 
@@ -70,7 +70,7 @@ export default function Lake({
       uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
     Colors: folder({
-      uTroughColor: { value: "#b1c9d6ff" },
+      uTroughColor: { value: "#8a9094ff" },
       uSurfaceColor: { value: "#9bd8c0" },
       uPeakColor: { value: "#bbd8e0" },
     }),

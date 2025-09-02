@@ -113,15 +113,15 @@ export default forwardRef(function Terrain(props, ref) {
 
   // 1) Leva controls
   const terrainParams = useControls("Terrain", {
-    elevation: { value: 5, min: 0, max: 150, step: 1 },
+    elevation: { value: 7, min: 0, max: 150, step: 1 },
     frequency: { value: 0.004, min: 0.001, max: 0.05, step: 0.001 },
     octaves: { value: 8, min: 1, max: 8, step: 1 },
     seed: { value: 2.2, min: 0.1, max: 10, step: 0.1 },
     scale: { value: 5, min: 0.1, max: 5, step: 0.1 },
     color: { value: "#0a0a0a" },
     plateauHeight: { value: 0, min: 0, max: 1, step: 0.01 },
-    plateauSmoothing: { value: 0.2, min: 0, max: 1, step: 0.01 },
-    segments: { value: 256, min: 32, max: 512, step: 32 },
+    plateauSmoothing: { value: 0.0, min: 0, max: 1, step: 0.01 },
+    segments: { value: 128, min: 32, max: 512, step: 32 },
     size: { value: 20, min: 10, max: 100, step: 5 },
     baseHeight: { value: 5, min: 0, max: 20, step: 1 },
   });

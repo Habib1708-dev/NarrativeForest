@@ -27,6 +27,7 @@ import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
+import DistanceFade from "./fog/DistanceFade";
 
 export default function Experience() {
   // Three handles
@@ -171,7 +172,7 @@ export default function Experience() {
       <Stars
         radius={360}
         depth={2}
-        count={20000}
+        count={2000}
         factor={4}
         saturation={0}
         fade={false}
@@ -217,7 +218,7 @@ export default function Experience() {
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
-        <Lake position={[-2, -2, -2]} />
+        <Lake />
 
         {/* Grid-based fog particle system with explicit occluders */}
         <FogParticleSystem
@@ -240,23 +241,15 @@ export default function Experience() {
         />
       </Suspense>
 
-      {/* Forward fog dome now rendered in the same main pass */}
-      {/* <UnifiedForwardFog
-        enabled={fEnabled}
-        color={fColor}
-        density={fDensity}
-        extinction={fExtinction}
-        fogHeight={fFogHeight}
-        fadeStart={fFadeStart}
-        fadeEnd={fFadeEnd}
-        distFadeStart={fDistStart}
-        distFadeEnd={fDistEnd}
-        lightDir={[fLightDirX, fLightDirY, fLightDirZ]}
-        lightIntensity={fLightIntensity}
-        anisotropy={fAnisotropy}
-        skyRadius={fSkyRadius}
-        layer={0}
-      /> */}
+      <DistanceFade
+        enabled
+        distStart={6}
+        distEnd={9}
+        clipStart={0.2}
+        clipEnd={0.6}
+        forceKill={false} // <-- FIRST: prove injection (everything disappears)
+        debugTint={false}
+      />
 
       {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
       <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
