@@ -18,8 +18,8 @@ import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { KernelSize } from "postprocessing";
 
 // Scene pieces
-import Terrain from "./components/Terrain";
-import Forest from "./components/Forest";
+// import Terrain from "./components/Terrain"; // <- replaced by tiled terrain
+// import Forest from "./components/Forest";   // <- will be reintroduced after terrain-only phase
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
@@ -29,19 +29,20 @@ import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
 import DistanceFade from "./fog/DistanceFade";
 
+// New: terrain-only tiling system
+import TerrainTiled from "./components/TerrainTiled";
+// You will implement this to EXACTLY match your current Terrain height math,
+// so the original 20x20 stays visually identical:
+import { heightAt as sampleHeight } from "./proc/heightfield";
+
 export default function Experience() {
   // Three handles
   const { gl } = useThree();
 
-  // One-time capture of the Terrain mesh to avoid setState loops
-  const [terrainMesh, setTerrainMesh] = useState(null);
-  const terrainCaptured = useRef(false);
-  const handleTerrainRef = useCallback((m) => {
-    if (!terrainCaptured.current && m) {
-      terrainCaptured.current = true;
-      setTerrainMesh(m);
-    }
-  }, []);
+  // We no longer capture a single Terrain mesh (tiled terrain is many meshes).
+  // Keep the ref slot for later when we expose a group from TerrainTiled.
+  const [terrainGroup, setTerrainGroup] = useState(null);
+  const handleTerrainGroupRef = useCallback((g) => g && setTerrainGroup(g), []);
 
   // Collect important objects via callback refs (no re-renders after first set)
   const [cabinObj, setCabinObj] = useState(null);
@@ -53,7 +54,7 @@ export default function Experience() {
   const handleCabinRef = useCallback((obj) => obj && setCabinObj(obj), []);
   const handleManRef = useCallback((obj) => obj && setManObj(obj), []);
   const handleCatRef = useCallback((obj) => obj && setCatObj(obj), []);
-  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []);
+  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []); // (unused for now)
   const handleRadioTowerRef = useCallback(
     (obj) => obj && setRadioTowerObj(obj),
     []
@@ -137,17 +138,13 @@ export default function Experience() {
     gl.toneMappingExposure = exposure;
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.outputColorSpace = THREE.SRGBColorSpace;
-    // Important: we’re not doing a background pre-pass anymore
     gl.autoClear = true;
   }, [gl, exposure]);
 
-  // Build occluder list once refs exist
+  // Occluders list (for now, exclude terrain until we expose the tiled group to the fog system)
   const occluders = useMemo(
-    () =>
-      [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(
-        Boolean
-      ),
-    [terrainMesh, cabinObj, manObj, catObj, forestObj, radioTowerObj]
+    () => [cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(Boolean),
+    [cabinObj, manObj, catObj, forestObj, radioTowerObj]
   );
 
   return (
@@ -161,7 +158,7 @@ export default function Experience() {
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
 
-      {/* Sky & Stars rendered as part of the main pass */}
+      {/* Sky & Stars */}
       <Sky
         sunPosition={sunPosition}
         rayleigh={rayleigh}
@@ -209,20 +206,29 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        {/* Terrain (capture mesh) */}
-        <Terrain ref={handleTerrainRef} />
+        <TerrainTiled
+          sampleHeight={sampleHeight}
+          tileSize={4}
+          anchorMinX={-10}
+          anchorMinZ={-10}
+          loadRadius={2}
+          dropRadius={3}
+          prefetch={1}
+          resolution={26} // keeps vertex density close to original across 20m
+        />
 
         {/* Scene actors */}
-        <Forest ref={handleForestRef} terrainMesh={terrainMesh} />
+        {/* Forest will return once we stream tiles into a BVH placement pipeline.
+            <Forest ref={handleForestRef} terrainMesh={/* TBD: tiled group hook-up *-/} /> */}
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
         <Lake />
 
-        {/* Grid-based fog particle system with explicit occluders */}
+        {/* Fog particles (works fine without terrain occluder for now) */}
         <FogParticleSystem
-          terrainMesh={terrainMesh}
+          terrainMesh={null} // temporarily null until we expose a unified proxy mesh/group for occlusion
           cellSize={2}
           occluders={occluders}
           fogParams={{
@@ -247,15 +253,15 @@ export default function Experience() {
         distEnd={9}
         clipStart={0.2}
         clipEnd={0.6}
-        forceKill={false} // <-- FIRST: prove injection (everything disappears)
+        forceKill={false}
         debugTint={false}
       />
 
-      {/* === POSTPROCESSING: Regular Bloom across the unified pass === */}
+      {/* POSTPROCESSING: Regular Bloom */}
       <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
         <Bloom
           intensity={1.35}
-          luminanceThreshold={0.7} // only “hot” emissive > ~0.7 bloom
+          luminanceThreshold={0.7}
           luminanceSmoothing={0.08}
           kernelSize={KernelSize.LARGE}
           mipmapBlur

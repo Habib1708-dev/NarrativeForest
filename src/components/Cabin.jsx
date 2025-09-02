@@ -65,8 +65,8 @@ export default forwardRef(function Cabin(_, ref) {
   } = useControls({
     Cabin: folder({
       Transform: folder({
-        positionX: { value: -1.8, min: -50, max: 50, step: 0.1 },
-        positionY: { value: -4.8, min: -20, max: 20, step: 0.1 },
+        positionX: { value: -2.2, min: -50, max: 50, step: 0.1 },
+        positionY: { value: -4.85, min: -20, max: 20, step: 0.01 },
         positionZ: { value: -2.7, min: -50, max: 50, step: 0.1 },
         rotationYDeg: {
           value: 180,
@@ -110,8 +110,8 @@ export default forwardRef(function Cabin(_, ref) {
           step: 0.001,
           label: "Size",
         },
-        bulbX: { value: -1.308, min: -50, max: 50, step: 0.001, label: "X" },
-        bulbY: { value: -4.59, min: -50, max: 50, step: 0.01, label: "Y" },
+        bulbX: { value: -1.705, min: -50, max: 50, step: 0.001, label: "X" },
+        bulbY: { value: -4.64, min: -50, max: 50, step: 0.01, label: "Y" },
         bulbZ: { value: -2.9, min: -50, max: 50, step: 0.01, label: "Z" },
       }),
     }),

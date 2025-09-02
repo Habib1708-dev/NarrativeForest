@@ -20,9 +20,9 @@ export default function Lake({
   // 1) Transform (X/Y/Z) via Leva
   const { lakePosX, lakePosY, lakePosZ } = useControls("Lake", {
     Transform: folder({
-      lakePosX: { value: -1.3, min: -20, max: 20, step: 0.01 },
-      lakePosY: { value: -4.89, min: -5, max: 5, step: 0.01 },
-      lakePosZ: { value: -3.87, min: -20, max: 20, step: 0.01 },
+      lakePosX: { value: -1.8, min: -20, max: 20, step: 0.01 },
+      lakePosY: { value: -4.82, min: -5, max: 5, step: 0.01 },
+      lakePosZ: { value: -2.8, min: -20, max: 20, step: 0.01 },
     }),
   });
 

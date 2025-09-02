@@ -44,8 +44,8 @@ export default forwardRef(function Cat(_, ref) {
   } = useControls({
     Cat: folder({
       Transform: folder({
-        positionX: { value: -1.305, min: -50, max: 50, step: 0.001 },
-        positionY: { value: -4.41, min: -50, max: 50, step: 0.001 },
+        positionX: { value: -1.7, min: -50, max: 50, step: 0.001 },
+        positionY: { value: -4.46, min: -50, max: 50, step: 0.001 },
         positionZ: { value: -2.86, min: -50, max: 50, step: 0.001 },
         rotationYDeg: {
           value: 180,

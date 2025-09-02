@@ -49,8 +49,8 @@ export default forwardRef(function Man(_, ref) {
   } = useControls({
     Man: folder({
       Transform: folder({
-        positionX: { value: -1.19, min: -50, max: 50, step: 0.01 },
-        positionY: { value: -4.48, min: -50, max: 50, step: 0.01 },
+        positionX: { value: -1.6, min: -50, max: 50, step: 0.01 },
+        positionY: { value: -4.53, min: -50, max: 50, step: 0.01 },
         positionZ: { value: -2.95, min: -50, max: 50, step: 0.01 },
         rotationYDeg: {
           value: 34.3,
