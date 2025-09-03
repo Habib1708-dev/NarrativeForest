@@ -1,3 +1,4 @@
+// src/Experience.jsx
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
@@ -28,17 +29,18 @@ import "./three-bvh-setup";
 export default function Experience() {
   const { gl } = useThree();
 
-  // ==== REFS (avoid setState in ref callbacks) ====
+  // ==== REFS ====
   const cabinRef = useRef(null);
   const manRef = useRef(null);
   const catRef = useRef(null);
   const radioTowerRef = useRef(null);
   const lakeRef = useRef(null);
-
-  // Terrain group for raycasts / occlusion
   const terrainRef = useRef(null);
 
-  // === Lake exclusion state (changes only when footprint materially changes) ===
+  // Forest occluders (instanced trees + rocks) — NEW
+  const [forestOccluders, setForestOccluders] = useState([]);
+
+  // Lake exclusion
   const [lakeExclusion, setLakeExclusion] = useState(null);
   const prevExclRef = useRef(null);
 
@@ -59,7 +61,6 @@ export default function Experience() {
 
     dirLightIntensity,
 
-    // Unified fog-ish params (used by FogParticleSystem & DistanceFade)
     fEnabled,
     fColor,
     fDensity,
@@ -122,7 +123,7 @@ export default function Experience() {
     gl.autoClear = true;
   }, [gl, exposure]);
 
-  // Compute occluders every render (cheap) — avoids state for refs
+  // Build occluders list (don’t include the lake)
   const occluders = useMemo(
     () =>
       [
@@ -131,6 +132,8 @@ export default function Experience() {
         manRef.current,
         catRef.current,
         radioTowerRef.current,
+        // Add instanced trees/rocks from the forest:
+        ...forestOccluders,
       ].filter(Boolean),
     [
       terrainRef.current,
@@ -138,16 +141,17 @@ export default function Experience() {
       manRef.current,
       catRef.current,
       radioTowerRef.current,
+      forestOccluders, // updates when ForestDynamic publishes
     ]
   );
 
-  // === Lake exclusion tracking without render-loop thrash ===
+  // Lake exclusion tracking
   useFrame(() => {
     const fp = lakeRef.current?.getFootprint?.(0.45);
     if (!fp) return;
 
     const prev = prevExclRef.current;
-    const eps = 0.02; // 2cm hysteresis to avoid churn
+    const eps = 0.02;
     const changed =
       !prev ||
       Math.abs(fp.centerX - prev.centerX) > eps ||
@@ -157,7 +161,6 @@ export default function Experience() {
 
     if (changed) {
       prevExclRef.current = fp;
-      // single state update when footprint meaningfully changes
       setLakeExclusion(fp);
     }
   });
@@ -240,11 +243,12 @@ export default function Experience() {
         <RadioTower ref={radioTowerRef} />
         <Lake ref={lakeRef} />
 
-        {/* Fog particles (include terrain in occluders for soft ground fade) */}
+        {/* Fog particles (now include forest instanced meshes as occluders) */}
         <FogParticleSystem
-          terrainMesh={terrainRef.current /* group */}
+          terrainGroup={terrainRef.current}
           cellSize={2}
           occluders={occluders}
+          exclusion={lakeExclusion}
           fogParams={{
             color: fColor,
             density: fDensity,
@@ -260,12 +264,13 @@ export default function Experience() {
           }}
         />
 
-        {/* Forest respects dynamic lake exclusion */}
+        {/* Forest — publish instanced meshes for fog occlusion */}
         <ForestDynamic
           terrainGroup={terrainRef.current}
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
           exclusion={lakeExclusion}
+          onOccludersChange={setForestOccluders}
         />
       </Suspense>
 
