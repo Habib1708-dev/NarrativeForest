@@ -13,7 +13,11 @@ import { useInstancedRocks } from "../hooks/InstancedRocks";
  * - Deterministic per-chunk RNG for reproducible revisits.
  * - Poisson-ish spacing using a light occupancy grid.
  * - Sinks trees/rocks into ground like your original Forest.jsx.
- * - Instanced meshes: high LOD near, low LOD mid; rocks near only.
+ *
+ * Rendering rule in this version:
+ * - NEAR ring  (first neighbors): render HIGH-LOD trees + rocks
+ * - MID ring   (second neighbors): render HIGH-LOD trees (no rocks)
+ * - VIEW ring  (third neighbors) : build & cache only (no render)
  */
 
 export default function ForestDynamic({
@@ -54,13 +58,13 @@ export default function ForestDynamic({
     rockTintIntensity,
   } = useControls("Forest (Dynamic)", {
     seed: { value: 6, min: 0, max: 2 ** 31 - 1, step: 1 },
-    chunkSize: { value: 3, min: 2, max: 8, step: 1 }, // <<< 3 m chunks
+    chunkSize: { value: 2, min: 2, max: 8, step: 1 }, // <<< 2 m chunks
     marginBeyondFade: { value: 2.0, min: 0, max: 6, step: 0.1 },
     useFadeDerived: { value: true },
     forestHalfOverride: { value: 9, min: 4, max: 20, step: 0.1 },
     nearRingExtra: { value: 0, min: 0, max: 2, step: 1 },
     midRingExtra: { value: 0, min: -2, max: 2, step: 1 },
-    raysPerFrame: { value: 150, min: 5, max: 400, step: 5 }, // <<< fills fast
+    raysPerFrame: { value: 150, min: 5, max: 400, step: 5 }, // fills fast
     retentionSeconds: { value: 2.0, min: 0.5, max: 10, step: 0.5 },
     prefetchAheadChunks: { value: 1, min: 0, max: 3, step: 1 },
 
@@ -109,7 +113,7 @@ export default function ForestDynamic({
     tileHalfExtent,
   ]);
 
-  // Chunk radii
+  // Chunk radii (in chunks)
   const nearRChunks = Math.max(
     1,
     Math.floor(fadeDistStart / chunkSize) + nearRingExtra
@@ -121,7 +125,7 @@ export default function ForestDynamic({
   const maxRFromTiles = Math.max(
     1,
     Math.floor((tileHalfExtent - 0.5) / chunkSize)
-  ); // safety clamp
+  ); // safety clamp vs tile extent
   const midRChunks = Math.min(midRChunksRaw, maxRFromTiles);
   const viewRChunks = Math.max(
     midRChunks + 1,
@@ -130,27 +134,22 @@ export default function ForestDynamic({
 
   // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
-  const lowParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
   const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 
   // Optional tints
   useEffect(() => {
     const tintC = new THREE.Color(treeTint);
-    const tint = (parts) => {
-      parts.forEach((p) => {
-        const m = p.material;
-        if (!m || !m.color) return;
-        if (!m.userData._origColor) m.userData._origColor = m.color.clone();
-        m.color.copy(m.userData._origColor).lerp(tintC, treeTintIntensity);
-        if (typeof m.metalness === "number") m.metalness = 0.0;
-        if (typeof m.roughness === "number")
-          m.roughness = Math.min(1, Math.max(0.8, m.roughness ?? 1));
-        m.needsUpdate = true;
-      });
-    };
-    if (highParts.length) tint(highParts);
-    if (lowParts.length) tint(lowParts);
-  }, [highParts, lowParts, treeTint, treeTintIntensity]);
+    highParts.forEach((p) => {
+      const m = p.material;
+      if (!m || !m.color) return;
+      if (!m.userData._origColor) m.userData._origColor = m.color.clone();
+      m.color.copy(m.userData._origColor).lerp(tintC, treeTintIntensity);
+      if (typeof m.metalness === "number") m.metalness = 0.0;
+      if (typeof m.roughness === "number")
+        m.roughness = Math.min(1, Math.max(0.8, m.roughness ?? 1));
+      m.needsUpdate = true;
+    });
+  }, [highParts, treeTint, treeTintIntensity]);
 
   useEffect(() => {
     const tintC = new THREE.Color(rockTint);
@@ -168,14 +167,13 @@ export default function ForestDynamic({
 
   // ---------------- Helpers ----------------
   const treeBaseMinY = useMemo(() => {
-    const parts = highParts.length ? highParts : lowParts;
     let minY = 0;
-    for (const p of parts) {
+    for (const p of highParts) {
       const bb = p.geometry.boundingBox;
       if (bb) minY = Math.min(minY, bb.min.y);
     }
     return minY;
-  }, [highParts, lowParts]);
+  }, [highParts]);
 
   const rockBottomPerPart = useMemo(
     () =>
@@ -197,7 +195,7 @@ export default function ForestDynamic({
 
   // ---------------- Chunk windows & modes ----------------
   const modesRef = useRef({});
-  const [modes, setModes] = useState({});
+  const [, setModes] = useState({});
   const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
   const camXZ = useRef(new THREE.Vector3());
 
@@ -208,30 +206,28 @@ export default function ForestDynamic({
   const raycasterRef = useRef(new THREE.Raycaster());
   raycasterRef.current.firstHitOnly = true;
 
-  // Instancing refs
+  // Instancing refs (HIGH trees + rocks)
   const treeHighRefs = useRef(highParts.map(() => React.createRef()));
-  const treeLowRefs = useRef(lowParts.map(() => React.createRef()));
   const rockRefs = useRef(rockParts.map(() => React.createRef()));
 
-  // Capacities
-  const TREE_CAP = 2000; // allow denser totals
+  // Capacities (increase since mid ring now renders trees too)
+  const TREE_CAP = 6000;
   const ROCK_CAP_PER_PART = 1200;
 
   // One-time mesh init
   useEffect(() => {
-    [treeHighRefs.current, treeLowRefs.current, rockRefs.current].forEach(
-      (arr) =>
-        arr.forEach((r) => {
-          const m = r.current;
-          if (!m) return;
-          m.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-          m.matrixAutoUpdate = false;
-          m.frustumCulled = false;
-          m.count = 0;
-          m.instanceMatrix.needsUpdate = true;
-        })
+    [treeHighRefs.current, rockRefs.current].forEach((arr) =>
+      arr.forEach((r) => {
+        const m = r.current;
+        if (!m) return;
+        m.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        m.matrixAutoUpdate = false;
+        m.frustumCulled = false;
+        m.count = 0;
+        m.instanceMatrix.needsUpdate = true;
+      })
     );
-  }, [highParts, lowParts, rockParts]);
+  }, [highParts, rockParts]);
 
   const chunkKey = (cx, cz) => `${cx},${cz}`;
   const worldToChunk = (x, z) => [
@@ -268,7 +264,7 @@ export default function ForestDynamic({
     for (const [x, z] of neighborhood(cx, cz, nearRChunks))
       next[chunkKey(x, z)] = "high";
     for (const [x, z] of neighborhood(cx, cz, midRChunks))
-      next[chunkKey(x, z)] ??= "med";
+      next[chunkKey(x, z)] ??= "med"; // now rendered as HIGH trees too
     for (const [x, z] of neighborhood(cx, cz, viewRChunks))
       next[chunkKey(x, z)] ??= "off";
     return { next, viewSet: new Set(Object.keys(next)) };
@@ -306,7 +302,7 @@ export default function ForestDynamic({
       viewSet.add(k);
     }
 
-    // Enqueue builds
+    // Enqueue builds (near, then mid, then view/prefetch)
     const now = performance.now();
     for (const k of viewSet) {
       if (!cacheRef.current.has(k)) {
@@ -318,11 +314,11 @@ export default function ForestDynamic({
 
     // Update modes & schedule drop
     modesRef.current = next;
-    setModes(next);
+    setModes(next); // dev visibility
     for (const k of cacheRef.current.keys())
       if (!viewSet.has(k)) dropTimesRef.current.set(k, now);
 
-    // Immediately flip instancing counts to reflect new LOD rings
+    // Reflect new rings immediately
     refreshInstancing();
   });
 
@@ -382,42 +378,35 @@ export default function ForestDynamic({
   const refreshInstancing = () => {
     if (!Object.keys(modesRef.current).length) return;
 
-    const highTrees = [];
-    const medTrees = [];
+    const visibleTrees = []; // high + mid (both rendered as HIGH)
     const rocksByPart = rockParts.map(() => []);
 
     for (const [key, mode] of Object.entries(modesRef.current)) {
       const rec = cacheRef.current.get(key);
       if (!rec) continue;
-      if (mode === "high") {
-        highTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
-      } else if (mode === "med") {
-        medTrees.push(...rec.trees);
+
+      if (mode === "high" || mode === "med") {
+        // Trees render in both rings (same HIGH model)
+        visibleTrees.push(...rec.trees);
+        if (mode === "high") {
+          // Rocks only in near ring
+          rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+        }
       }
+      // mode === "off": cached only
     }
 
-    // Trees high
+    // Trees (HIGH everywhere in visible window)
     treeHighRefs.current.forEach((ref) => {
       const m = ref.current;
       if (!m) return;
-      const N = Math.min(TREE_CAP, highTrees.length);
-      for (let i = 0; i < N; i++) m.setMatrixAt(i, highTrees[i]);
+      const N = Math.min(TREE_CAP, visibleTrees.length);
+      for (let i = 0; i < N; i++) m.setMatrixAt(i, visibleTrees[i]);
       m.count = N;
       m.instanceMatrix.needsUpdate = true;
     });
 
-    // Trees low
-    treeLowRefs.current.forEach((ref) => {
-      const m = ref.current;
-      if (!m) return;
-      const N = Math.min(TREE_CAP, medTrees.length);
-      for (let i = 0; i < N; i++) m.setMatrixAt(i, medTrees[i]);
-      m.count = N;
-      m.instanceMatrix.needsUpdate = true;
-    });
-
-    // Rocks per part
+    // Rocks per part (near ring only)
     rockRefs.current.forEach((ref, iPart) => {
       const m = ref.current;
       if (!m) return;
@@ -429,11 +418,11 @@ export default function ForestDynamic({
     });
   };
 
-  if (!highParts.length || !lowParts.length || !rockParts.length) return null;
+  if (!highParts.length || !rockParts.length) return null;
 
   return (
     <group name="ForestDynamic">
-      {/* Trees: High LOD */}
+      {/* Trees: HIGH LOD (near + mid rings) */}
       {highParts.map((p, i) => (
         <instancedMesh
           key={`fd-th-${i}`}
@@ -445,19 +434,7 @@ export default function ForestDynamic({
         />
       ))}
 
-      {/* Trees: Low LOD */}
-      {lowParts.map((p, i) => (
-        <instancedMesh
-          key={`fd-tm-${i}`}
-          ref={treeLowRefs.current[i]}
-          args={[p.geometry, p.material, TREE_CAP]}
-          castShadow={false}
-          receiveShadow
-          frustumCulled={false}
-        />
-      ))}
-
-      {/* Rocks */}
+      {/* Rocks: near ring only */}
       {rockParts.map((p, i) => (
         <instancedMesh
           key={`fd-rk-${i}`}
