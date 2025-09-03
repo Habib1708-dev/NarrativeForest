@@ -98,7 +98,7 @@ export default function ForestDynamic({
     // --- NEW: Scales ---
     treeScaleMin: { value: 0.03, min: 0.005, max: 0.2, step: 0.001 },
     treeScaleMax: { value: 0.06, min: 0.006, max: 0.3, step: 0.001 },
-    rockScaleMin: { value: 0.24, min: 0.02, max: 0.5, step: 0.001 },
+    rockScaleMin: { value: 0.36, min: 0.02, max: 0.5, step: 0.001 },
     rockScaleMax: { value: 0.48, min: 0.03, max: 0.8, step: 0.001 },
 
     // Rendering toggles

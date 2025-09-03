@@ -15,9 +15,10 @@ import { TrailFluid } from "../fx/TrailFluid";
 
 const Lake = forwardRef(function Lake(
   {
-    position = [-2, 0.0, -2], // initial position
+    // initial transform
+    position = [-2, 0.0, -2],
     rotation = [Math.PI * 0.5, 0, 0],
-    resolution = 128,
+    resolution = 128, //128,
     envMap = null, // optional THREE.CubeTexture
   },
   ref
@@ -36,7 +37,28 @@ const Lake = forwardRef(function Lake(
     }),
   });
 
-  // 2) Waves, colors, thresholds, fresnel, bioluminescence
+  // 2) Size — DOUBLE the visual size by default, without changing exclusion
+  //    The plane is on LOCAL XY; after a 90° X-rotation, local X→world X, local Y→world Z.
+  const { lakeSizeX, lakeSizeZ } = useControls("Lake", {
+    Size: folder({
+      lakeSizeX: {
+        value: 2.0,
+        min: 0.25,
+        max: 10,
+        step: 0.01,
+        label: "Size X (world)",
+      },
+      lakeSizeZ: {
+        value: 2.0,
+        min: 0.25,
+        max: 10,
+        step: 0.01,
+        label: "Size Z (world)",
+      },
+    }),
+  });
+
+  // 3) Waves, colors, thresholds, fresnel, bioluminescence
   const {
     // waves
     uWavesAmplitude,
@@ -53,7 +75,7 @@ const Lake = forwardRef(function Lake(
     uPeakTransition,
     uTroughThreshold,
     uTroughTransition,
-    // fresnel (opacity is hard-coded to 1.0 now)
+    // fresnel
     uFresnelScale,
     uFresnelPower,
     // bioluminescence (fluid)
@@ -91,15 +113,14 @@ const Lake = forwardRef(function Lake(
       uTroughTransition: { value: 0.15, min: 0.001, max: 0.3, step: 0.001 },
     }),
     Material: folder({
-      // uOpacity removed — always opaque for perf
       uFresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
       uFresnelPower: { value: 1.0, min: 0.1, max: 2, step: 0.01 },
     }),
     Bioluminescence: folder({
-      bioColorA: { value: "#2cc3ff" }, // cyan-ish
-      bioColorB: { value: "#00ff88" }, // green-ish
+      bioColorA: { value: "#2cc3ff" },
+      bioColorB: { value: "#00ff88" },
       bioIntensity: { value: 3, min: 0, max: 4, step: 0.05 },
-      bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 }, // 2π rad/s by age
+      bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 },
       bioAltPhase: { value: 0.0, min: -6.28318, max: 6.28318, step: 0.01 },
       decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
       diffusion: { value: 0.15, min: 0.0, max: 0.5, step: 0.01 },
@@ -140,14 +161,14 @@ const Lake = forwardRef(function Lake(
     });
   }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow, splatRadius, splatStrength]);
 
-  // === Shader material (always opaque: uOpacity=1.0, transparent=false) ===
+  // === Shader material (always opaque) ===
   const material = useMemo(() => {
     return new THREE.ShaderMaterial({
       vertexShader: lakeVertexShader,
       fragmentShader: lakeFragmentShader,
       uniforms: {
         uTime: { value: 0 },
-        uOpacity: { value: 1.0 }, // hard-coded opacity
+        uOpacity: { value: 1.0 },
         uEnvironmentMap: { value: envMap },
 
         // Waves
@@ -182,18 +203,16 @@ const Lake = forwardRef(function Lake(
         uBioAltFreq: { value: bioAltFreq },
         uBioAltPhase: { value: bioAltPhase },
       },
-      transparent: false, // never use blending path
+      transparent: false,
       depthTest: true,
-      side: THREE.DoubleSide, // your choice to keep double-sided
+      side: THREE.DoubleSide,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live-update uniforms from controls (skip uOpacity — fixed to 1.0)
+  // Live-update uniforms from controls
   useEffect(() => {
     if (!material) return;
-
-    // Waves
     material.uniforms.uWavesAmplitude.value = uWavesAmplitude;
     material.uniforms.uWavesFrequency.value = uWavesFrequency;
     material.uniforms.uWavesPersistence.value = uWavesPersistence;
@@ -201,7 +220,6 @@ const Lake = forwardRef(function Lake(
     material.uniforms.uWavesIterations.value = uWavesIterations;
     material.uniforms.uWavesSpeed.value = uWavesSpeed;
 
-    // Colors/thresholds
     material.uniforms.uTroughColor.value.setStyle(uTroughColor);
     material.uniforms.uSurfaceColor.value.setStyle(uSurfaceColor);
     material.uniforms.uPeakColor.value.setStyle(uPeakColor);
@@ -210,11 +228,9 @@ const Lake = forwardRef(function Lake(
     material.uniforms.uTroughThreshold.value = uTroughThreshold;
     material.uniforms.uTroughTransition.value = uTroughTransition;
 
-    // Fresnel
     material.uniforms.uFresnelScale.value = uFresnelScale;
     material.uniforms.uFresnelPower.value = uFresnelPower;
 
-    // Bio alt
     material.uniforms.uBioColorA.value.setStyle(bioColorA);
     material.uniforms.uBioColorB.value.setStyle(bioColorB);
     material.uniforms.uBioIntensity.value = bioIntensity;
@@ -234,13 +250,10 @@ const Lake = forwardRef(function Lake(
 
   const handlePointerMove = useCallback(
     (e) => {
-      // Throttle to ~83 Hz to prevent oversplats & overdraw
       const now = performance.now();
       if (now - lastSplatT.current < 12) return;
       lastSplatT.current = now;
       lastInteractT.current = now;
-
-      // R3F provides UV on the intersection event for the mesh
       if (!e.uv) return;
       trail.splat(e.uv, splatStrength, splatRadius);
     },
@@ -251,8 +264,6 @@ const Lake = forwardRef(function Lake(
   useFrame((_, dt) => {
     const now = performance.now();
     const idleMs = now - lastInteractT.current;
-
-    // Full fidelity while interacting; cheaper when idle
     const maxDt = idleMs < 1000 ? 1 / 30 : 1 / 20;
     const step = Math.min(dt, maxDt);
 
@@ -260,25 +271,21 @@ const Lake = forwardRef(function Lake(
 
     if (material) {
       material.uniforms.uTrailMap.value = trail.texture;
-      if (material.uniforms.uStampMap) {
-        material.uniforms.uStampMap.value =
-          trail.stampTexture || material.uniforms.uStampMap.value;
-      }
+      material.uniforms.uStampMap.value = trail.stampTexture; // now exposed
       material.uniforms.uTime.value += dt;
     }
   });
 
   // === Expose world-space footprint via ref ===
+  // We report a footprint that is **invariant to visual size**:
+  // dividing world AABB width/depth by the visual scale keeps the exclusion the same
+  // even when the lake is doubled (or changed) in size.
   useImperativeHandle(ref, () => ({
-    /**
-     * Returns an axis-aligned footprint of the lake on XZ, with an extra margin.
-     * { centerX, centerZ, width, depth }
-     */
     getFootprint: (extraMargin = 0.45) => {
       const m = meshRef.current;
       if (!m) return null;
 
-      // PlaneGeometry(1,1) corners in LOCAL space (XY plane)
+      // PlaneGeometry(1,1) LOCAL corners (XY plane)
       const corners = [
         new THREE.Vector3(-0.5, -0.5, 0.0),
         new THREE.Vector3(0.5, -0.5, 0.0),
@@ -298,20 +305,35 @@ const Lake = forwardRef(function Lake(
         if (p.z > maxZ) maxZ = p.z;
       }
 
+      // Actual world center
       const centerX = (minX + maxX) * 0.5;
       const centerZ = (minZ + maxZ) * 0.5;
-      const width = maxX - minX + 2 * extraMargin;
-      const depth = maxZ - minZ + 2 * extraMargin;
 
-      return { centerX, centerZ, width, depth };
+      // Report a **scale-invariant** width/depth to keep the exclusion unchanged.
+      const worldWidth = maxX - minX;
+      const worldDepth = maxZ - minZ;
+
+      const sx = Math.max(1e-6, lakeSizeX);
+      const sz = Math.max(1e-6, lakeSizeZ);
+      const reportedWidth = worldWidth / sx; // undo visual X scale
+      const reportedDepth = worldDepth / sz; // undo visual Z scale
+
+      return {
+        centerX,
+        centerZ,
+        width: reportedWidth + 2 * extraMargin,
+        depth: reportedDepth + 2 * extraMargin,
+      };
     },
   }));
 
   return (
     <mesh
       ref={meshRef}
-      position={[lakePosX, lakePosY, lakePosZ]} // controlled via Leva
+      position={[lakePosX, lakePosY, lakePosZ]}
       rotation={rotation}
+      // DOUBLE SIZE visually (default 2.0 each). Z scale stays 1 (thickness).
+      scale={[lakeSizeX, lakeSizeZ, 1]}
       geometry={geom}
       onPointerMove={handlePointerMove}
       frustumCulled={true}
