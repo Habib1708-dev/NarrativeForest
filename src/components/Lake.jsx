@@ -1,4 +1,11 @@
-import React, { useMemo, useRef, useEffect, useCallback } from "react";
+import React, {
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useControls, folder } from "leva";
@@ -6,12 +13,15 @@ import lakeVertexShader from "../shaders/lake/vertex.glsl?raw";
 import lakeFragmentShader from "../shaders/lake/fragment.glsl?raw";
 import { TrailFluid } from "../fx/TrailFluid";
 
-export default function Lake({
-  position = [-2, 0.0, -2], // initial position
-  rotation = [Math.PI * 0.5, 0, 0],
-  resolution = 128,
-  envMap = null, // optional THREE.CubeTexture
-}) {
+const Lake = forwardRef(function Lake(
+  {
+    position = [-2, 0.0, -2], // initial position
+    rotation = [Math.PI * 0.5, 0, 0],
+    resolution = 128,
+    envMap = null, // optional THREE.CubeTexture
+  },
+  ref
+) {
   const meshRef = useRef();
   const matRef = useRef();
   const { gl } = useThree();
@@ -128,16 +138,7 @@ export default function Lake({
       splatRadius,
       splatStrength,
     });
-  }, [
-    trail,
-    decay,
-    diffusion,
-    flowScale,
-    flowFrequency,
-    fadeWindow,
-    splatRadius,
-    splatStrength,
-  ]);
+  }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow, splatRadius, splatStrength]);
 
   // === Shader material (always opaque: uOpacity=1.0, transparent=false) ===
   const material = useMemo(() => {
@@ -219,29 +220,7 @@ export default function Lake({
     material.uniforms.uBioIntensity.value = bioIntensity;
     material.uniforms.uBioAltFreq.value = bioAltFreq;
     material.uniforms.uBioAltPhase.value = bioAltPhase;
-  }, [
-    material,
-    uWavesAmplitude,
-    uWavesFrequency,
-    uWavesPersistence,
-    uWavesLacunarity,
-    uWavesIterations,
-    uWavesSpeed,
-    uTroughColor,
-    uSurfaceColor,
-    uPeakColor,
-    uPeakThreshold,
-    uPeakTransition,
-    uTroughThreshold,
-    uTroughTransition,
-    uFresnelScale,
-    uFresnelPower,
-    bioColorA,
-    bioColorB,
-    bioIntensity,
-    bioAltFreq,
-    bioAltPhase,
-  ]);
+  }, [material, uWavesAmplitude, uWavesFrequency, uWavesPersistence, uWavesLacunarity, uWavesIterations, uWavesSpeed, uTroughColor, uSurfaceColor, uPeakColor, uPeakThreshold, uPeakTransition, uTroughThreshold, uTroughTransition, uFresnelScale, uFresnelPower, bioColorA, bioColorB, bioIntensity, bioAltFreq, bioAltPhase]);
 
   // === Geometry ===
   const geom = useMemo(
@@ -289,6 +268,45 @@ export default function Lake({
     }
   });
 
+  // === Expose world-space footprint via ref ===
+  useImperativeHandle(ref, () => ({
+    /**
+     * Returns an axis-aligned footprint of the lake on XZ, with an extra margin.
+     * { centerX, centerZ, width, depth }
+     */
+    getFootprint: (extraMargin = 0.45) => {
+      const m = meshRef.current;
+      if (!m) return null;
+
+      // PlaneGeometry(1,1) corners in LOCAL space (XY plane)
+      const corners = [
+        new THREE.Vector3(-0.5, -0.5, 0.0),
+        new THREE.Vector3(0.5, -0.5, 0.0),
+        new THREE.Vector3(0.5, 0.5, 0.0),
+        new THREE.Vector3(-0.5, 0.5, 0.0),
+      ];
+      const w = corners.map((c) => c.clone().applyMatrix4(m.matrixWorld));
+
+      let minX = +Infinity,
+        maxX = -Infinity,
+        minZ = +Infinity,
+        maxZ = -Infinity;
+      for (const p of w) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+      }
+
+      const centerX = (minX + maxX) * 0.5;
+      const centerZ = (minZ + maxZ) * 0.5;
+      const width = maxX - minX + 2 * extraMargin;
+      const depth = maxZ - minZ + 2 * extraMargin;
+
+      return { centerX, centerZ, width, depth };
+    },
+  }));
+
   return (
     <mesh
       ref={meshRef}
@@ -301,4 +319,6 @@ export default function Lake({
       <primitive object={material} attach="material" ref={matRef} />
     </mesh>
   );
-}
+});
+
+export default Lake;

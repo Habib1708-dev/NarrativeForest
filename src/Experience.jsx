@@ -1,16 +1,8 @@
-// src/Experience.jsx
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
 import { useControls, folder } from "leva";
-import {
-  useRef,
-  useState,
-  Suspense,
-  useEffect,
-  useCallback,
-  useMemo,
-} from "react";
-import { useThree } from "@react-three/fiber";
+import { useRef, useState, Suspense, useEffect, useMemo } from "react";
+import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
@@ -20,7 +12,6 @@ import { KernelSize } from "postprocessing";
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import UnifiedForwardFog from "./fog/UnifiedForwardFog";
 import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
@@ -37,20 +28,19 @@ import "./three-bvh-setup";
 export default function Experience() {
   const { gl } = useThree();
 
-  const [cabinObj, setCabinObj] = useState(null);
-  const [manObj, setManObj] = useState(null);
-  const [catObj, setCatObj] = useState(null);
-  const [forestObj, setForestObj] = useState(null);
-  const [radioTowerObj, setRadioTowerObj] = useState(null);
+  // ==== REFS (avoid setState in ref callbacks) ====
+  const cabinRef = useRef(null);
+  const manRef = useRef(null);
+  const catRef = useRef(null);
+  const radioTowerRef = useRef(null);
+  const lakeRef = useRef(null);
 
-  const handleCabinRef = useCallback((obj) => obj && setCabinObj(obj), []);
-  const handleManRef = useCallback((obj) => obj && setManObj(obj), []);
-  const handleCatRef = useCallback((obj) => obj && setCatObj(obj), []);
-  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []);
-  const handleRadioTowerRef = useCallback(
-    (obj) => obj && setRadioTowerObj(obj),
-    []
-  );
+  // Terrain group for raycasts / occlusion
+  const terrainRef = useRef(null);
+
+  // === Lake exclusion state (changes only when footprint materially changes) ===
+  const [lakeExclusion, setLakeExclusion] = useState(null);
+  const prevExclRef = useRef(null);
 
   const {
     fogColor,
@@ -69,7 +59,7 @@ export default function Experience() {
 
     dirLightIntensity,
 
-    // Unified fog params used by FogParticleSystem
+    // Unified fog-ish params (used by FogParticleSystem & DistanceFade)
     fEnabled,
     fColor,
     fDensity,
@@ -132,13 +122,45 @@ export default function Experience() {
     gl.autoClear = true;
   }, [gl, exposure]);
 
+  // Compute occluders every render (cheap) — avoids state for refs
   const occluders = useMemo(
-    () => [cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(Boolean),
-    [cabinObj, manObj, catObj, forestObj, radioTowerObj]
+    () =>
+      [
+        terrainRef.current,
+        cabinRef.current,
+        manRef.current,
+        catRef.current,
+        radioTowerRef.current,
+      ].filter(Boolean),
+    [
+      terrainRef.current,
+      cabinRef.current,
+      manRef.current,
+      catRef.current,
+      radioTowerRef.current,
+    ]
   );
 
-  // NEW: grab TerrainTiled group for raycasts (ForestDynamic / Fog can use it)
-  const terrainRef = useRef(null);
+  // === Lake exclusion tracking without render-loop thrash ===
+  useFrame(() => {
+    const fp = lakeRef.current?.getFootprint?.(0.45);
+    if (!fp) return;
+
+    const prev = prevExclRef.current;
+    const eps = 0.02; // 2cm hysteresis to avoid churn
+    const changed =
+      !prev ||
+      Math.abs(fp.centerX - prev.centerX) > eps ||
+      Math.abs(fp.centerZ - prev.centerZ) > eps ||
+      Math.abs(fp.width - prev.width) > eps ||
+      Math.abs(fp.depth - prev.depth) > eps;
+
+    if (changed) {
+      prevExclRef.current = fp;
+      // single state update when footprint meaningfully changes
+      setLakeExclusion(fp);
+    }
+  });
 
   const TERRAIN_TILE_SIZE = 4;
   const TERRAIN_LOAD_RADIUS = 2;
@@ -212,13 +234,13 @@ export default function Experience() {
         />
 
         {/* Actors */}
-        <Cabin ref={handleCabinRef} />
-        <Man ref={handleManRef} />
-        <Cat ref={handleCatRef} />
-        <RadioTower ref={handleRadioTowerRef} />
-        <Lake />
+        <Cabin ref={cabinRef} />
+        <Man ref={manRef} />
+        <Cat ref={catRef} />
+        <RadioTower ref={radioTowerRef} />
+        <Lake ref={lakeRef} />
 
-        {/* Fog particles */}
+        {/* Fog particles (include terrain in occluders for soft ground fade) */}
         <FogParticleSystem
           terrainMesh={terrainRef.current /* group */}
           cellSize={2}
@@ -238,15 +260,12 @@ export default function Experience() {
           }}
         />
 
-        {/* NEW: Size-less forest, tied to DistanceFade & tile extents */}
+        {/* Forest respects dynamic lake exclusion */}
         <ForestDynamic
           terrainGroup={terrainRef.current}
-          fadeDistStart={fDistStart}
-          fadeDistEnd={fDistEnd}
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-          // Optional exclusion to keep cabin clearing (example):
-          exclusion={{ centerX: -1.4, centerZ: -2.7, width: 1.1, depth: 1.1 }}
+          exclusion={lakeExclusion}
         />
       </Suspense>
 

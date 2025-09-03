@@ -1,4 +1,3 @@
-// src/components/ForestDynamic.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
@@ -10,10 +9,12 @@ import { useInstancedRocks } from "../hooks/InstancedRocks";
  * ForestDynamic — two rings (NEAR + MID):
  * - NEAR ring : render HIGH-LOD trees + rocks
  * - MID ring  : raycast/build always; optional render for trees (toggle OFF by default)
- * - No third ring, no prefetch
  *
  * Radii are Chebyshev distances in CHUNKS from the camera’s current chunk.
  * chunkSize = meters per chunk (grid resolution).
+ *
+ * Supports an exclusion zone:
+ *   exclusion = { centerX, centerZ, width, depth }  // axis-aligned rect on XZ
  */
 
 export default function ForestDynamic({
@@ -95,12 +96,10 @@ export default function ForestDynamic({
     rockTargetPerChunk: { value: 12, min: 0, max: 60, step: 1 },
 
     // --- NEW: Scales ---
-    // Trees previously: 0.02 .. 0.037 (fixed in code). Now exposed:
     treeScaleMin: { value: 0.03, min: 0.005, max: 0.2, step: 0.001 },
-    treeScaleMax: { value: 0.05, min: 0.006, max: 0.3, step: 0.001 },
-    // Rocks were already exposed; defaults preserved:
-    rockScaleMin: { value: 0.03, min: 0.02, max: 0.5, step: 0.001 },
-    rockScaleMax: { value: 0.12, min: 0.03, max: 0.8, step: 0.001 },
+    treeScaleMax: { value: 0.06, min: 0.006, max: 0.3, step: 0.001 },
+    rockScaleMin: { value: 0.24, min: 0.02, max: 0.5, step: 0.001 },
+    rockScaleMax: { value: 0.48, min: 0.03, max: 0.8, step: 0.001 },
 
     // Rendering toggles
     renderMidTrees: {
@@ -276,7 +275,7 @@ export default function ForestDynamic({
     modesRef.current = next;
     setModes(next);
     for (const k of cacheRef.current.keys())
-      if (!viewSet.has(k)) dropTimesRef.current.set(k, now);
+      if (!viewSet.has(k)) dropTimesRef.current.set(k, performance.now());
 
     // Reflect new rings immediately
     refreshInstancing();
@@ -335,6 +334,37 @@ export default function ForestDynamic({
 
     refreshInstancing();
   });
+
+  // Rebuild overlapping chunks immediately when exclusion changes (instant cleanup)
+  useEffect(() => {
+    if (!exclusion) return;
+    const { centerX, centerZ, width, depth } = exclusion;
+    const minX = centerX - width * 0.5;
+    const maxX = centerX + width * 0.5;
+    const minZ = centerZ - depth * 0.5;
+    const maxZ = centerZ + depth * 0.5;
+
+    const minCx = Math.floor(minX / chunkSize);
+    const maxCx = Math.floor(maxX / chunkSize);
+    const minCz = Math.floor(minZ / chunkSize);
+    const maxCz = Math.floor(maxZ / chunkSize);
+
+    const now = performance.now();
+    for (let cz = minCz; cz <= maxCz; cz++) {
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        const key = chunkKey(cx, cz);
+        if (cacheRef.current.has(key)) {
+          cacheRef.current.delete(key);
+          // If currently in view, enqueue rebuild
+          if (modesRef.current[key]) {
+            buildQueueRef.current.push({ key, cx, cz, enqueuedAt: now });
+          }
+        }
+      }
+    }
+    refreshInstancing();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exclusion, chunkSize]);
 
   // Aggregate matrices from active chunks → upload to instanced meshes
   const refreshInstancing = () => {
@@ -486,7 +516,7 @@ function buildChunk(cx, cz, rayBudget, opts) {
 
       const terrainY = hit.point.y;
       const bottomAlign = -treeBaseMinY * scale;
-      const sink = 0.02; // same as original: “dig” slightly
+      const sink = 0.02; // dig slightly
       const y = terrainY - bottomAlign - sink;
 
       const rotY = rng() * Math.PI * 2;
