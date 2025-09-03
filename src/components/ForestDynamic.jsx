@@ -14,15 +14,15 @@ import { useInstancedRocks } from "../hooks/InstancedRocks";
 
 /**
  * ForestDynamic — two rings (NEAR + MID) with BVH raycasts and instancing.
- * Adds onOccludersChange so outside systems (fog) can include trees/rocks
- * in their depth pre-pass to avoid clipping.
+ * Publishes occluders (trees/rocks instancedMeshes) via onOccludersChange.
  */
 export default function ForestDynamic({
   terrainGroup, // REQUIRED
   tileSize = 4,
   terrainLoadRadius = 2,
   exclusion = null,
-  onOccludersChange = () => {}, // NEW
+  refRockRefs, // OPTIONAL: external array/refs for the rocks instancedMeshes
+  onOccludersChange = () => {}, // OPTIONAL: callback(occ[]) for fog prepass, etc.
 }) {
   const { camera } = useThree();
 
@@ -35,18 +35,22 @@ export default function ForestDynamic({
     raysPerFrame,
     retentionSeconds,
 
+    // Scatter & spacing
     treeMinSpacing,
     rockMinSpacing,
     treeTargetPerChunk,
     rockTargetPerChunk,
 
+    // Explicit scale ranges
     treeScaleMin,
     treeScaleMax,
     rockScaleMin,
     rockScaleMax,
 
+    // Rendering toggles
     renderMidTrees,
 
+    // Optional tint
     treeTint,
     treeTintIntensity,
     rockTint,
@@ -54,29 +58,49 @@ export default function ForestDynamic({
   } = useControls("Forest (Dynamic)", {
     seed: { value: 6, min: 0, max: 2 ** 31 - 1, step: 1 },
     chunkSize: { value: 2, min: 1, max: 8, step: 1 },
-    nearRingChunks: { value: 3, min: 1, max: 12, step: 1 },
-    midRingChunks: { value: 4, min: 1, max: 16, step: 1 },
+    nearRingChunks: {
+      value: 3,
+      min: 1,
+      max: 12,
+      step: 1,
+      label: "Near radius (chunks)",
+    },
+    midRingChunks: {
+      value: 4,
+      min: 1,
+      max: 16,
+      step: 1,
+      label: "Mid radius (chunks)",
+    },
     raysPerFrame: { value: 150, min: 50, max: 400, step: 5 },
     retentionSeconds: { value: 2.0, min: 0.5, max: 10, step: 0.5 },
+
+    // Spacing & density
     treeMinSpacing: { value: 0.7, min: 0.3, max: 2.0, step: 0.05 },
     rockMinSpacing: { value: 0.35, min: 0.15, max: 1.5, step: 0.05 },
     treeTargetPerChunk: { value: 14, min: 2, max: 60, step: 1 },
     rockTargetPerChunk: { value: 12, min: 0, max: 60, step: 1 },
+
+    // Scales
     treeScaleMin: { value: 0.03, min: 0.005, max: 0.2, step: 0.001 },
     treeScaleMax: { value: 0.06, min: 0.006, max: 0.3, step: 0.001 },
     rockScaleMin: { value: 0.36, min: 0.02, max: 0.5, step: 0.001 },
     rockScaleMax: { value: 0.48, min: 0.03, max: 0.8, step: 0.001 },
+
+    // Rendering toggles
     renderMidTrees: {
       value: false,
       label: "Render mid trees (built either way)",
     },
+
+    // Optional tint
     treeTint: { value: "#000000" },
     treeTintIntensity: { value: 0.0, min: 0, max: 1, step: 0.01 },
     rockTint: { value: "#444444" },
     rockTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
   });
 
-  // Terrain extent clamps
+  // Terrain half-extent clamp so forest never outruns loaded tiles
   const tileHalfExtent = useMemo(
     () => (terrainLoadRadius + 0.5) * tileSize,
     [terrainLoadRadius, tileSize]
@@ -86,14 +110,29 @@ export default function ForestDynamic({
       Math.max(1, Math.floor((tileHalfExtent - 0.5) / Math.max(1, chunkSize))),
     [tileHalfExtent, chunkSize]
   );
+
+  // Effective radii (ensure mid >= near, both within tile extent)
   const NEAR_R = Math.max(1, Math.min(nearRingChunks | 0, maxRFromTiles));
   const MID_R = Math.max(NEAR_R, Math.min(midRingChunks | 0, maxRFromTiles));
 
-  // Assets
+  // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
   const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 
-  // Tinting
+  // Instanced refs
+  const treeHighRefs = useRef(highParts.map(() => React.createRef()));
+  // Single, conflict-free rock refs array:
+  const rockRefsArray = useMemo(() => {
+    // Accept either an array of refs, or a ref object whose .current is an array of refs
+    const external =
+      (Array.isArray(refRockRefs) && refRockRefs) ||
+      (Array.isArray(refRockRefs?.current) && refRockRefs.current) ||
+      null;
+    return external ?? rockParts.map(() => React.createRef());
+    // depend only on length so we don't regenerate refs every frame
+  }, [refRockRefs, rockParts.length]);
+
+  // Optional tints
   useEffect(() => {
     const tintC = new THREE.Color(treeTint);
     highParts.forEach((p) => {
@@ -122,7 +161,7 @@ export default function ForestDynamic({
     });
   }, [rockParts, rockTint, rockTintIntensity]);
 
-  // Helpers
+  // ---------------- Helpers ----------------
   const treeBaseMinY = useMemo(() => {
     let minY = 0;
     for (const p of highParts) {
@@ -150,27 +189,26 @@ export default function ForestDynamic({
     );
   };
 
-  // Modes, caches, raycaster
+  // ---------------- Chunk windows & modes (NEAR + MID only) ----------------
   const modesRef = useRef({});
   const [, setModes] = useState({});
   const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
   const camXZ = useRef(new THREE.Vector3());
+
+  // Chunk cache
   const cacheRef = useRef(new Map());
   const buildQueueRef = useRef([]);
   const dropTimesRef = useRef(new Map());
   const raycasterRef = useRef(new THREE.Raycaster());
   raycasterRef.current.firstHitOnly = true;
 
-  // Instanced refs
-  const treeHighRefs = useRef(highParts.map(() => React.createRef()));
-  const rockRefs = useRef(rockParts.map(() => React.createRef()));
-
+  // Capacities
   const TREE_CAP = 6000;
   const ROCK_CAP_PER_PART = 1200;
 
   // One-time mesh init
   useEffect(() => {
-    [treeHighRefs.current, rockRefs.current].forEach((arr) =>
+    [treeHighRefs.current, rockRefsArray].forEach((arr) =>
       arr.forEach((r) => {
         const m = r.current;
         if (!m) return;
@@ -181,45 +219,47 @@ export default function ForestDynamic({
         m.instanceMatrix.needsUpdate = true;
       })
     );
-  }, [highParts, rockParts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highParts.length, rockParts.length]);
 
-  // ---------- PUBLISH OCCLUDERS (NEW) ----------
+  // ---------- PUBLISH OCCLUDERS (trees & rocks instanced meshes) ----------
   const publishOccluders = useCallback(() => {
     const occ = [];
     treeHighRefs.current.forEach((r) => r.current && occ.push(r.current));
-    rockRefs.current.forEach((r) => r.current && occ.push(r.current));
+    rockRefsArray.forEach((r) => r.current && occ.push(r.current));
     onOccludersChange?.(occ);
-  }, [onOccludersChange]);
+  }, [onOccludersChange, rockRefsArray]);
 
   useEffect(() => {
-    // after first mount and whenever part counts change
     publishOccluders();
     return () => onOccludersChange?.([]); // clear on unmount
   }, [publishOccluders, highParts.length, rockParts.length, onOccludersChange]);
-  // ---------------------------------------------
+  // ------------------------------------------------------------------------
 
   const chunkKey = (cx, cz) => `${cx},${cz}`;
   const worldToChunk = (x, z) => [
     Math.floor(x / chunkSize),
     Math.floor(z / chunkSize),
   ];
+
   const neighborhood = (cx, cz, R) => {
     const out = [];
     for (let dz = -R; dz <= R; dz++)
       for (let dx = -R; dx <= R; dx++) out.push([cx + dx, cz + dz]);
     return out;
   };
+
   const computeModes = (cx, cz) => {
     const next = {};
     for (const [x, z] of neighborhood(cx, cz, NEAR_R))
       next[chunkKey(x, z)] = "high";
     for (const [x, z] of neighborhood(cx, cz, MID_R))
       next[chunkKey(x, z)] ??= "med";
-    const viewSet = new Set(Object.keys(next));
+    const viewSet = new Set(Object.keys(next)); // near+mid only
     return { next, viewSet };
   };
 
-  // Recompute when entering new chunk
+  // Recompute when entering a new chunk
   useFrame(() => {
     if (!terrainGroup) return;
 
@@ -231,6 +271,7 @@ export default function ForestDynamic({
 
     const { next, viewSet } = computeModes(ccx, ccz);
 
+    // Enqueue builds (NEAR + MID only)
     const now = performance.now();
     for (const k of viewSet) {
       if (!cacheRef.current.has(k)) {
@@ -240,15 +281,17 @@ export default function ForestDynamic({
       dropTimesRef.current.delete(k);
     }
 
+    // Update modes & schedule drop
     modesRef.current = next;
     setModes(next);
     for (const k of cacheRef.current.keys())
       if (!viewSet.has(k)) dropTimesRef.current.set(k, performance.now());
 
+    // Reflect new rings immediately
     refreshInstancing();
   });
 
-  // Drop after retention
+  // Drop chunks outside retention window after cooldown
   useFrame(() => {
     if (!Object.keys(modesRef.current).length) return;
     const now = performance.now();
@@ -261,7 +304,7 @@ export default function ForestDynamic({
     });
   });
 
-  // Build cadence
+  // Build cadence — budgeted rays (NEAR + MID only)
   useFrame(() => {
     if (!terrainGroup || !buildQueueRef.current.length) return;
 
@@ -302,7 +345,7 @@ export default function ForestDynamic({
     refreshInstancing();
   });
 
-  // Rebuild overlapping chunks immediately when exclusion changes
+  // Rebuild overlapping chunks immediately when exclusion changes (instant cleanup)
   useEffect(() => {
     if (!exclusion) return;
     const { centerX, centerZ, width, depth } = exclusion;
@@ -322,6 +365,7 @@ export default function ForestDynamic({
         const key = chunkKey(cx, cz);
         if (cacheRef.current.has(key)) {
           cacheRef.current.delete(key);
+          // If currently in view, enqueue rebuild
           if (modesRef.current[key]) {
             buildQueueRef.current.push({ key, cx, cz, enqueuedAt: now });
           }
@@ -332,12 +376,12 @@ export default function ForestDynamic({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exclusion, chunkSize]);
 
-  // Upload matrices
+  // Aggregate matrices from active chunks → upload to instanced meshes
   const refreshInstancing = () => {
     if (!Object.keys(modesRef.current).length) return;
 
-    const nearTrees = [];
-    const midTrees = [];
+    const nearTrees = []; // always rendered
+    const midTrees = []; // rendered only if renderMidTrees = true
     const rocksByPart = rockParts.map(() => []);
 
     for (const [key, mode] of Object.entries(modesRef.current)) {
@@ -346,7 +390,7 @@ export default function ForestDynamic({
 
       if (mode === "high") {
         nearTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr)); // rocks near only
       } else if (mode === "med") {
         midTrees.push(...rec.trees);
       }
@@ -354,6 +398,7 @@ export default function ForestDynamic({
 
     const allTrees = renderMidTrees ? nearTrees.concat(midTrees) : nearTrees;
 
+    // Trees (HIGH LOD)
     treeHighRefs.current.forEach((ref) => {
       const m = ref.current;
       if (!m) return;
@@ -363,7 +408,8 @@ export default function ForestDynamic({
       m.instanceMatrix.needsUpdate = true;
     });
 
-    rockRefs.current.forEach((ref, iPart) => {
+    // Rocks per part (near ring only)
+    rockRefsArray.forEach((ref, iPart) => {
       const m = ref.current;
       if (!m) return;
       const mats = rocksByPart[iPart] || [];
@@ -378,6 +424,7 @@ export default function ForestDynamic({
 
   return (
     <group name="ForestDynamic">
+      {/* Trees: HIGH LOD (near always; mid if toggled) */}
       {highParts.map((p, i) => (
         <instancedMesh
           key={`fd-th-${i}`}
@@ -389,10 +436,11 @@ export default function ForestDynamic({
         />
       ))}
 
+      {/* Rocks: near ring only */}
       {rockParts.map((p, i) => (
         <instancedMesh
           key={`fd-rk-${i}`}
-          ref={rockRefs.current[i]}
+          ref={rockRefsArray[i]}
           args={[p.geometry, p.material, ROCK_CAP_PER_PART]}
           castShadow={false}
           receiveShadow
@@ -427,27 +475,31 @@ function buildChunk(cx, cz, rayBudget, opts) {
     ((cx * 73856093) ^ (cz * 19349663) ^ (seed ^ 0x9e3779b9)) >>> 0
   );
 
+  // Chunk world bounds
   const minX = cx * chunkSize;
   const minZ = cz * chunkSize;
   const maxX = minX + chunkSize;
   const maxZ = minZ + chunkSize;
 
+  // Terrain top bound for ray origin
   const bb = new THREE.Box3().setFromObject(terrainGroup);
   const originY = (bb.max.y || 0) + 5;
   const down = new THREE.Vector3(0, -1, 0);
 
+  // Occupancy hashes (grid cell ~ half the spacing)
   const occTrees = makeHasherLocal(Math.max(0.05, treeMinSpacing * 0.5));
   const occRocks = makeHasherLocal(Math.max(0.05, rockMinSpacing * 0.5));
 
   const trees = [];
   const rockByPart = rockBottomPerPart.map(() => []);
+
   let raysUsed = 0;
 
   // Trees
   {
     let placed = 0,
       attempts = 0;
-    const maxAttempts = treeTargetPerChunk * 60;
+    const maxAttempts = treeTargetPerChunk * 60; // denser → more tries
     const tMin = Math.max(0.001, Math.min(treeScaleMin, treeScaleMax));
     const tMax = Math.max(tMin + 1e-4, Math.max(treeScaleMin, treeScaleMax));
     const rTree = Math.max(0.05, treeMinSpacing * 0.5);
@@ -458,11 +510,12 @@ function buildChunk(cx, cz, rayBudget, opts) {
       raysUsed < rayBudget
     ) {
       attempts++;
+
       const x = minX + rng() * (maxX - minX);
       const z = minZ + rng() * (maxZ - minZ);
       if (insideExclusion(x, z)) continue;
 
-      const scale = tMin + rng() * (tMax - tMin);
+      const scale = tMin + rng() * (tMax - tMin); // UNIFORM in [tMin..tMax]
       if (!occTrees.canPlace(x, z, rTree)) continue;
 
       const origin = new THREE.Vector3(x, originY, z);
@@ -473,8 +526,9 @@ function buildChunk(cx, cz, rayBudget, opts) {
 
       const terrainY = hit.point.y;
       const bottomAlign = -treeBaseMinY * scale;
-      const sink = 0.02;
+      const sink = 0.02; // dig slightly
       const y = terrainY - bottomAlign - sink;
+
       const rotY = rng() * Math.PI * 2;
 
       const m4 = new THREE.Matrix4();
@@ -506,11 +560,12 @@ function buildChunk(cx, cz, rayBudget, opts) {
       raysUsed < rayBudget
     ) {
       attempts++;
+
       const x = minX + rng() * (maxX - minX);
       const z = minZ + rng() * (maxZ - minZ);
       if (insideExclusion(x, z)) continue;
 
-      const scale = rMin + rng() * (rMax - rMin);
+      const scale = rMin + rng() * (rMax - rMin); // UNIFORM in [rMin..rMax]
       if (!occRocks.canPlace(x, z, rRock)) continue;
 
       const origin = new THREE.Vector3(x, originY, z);
@@ -524,7 +579,7 @@ function buildChunk(cx, cz, rayBudget, opts) {
 
       let y = terrainY;
       const bottomAlign = (rockBottomPerPart[pick] || 0) * scale;
-      const sink = 0.4 * scale;
+      const sink = 0.4 * scale; // “dig rocks in” proportional to size
       y += bottomAlign - sink;
 
       const rx = (rng() - 0.5) * 0.2;

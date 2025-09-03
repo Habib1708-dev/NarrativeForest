@@ -102,7 +102,7 @@ const Lake = forwardRef(function Lake(
       uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
     Colors: folder({
-      uTroughColor: { value: "#8a9094ff" },
+      uTroughColor: { value: "#939393" },
       uSurfaceColor: { value: "#9bd8c0" },
       uPeakColor: { value: "#bbd8e0" },
     }),

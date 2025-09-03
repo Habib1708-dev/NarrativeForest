@@ -25,6 +25,8 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 // NEW
 import ForestDynamic from "./components/ForestDynamic";
 import "./three-bvh-setup";
+import RaycastClickLogger from "./debug/RaycastClickLogger";
+import ClickLogger from "./utils/ClickLogger";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -272,6 +274,7 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
+        <ClickLogger targets={forestOccluders} />
       </Suspense>
 
       <DistanceFade
@@ -293,6 +296,18 @@ export default function Experience() {
           mipmapBlur
         />
       </EffectComposer>
+
+      <RaycastClickLogger
+        targets={[
+          terrainRef,
+          cabinRef,
+          manRef,
+          catRef,
+          radioTowerRef /*, any others */,
+        ]}
+        firstHitOnly={true} // set to false if you want every intersection per click
+        decimals={3}
+      />
     </>
   );
 }
