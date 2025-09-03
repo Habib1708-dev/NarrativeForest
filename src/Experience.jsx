@@ -13,13 +13,10 @@ import {
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
-// Postprocessing (regular Bloom)
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { KernelSize } from "postprocessing";
 
 // Scene pieces
-// import Terrain from "./components/Terrain"; // <- replaced by tiled terrain
-// import Forest from "./components/Forest";   // <- will be reintroduced after terrain-only phase
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
@@ -29,22 +26,17 @@ import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
 import DistanceFade from "./fog/DistanceFade";
 
-// New: terrain-only tiling system
+// Tiled terrain and heightfield
 import TerrainTiled from "./components/TerrainTiled";
-// You will implement this to EXACTLY match your current Terrain height math,
-// so the original 20x20 stays visually identical:
 import { heightAt as sampleHeight } from "./proc/heightfield";
 
+// NEW
+import ForestDynamic from "./components/ForestDynamic";
+import "./three-bvh-setup";
+
 export default function Experience() {
-  // Three handles
   const { gl } = useThree();
 
-  // We no longer capture a single Terrain mesh (tiled terrain is many meshes).
-  // Keep the ref slot for later when we expose a group from TerrainTiled.
-  const [terrainGroup, setTerrainGroup] = useState(null);
-  const handleTerrainGroupRef = useCallback((g) => g && setTerrainGroup(g), []);
-
-  // Collect important objects via callback refs (no re-renders after first set)
   const [cabinObj, setCabinObj] = useState(null);
   const [manObj, setManObj] = useState(null);
   const [catObj, setCatObj] = useState(null);
@@ -54,13 +46,12 @@ export default function Experience() {
   const handleCabinRef = useCallback((obj) => obj && setCabinObj(obj), []);
   const handleManRef = useCallback((obj) => obj && setManObj(obj), []);
   const handleCatRef = useCallback((obj) => obj && setCatObj(obj), []);
-  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []); // (unused for now)
+  const handleForestRef = useCallback((obj) => obj && setForestObj(obj), []);
   const handleRadioTowerRef = useCallback(
     (obj) => obj && setRadioTowerObj(obj),
     []
   );
 
-  // Controls (no Stars folder here — stars use defaults)
   const {
     fogColor,
     fogNear,
@@ -78,6 +69,7 @@ export default function Experience() {
 
     dirLightIntensity,
 
+    // Unified fog params used by FogParticleSystem
     fEnabled,
     fColor,
     fDensity,
@@ -122,8 +114,8 @@ export default function Experience() {
       fFogHeight: { value: -12.7, min: -20.0, max: 40.0, step: 0.1 },
       fFadeStart: { value: 0, min: 0.0, max: 200.0, step: 0.1 },
       fFadeEnd: { value: 51.8, min: 0.0, max: 300.0, step: 0.1 },
-      fDistStart: { value: 0.0, min: 0.0, max: 500.0, step: 1.0 },
-      fDistEnd: { value: 92.0, min: 0.0, max: 1000.0, step: 1.0 },
+      fDistStart: { value: 6.0, min: 0.0, max: 500.0, step: 0.1 },
+      fDistEnd: { value: 9.0, min: 0.0, max: 1000.0, step: 0.1 },
       fLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
       fLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
       fLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
@@ -133,7 +125,6 @@ export default function Experience() {
     }),
   });
 
-  // Renderer: ACES for nice highlights, keep HDR path for bloom
   useEffect(() => {
     gl.toneMappingExposure = exposure;
     gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -141,24 +132,27 @@ export default function Experience() {
     gl.autoClear = true;
   }, [gl, exposure]);
 
-  // Occluders list (for now, exclude terrain until we expose the tiled group to the fog system)
   const occluders = useMemo(
     () => [cabinObj, manObj, catObj, forestObj, radioTowerObj].filter(Boolean),
     [cabinObj, manObj, catObj, forestObj, radioTowerObj]
   );
 
+  // NEW: grab TerrainTiled group for raycasts (ForestDynamic / Fog can use it)
+  const terrainRef = useRef(null);
+
+  const TERRAIN_TILE_SIZE = 4;
+  const TERRAIN_LOAD_RADIUS = 2;
+
   return (
     <>
       <Perf position="top-left" />
 
-      {/* Scene fog (world) */}
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
       ) : (
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
 
-      {/* Sky & Stars */}
       <Sky
         sunPosition={sunPosition}
         rayleigh={rayleigh}
@@ -189,8 +183,7 @@ export default function Experience() {
         rotateSpeed={0.5}
       />
 
-      {/* World lights */}
-      <ambientLight intensity={0} color="#ffffff" />
+      <ambientLight intensity={0} />
       <directionalLight
         position={[-10, 15, -10]}
         intensity={dirLightIntensity}
@@ -207,28 +200,27 @@ export default function Experience() {
 
       <Suspense fallback={null}>
         <TerrainTiled
+          ref={terrainRef}
           sampleHeight={sampleHeight}
-          tileSize={4}
+          tileSize={TERRAIN_TILE_SIZE}
           anchorMinX={-10}
           anchorMinZ={-10}
-          loadRadius={2}
+          loadRadius={TERRAIN_LOAD_RADIUS}
           dropRadius={3}
           prefetch={1}
-          resolution={26} // keeps vertex density close to original across 20m
+          resolution={26}
         />
 
-        {/* Scene actors */}
-        {/* Forest will return once we stream tiles into a BVH placement pipeline.
-            <Forest ref={handleForestRef} terrainMesh={/* TBD: tiled group hook-up *-/} /> */}
+        {/* Actors */}
         <Cabin ref={handleCabinRef} />
         <Man ref={handleManRef} />
         <Cat ref={handleCatRef} />
         <RadioTower ref={handleRadioTowerRef} />
         <Lake />
 
-        {/* Fog particles (works fine without terrain occluder for now) */}
+        {/* Fog particles */}
         <FogParticleSystem
-          terrainMesh={null} // temporarily null until we expose a unified proxy mesh/group for occlusion
+          terrainMesh={terrainRef.current /* group */}
           cellSize={2}
           occluders={occluders}
           fogParams={{
@@ -245,19 +237,29 @@ export default function Experience() {
             anisotropy: fAnisotropy,
           }}
         />
+
+        {/* NEW: Size-less forest, tied to DistanceFade & tile extents */}
+        <ForestDynamic
+          terrainGroup={terrainRef.current}
+          fadeDistStart={fDistStart}
+          fadeDistEnd={fDistEnd}
+          tileSize={TERRAIN_TILE_SIZE}
+          terrainLoadRadius={TERRAIN_LOAD_RADIUS}
+          // Optional exclusion to keep cabin clearing (example):
+          exclusion={{ centerX: -1.4, centerZ: -2.7, width: 1.1, depth: 1.1 }}
+        />
       </Suspense>
 
       <DistanceFade
         enabled
-        distStart={6}
-        distEnd={9}
+        distStart={fDistStart}
+        distEnd={fDistEnd}
         clipStart={0.2}
         clipEnd={0.6}
         forceKill={false}
         debugTint={false}
       />
 
-      {/* POSTPROCESSING: Regular Bloom */}
       <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
         <Bloom
           intensity={1.35}

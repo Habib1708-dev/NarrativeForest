@@ -1,31 +1,41 @@
-import React, { useEffect, useMemo, useRef } from "react";
+// src/components/TerrainTiled.jsx
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useInfiniteTiles } from "../hooks/useInfiniteTiles";
 
 /**
- * TerrainTiled — CPU-built tiles that exactly sample your Terrain.jsx height math.
- * - sampleHeight(x,z) MUST be the function from proc/heightfield (heightAt).
- * - We compute positions in WORLD space directly (no rotation/offset tricks).
- * - We call computeVertexNormals() for parity with your original mesh.
+ * TerrainTiled — forwardRef so other systems (Forest/Fog) can raycast recursively.
+ * Each tile geometry gets a BVH if available (three-mesh-bvh) for fast raycasts.
  */
-export default function TerrainTiled({
-  sampleHeight, // REQUIRED
-  tileSize = 4, // 5x5 tiles cover your original 20x20 base
-  anchorMinX = -10, // aligns 20×20 base to [-10..+10]
-  anchorMinZ = -10,
-  loadRadius = 2, // 5x5 visible set
-  dropRadius = 3, // hysteresis band
-  prefetch = 1,
-  resolution = 26, // ~128 segs / 20m → 6.4 segs/m → 4m tile ≈ 25.6 → 26
-  materialFactory,
-  unloadCooldownMs = 2000,
-}) {
+const TerrainTiled = forwardRef(function TerrainTiled(
+  {
+    sampleHeight, // REQUIRED function (x,z) -> y
+    tileSize = 4,
+    anchorMinX = -10,
+    anchorMinZ = -10,
+    loadRadius = 2,
+    dropRadius = 3,
+    prefetch = 1,
+    resolution = 26,
+    materialFactory,
+    unloadCooldownMs = 2000,
+  },
+  ref
+) {
   if (typeof sampleHeight !== "function") {
     throw new Error("<TerrainTiled> needs sampleHeight(x,z).");
   }
 
   const groupRef = useRef();
+  useImperativeHandle(ref, () => groupRef.current, []);
+
   const tiles = useRef(new Map());
   const buildQueue = useRef([]);
 
@@ -40,7 +50,6 @@ export default function TerrainTiled({
 
   const makeMaterial = useMemo(() => {
     if (materialFactory) return materialFactory;
-    // Match your Terrain.jsx material color
     return () =>
       new THREE.MeshStandardMaterial({
         color: "#0a0a0a",
@@ -49,7 +58,6 @@ export default function TerrainTiled({
       });
   }, [materialFactory]);
 
-  // Build one tile geometry (positions + indices; let three compute normals)
   const buildTileGeometry = (ix, iz) => {
     const { minX, minZ, maxX, maxZ } = math.tileBounds(ix, iz);
     const seg = Math.max(2, resolution | 0);
@@ -67,7 +75,7 @@ export default function TerrainTiled({
       const wz = minZ + z * dz;
       for (let x = 0; x < vertsX; x++) {
         const wx = minX + x * dx;
-        const wy = sampleHeight(wx, wz); // world-space height, includes baseHeight & -10 offset
+        const wy = sampleHeight(wx, wz);
         pos[p++] = wx;
         pos[p++] = wy;
         pos[p++] = wz;
@@ -93,16 +101,16 @@ export default function TerrainTiled({
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
-    // Normals like your original Terrain.jsx (computed from triangles)
     g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
+    // BVH if three-bvh is installed (three-bvh-setup typically patches this):
+    g.computeBoundsTree?.();
     return g;
   };
 
-  // Diff application
   useEffect(() => {
-    // Enqueue builds for newly required tiles
+    // Enqueue newly required tiles
     required.forEach((key) => {
       if (tiles.current.has(key)) return;
       const [ix, iz] = math.parse(key);
@@ -117,9 +125,9 @@ export default function TerrainTiled({
       });
     });
 
-    // Mark for removal when outside retention
-    tiles.current.forEach((rec, key) => {
-      if (!retention.has(key)) {
+    // Mark removals outside retention
+    tiles.current.forEach((rec) => {
+      if (!retention.has(rec.key)) {
         rec.markedForRemovalAt ??= performance.now();
       } else {
         rec.markedForRemovalAt = undefined;
@@ -147,7 +155,7 @@ export default function TerrainTiled({
       }
     });
 
-    // Build one tile
+    // Build one tile per frame
     const q = buildQueue.current;
     if (!q.length) return;
     const job = q.shift();
@@ -169,4 +177,6 @@ export default function TerrainTiled({
   });
 
   return <group ref={groupRef} name="TerrainTiled" />;
-}
+});
+
+export default TerrainTiled;
