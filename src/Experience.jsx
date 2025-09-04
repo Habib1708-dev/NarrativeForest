@@ -29,6 +29,7 @@ import "./three-bvh-setup";
 import RaycastClickLogger from "./debug/RaycastClickLogger";
 import ClickLogger from "./utils/ClickLogger";
 import TestTree from "./components/TestTree";
+import MagicFlowers from "./components/MagicFlowers";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -245,10 +246,10 @@ export default function Experience() {
         <Man ref={manRef} />
         <Cat ref={catRef} />
         <RadioTower ref={radioTowerRef} />
-        {/* <Lake ref={lakeRef} /> */}
+        <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
-        {/* <FogParticleSystem
+        <FogParticleSystem
           terrainGroup={terrainRef.current}
           cellSize={2}
           occluders={occluders}
@@ -266,7 +267,7 @@ export default function Experience() {
             lightIntensity: fLightIntensity,
             anisotropy: fAnisotropy,
           }}
-        /> */}
+        />
 
         {/* Forest — publish instanced meshes for fog occlusion */}
         <ForestDynamic
@@ -277,6 +278,8 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         <ClickLogger targets={forestOccluders} />
+        <MagicMushrooms />
+        <MagicFlowers />
       </Suspense>
 
       <DistanceFade
@@ -298,9 +301,6 @@ export default function Experience() {
           mipmapBlur
         />
       </EffectComposer>
-
-      <TestTree />
-      <MagicMushrooms />
 
       <RaycastClickLogger
         targets={[

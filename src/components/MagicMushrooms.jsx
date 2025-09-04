@@ -1,5 +1,5 @@
 // src/components/MagicMushrooms.jsx
-import React from "react";
+import React, { useMemo, useRef, useEffect } from "react";
 import * as THREE from "three";
 import { useGLTF, Clone } from "@react-three/drei";
 import { useControls, folder } from "leva";
@@ -9,53 +9,120 @@ const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb"; // public/
 export default function MagicMushrooms(props) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
-  // 7 instances, each with its own Leva folder
-  const instances = Array.from({ length: 7 }, (_, i) => {
-    const name = `Mushroom ${i + 1}`;
-    return useControls(
-      name,
-      {
-        positionX: { value: -2, min: -4, max: 2, step: 0.001 },
-        positionY: { value: -4, min: -5, max: -3, step: 0.001 }, // updated range
-        positionZ: { value: -2, min: -4, max: 2, step: 0.001 },
-        rotationY: { value: 0, min: -Math.PI, max: Math.PI, step: 0.001 },
-        rotationZ: { value: 0, min: -Math.PI, max: Math.PI, step: 0.001 },
-        scale: { value: 0.7, min: 0.01, max: 5, step: 0.001 },
+  // --- Global tint controls (color + intensity) ---
+  const { tintColor, tintIntensity } = useControls({
+    Tint: folder({
+      tintColor: { value: "#ffffff", label: "Color" },
+      tintIntensity: {
+        value: 0.0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        label: "Intensity",
       },
-      { collapsed: true }
-    );
+    }),
   });
+
+  // Keep references to all materials so we can re-apply tint on change
+  const materialsRef = useRef(new Set());
+
+  // Helper: onClone hook to isolate materials & stash originals
+  const onCloneRegister = (root) => {
+    root.traverse((n) => {
+      if (!n.isMesh) return;
+      n.castShadow = true;
+      n.receiveShadow = true;
+
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      const cloned = mats.map((m) => {
+        const c = m.clone();
+        if (c.color && !c.userData._origColor) {
+          c.userData._origColor = c.color.clone();
+        }
+        c.needsUpdate = true;
+        materialsRef.current.add(c);
+        return c;
+      });
+      n.material = Array.isArray(n.material) ? cloned : cloned[0];
+    });
+  };
+
+  // Apply tint when color or intensity changes
+  useEffect(() => {
+    const target = new THREE.Color(tintColor);
+    materialsRef.current.forEach((m) => {
+      if (!m || !m.color) return;
+      if (!m.userData._origColor) m.userData._origColor = m.color.clone();
+      m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
+      m.needsUpdate = true;
+    });
+  }, [tintColor, tintIntensity]);
+
+  // --- Hard-coded mushrooms (your values) ---
+  const INSTANCES = useMemo(
+    () => [
+      // 1
+      {
+        position: [-2.487, -4.51, -1.836],
+        rotation: [0, 0.0, 0.0],
+        scale: 0.2,
+      },
+      // 2
+      {
+        position: [-2.786, -4.394, -2.157],
+        rotation: [0, Math.PI, 0.0],
+        scale: 0.294,
+      },
+      // 3
+      {
+        position: [-2.499, -4.449, -1.383],
+        rotation: [0, 0.825, 0.062],
+        scale: 0.16,
+      },
+      // 4
+      {
+        position: [-2.69, -4.429, -3.001],
+        rotation: [0, -Math.PI, 0.118],
+        scale: 0.18,
+      },
+      // 5
+      {
+        position: [-0.935, -4.167, -3.662],
+        rotation: [0, 0.246, 0.117],
+        scale: 0.15,
+      },
+      // 6
+      {
+        position: [-1.888, -4.523, -3.583],
+        rotation: [0, 1.71, -0.287],
+        scale: 0.2,
+      },
+      // 7
+      {
+        position: [-1.31, -4.58, -1.81],
+        rotation: [0, 0.0, 0.117],
+        scale: 0.15,
+      },
+    ],
+    []
+  );
+
+  if (!scene) return null;
 
   return (
     <group {...props} name="MagicMushrooms">
-      {instances.map((ctrl, i) => (
+      {INSTANCES.map((cfg, i) => (
         <group
           key={i}
-          position={[ctrl.positionX, ctrl.positionY, ctrl.positionZ]}
-          rotation={[0, ctrl.rotationY, ctrl.rotationZ]}
-          scale={ctrl.scale}
+          position={cfg.position}
+          rotation={cfg.rotation}
+          scale={cfg.scale}
         >
-          <Clone object={scene} onClone={(root) => tintClone(root)} />
+          <Clone object={scene} onClone={onCloneRegister} />
         </group>
       ))}
     </group>
   );
-}
-
-function tintClone(root) {
-  root.traverse((n) => {
-    if (n.isMesh) {
-      const mats = Array.isArray(n.material) ? n.material : [n.material];
-      n.material = mats.map((m) => {
-        const c = m.clone();
-        c.needsUpdate = true;
-        return c;
-      });
-      if (!Array.isArray(n.material)) n.material = n.material[0];
-      n.castShadow = true;
-      n.receiveShadow = true;
-    }
-  });
 }
 
 useGLTF.preload(MUSHROOM_GLB);
