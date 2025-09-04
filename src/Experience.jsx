@@ -24,9 +24,11 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 
 // NEW
 import ForestDynamic from "./components/ForestDynamic";
+import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
 import RaycastClickLogger from "./debug/RaycastClickLogger";
 import ClickLogger from "./utils/ClickLogger";
+import TestTree from "./components/TestTree";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -243,10 +245,10 @@ export default function Experience() {
         <Man ref={manRef} />
         <Cat ref={catRef} />
         <RadioTower ref={radioTowerRef} />
-        <Lake ref={lakeRef} />
+        {/* <Lake ref={lakeRef} /> */}
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
-        <FogParticleSystem
+        {/* <FogParticleSystem
           terrainGroup={terrainRef.current}
           cellSize={2}
           occluders={occluders}
@@ -264,7 +266,7 @@ export default function Experience() {
             lightIntensity: fLightIntensity,
             anisotropy: fAnisotropy,
           }}
-        />
+        /> */}
 
         {/* Forest — publish instanced meshes for fog occlusion */}
         <ForestDynamic
@@ -296,6 +298,9 @@ export default function Experience() {
           mipmapBlur
         />
       </EffectComposer>
+
+      <TestTree />
+      <MagicMushrooms />
 
       <RaycastClickLogger
         targets={[
