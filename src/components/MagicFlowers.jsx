@@ -1,11 +1,11 @@
 // src/components/MagicFlowers.jsx
-import React, { useMemo } from "react";
+import React, { useMemo, forwardRef } from "react";
 import { useGLTF, Clone } from "@react-three/drei";
 
 // Model should be in: public/models/magicPlantsAndCrystal/PurpleFlowers.glb
 const FLOWERS_GLB = "/models/magicPlantsAndCrystal/PurpleFlowers.glb";
 
-export default function MagicFlowers(props) {
+export default forwardRef(function MagicFlowers(props, ref) {
   const { scene } = useGLTF(FLOWERS_GLB);
 
   // Hard-coded transforms (radians for rotations), rounded to ≤ 3 decimals
@@ -66,7 +66,7 @@ export default function MagicFlowers(props) {
   if (!scene) return null;
 
   return (
-    <group {...props} name="MagicFlowers">
+    <group {...props} ref={ref} name="MagicFlowers">
       {INSTANCES.map((cfg, i) => (
         <group
           key={i}
@@ -74,18 +74,23 @@ export default function MagicFlowers(props) {
           rotation={cfg.rotation}
           scale={cfg.scale}
         >
-          <Clone object={scene} onClone={isolateMaterialsPerClone} />
+          <Clone
+            object={scene}
+            onClone={isolateMaterialsTransparentNoDepthWrite}
+          />
         </group>
       ))}
     </group>
   );
-}
+});
 
 /**
- * Ensure each clone has isolated materials so edits won't leak between instances.
- * Also enables cast/receive shadows.
+ * Important:
+ * - transparent = true + depthWrite = false prevents hard z-clip of fog particles.
+ * - depthTest remains true so they still test against solid geometry depth.
+ * - materials are cloned per instance to avoid shared-state issues.
  */
-function isolateMaterialsPerClone(root) {
+function isolateMaterialsTransparentNoDepthWrite(root) {
   root.traverse((n) => {
     if (!n.isMesh) return;
     n.castShadow = true;
@@ -94,6 +99,9 @@ function isolateMaterialsPerClone(root) {
     const mats = Array.isArray(n.material) ? n.material : [n.material];
     const cloned = mats.map((m) => {
       const c = m.clone();
+      c.transparent = true; // ensure proper sorting after disabling depthWrite
+      c.depthWrite = false; // <-- key fix to avoid harsh fog clipping
+      // keep depthTest = true (default)
       c.needsUpdate = true;
       return c;
     });

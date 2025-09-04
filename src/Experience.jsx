@@ -41,6 +41,8 @@ export default function Experience() {
   const radioTowerRef = useRef(null);
   const lakeRef = useRef(null);
   const terrainRef = useRef(null);
+  const flowersRef = useRef(null);
+  const mushroomsRef = useRef(null);
 
   // Forest occluders (instanced trees + rocks) — NEW
   const [forestOccluders, setForestOccluders] = useState([]);
@@ -137,7 +139,8 @@ export default function Experience() {
         manRef.current,
         catRef.current,
         radioTowerRef.current,
-        // Add instanced trees/rocks from the forest:
+        flowersRef.current,
+        mushroomsRef.current,
         ...forestOccluders,
       ].filter(Boolean),
     [
@@ -146,6 +149,8 @@ export default function Experience() {
       manRef.current,
       catRef.current,
       radioTowerRef.current,
+      flowersRef.current,
+      mushroomsRef.current,
       forestOccluders, // updates when ForestDynamic publishes
     ]
   );
@@ -277,9 +282,8 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
-        <ClickLogger targets={forestOccluders} />
-        <MagicMushrooms />
-        <MagicFlowers />
+        <MagicMushrooms ref={mushroomsRef} />
+        <MagicFlowers ref={flowersRef} />
       </Suspense>
 
       <DistanceFade
@@ -301,18 +305,6 @@ export default function Experience() {
           mipmapBlur
         />
       </EffectComposer>
-
-      <RaycastClickLogger
-        targets={[
-          terrainRef,
-          cabinRef,
-          manRef,
-          catRef,
-          radioTowerRef /*, any others */,
-        ]}
-        firstHitOnly={true} // set to false if you want every intersection per click
-        decimals={3}
-      />
     </>
   );
 }
