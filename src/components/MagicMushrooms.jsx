@@ -101,9 +101,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         scale: 0.2,
       },
       {
-        position: [-1.31, -4.58, -1.81],
+        position: [-1.31, -4.78, -1.71],
         rotation: [0, 0.0, 0.117],
-        scale: 0.15,
+        scale: 0.19,
       },
     ],
     []
