@@ -10,7 +10,7 @@ const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
-  // Instance placements
+  // Instance placements (unchanged)
   const INSTANCES = useMemo(
     () => [
       {
@@ -52,13 +52,15 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     []
   );
 
-  // Bake meshes (world transform) & clone materials (one per source)
+  // Extract sources: bake world → geometry, clone materials (bloom-friendly)
   const sources = useMemo(() => {
     if (!scene) return [];
     const list = [];
     scene.updateMatrixWorld(true);
     scene.traverse((n) => {
       if (!n.isMesh) return;
+
+      // Clone *world-baked* geometry for consistent base space
       const g = n.geometry.clone();
       g.applyMatrix4(n.matrixWorld);
       g.computeBoundingBox();
@@ -67,17 +69,16 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       const srcMats = Array.isArray(n.material) ? n.material : [n.material];
       const clonedMats = srcMats.map((m) => {
         const c = m.clone();
-        // For dissolve we keep full depth path & discard in shader
-        c.transparent = false;
+        c.transparent = false; // we discard in shader; keep depth writes
         c.depthWrite = true;
-        // Let bloom see HDR-ish values from our added glow
-        c.toneMapped = false;
+        c.toneMapped = false; // allow strong additive glow pre-tonemap
         c.needsUpdate = true;
         return c;
       });
 
       list.push({
         geometry: g,
+        bboxY: { min: g.boundingBox.min.y, max: g.boundingBox.max.y }, // source bbox (world-baked)
         material: Array.isArray(n.material) ? clonedMats : clonedMats[0],
       });
     });
@@ -88,9 +89,8 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const meshRefs = useRef([]);
   meshRefs.current = [];
 
-  // -------- Dissolve controls (start hidden) --------
+  // ---- Dissolve controls (start hidden) ----
   const progressRef = useRef(-0.2);
-  const worldYRangeRef = useRef({ min: 0, max: 1 });
 
   const params = useControls({
     Mushrooms: folder(
@@ -145,20 +145,17 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   });
 
   const updateUniformAll = (name, val) => {
-    // update on every material we patched
-    sources.forEach((src, sIdx) => {
-      const mat = src.material;
-      const mats = Array.isArray(mat) ? mat : [mat];
+    sources.forEach((src) => {
+      const mats = Array.isArray(src.material) ? src.material : [src.material];
       mats.forEach((m) => {
         const sh = m?.userData?.rtShader;
-        if (sh && sh.uniforms && name in sh.uniforms) {
+        if (sh && sh.uniforms && name in sh.uniforms)
           sh.uniforms[name].value = val;
-        }
       });
     });
   };
 
-  // Patch materials for dissolve (instancing-safe worldPos + glow)
+  // Patch materials for dissolve + glow (now with per-instance min/max via instanced attributes)
   useEffect(() => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -167,11 +164,20 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         if (m.isShaderMaterial || m.isPointsMaterial || m.isLineBasicMaterial)
           return;
 
-        const prevOnBeforeCompile = m.onBeforeCompile;
+        const prev = m.onBeforeCompile;
         m.onBeforeCompile = (shader) => {
-          prevOnBeforeCompile?.(shader);
+          prev?.(shader);
 
-          // Varying for world position
+          // Per-instance attributes for height normalization
+          shader.vertexShader =
+            `
+            attribute float iMinY;
+            attribute float iMaxY;
+            varying float vMinY;
+            varying float vMaxY;
+          ` + shader.vertexShader;
+
+          // Varying world position (instancing-safe)
           if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
             shader.vertexShader = shader.vertexShader.replace(
               "#include <common>",
@@ -185,7 +191,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             );
           }
 
-          // world position with instancing
+          // compute worldPos and pass iMinY/iMaxY
           shader.vertexShader = shader.vertexShader.replace(
             "#include <worldpos_vertex>",
             `
@@ -196,6 +202,8 @@ export default forwardRef(function MagicMushrooms(props, ref) {
               mat4 rtModel = modelMatrix;
             #endif
             worldPos = (rtModel * vec4(transformed, 1.0)).xyz;
+            vMinY = iMinY;
+            vMaxY = iMaxY;
             `
           );
 
@@ -208,13 +216,12 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           shader.uniforms.uGlowColor = {
             value: new THREE.Color(params.glowColor),
           };
-          shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
-          shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
           shader.uniforms.uSeed = { value: params.seed };
 
           const fragPrelude = /* glsl */ `
-            uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uMinY, uMaxY, uSeed, uGlowStrength;
+            uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uSeed, uGlowStrength;
             uniform vec3  uGlowColor;
+            varying float vMinY, vMaxY;
 
             float rt_hash(vec3 p){
               p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
@@ -247,11 +254,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `#include <common>\n${fragPrelude}`
           );
 
-          // gate & edge at main()
+          // Use per-instance Y range (vMinY/vMaxY) for uniform edge width
           shader.fragmentShader = shader.fragmentShader.replace(
             "void main() {",
             `void main() {
-              float y01 = clamp((worldPos.y - uMinY) / max(1e-5, (uMaxY - uMinY)), 0.0, 1.0);
+              float y01 = clamp((worldPos.y - vMinY) / max(1e-5, (vMaxY - vMinY)), 0.0, 1.0);
               float n = rt_vnoise(worldPos * uNoiseScale + vec3(uSeed));
               float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
               if (y01 > cutoff) { discard; }
@@ -259,7 +266,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `
           );
 
-          // add glow pre-tonemapping (fallback if absent)
+          // Add additive glow before tonemapping (with fallback)
           if (
             shader.fragmentShader.includes("#include <tonemapping_fragment>")
           ) {
@@ -323,22 +330,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   );
   useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
 
-  // Compute world Y range from the whole group
-  const updateWorldYRange = () => {
-    if (!groupRef.current) return;
-    groupRef.current.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(groupRef.current);
-    worldYRangeRef.current.min = box.min.y;
-    worldYRangeRef.current.max = box.max.y;
-    updateUniformAll("uMinY", worldYRangeRef.current.min);
-    updateUniformAll("uMaxY", worldYRangeRef.current.max);
-  };
-
-  useEffect(() => {
-    updateWorldYRange();
-  }, [sources]);
-
-  // Animate dissolve progress (in/out)
+  // Animate dissolve progress
   useFrame((_, dt) => {
     const target = params.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
@@ -350,14 +342,26 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     }
   });
 
-  // Build instance matrices once
+  // Build instance matrices once + set per-instance Y ranges as instanced attributes
   useEffect(() => {
     if (!sources.length) return;
+
     const dummy = new THREE.Object3D();
-    meshRefs.current.forEach((imesh) => {
+
+    meshRefs.current.forEach((imesh, sIdx) => {
       if (!imesh) return;
+
+      // Per-source base bbox (world-baked)
+      const { min: minY0, max: maxY0 } = sources[sIdx].bboxY;
+
+      // Prepare instanced attribute arrays
+      const minYArr = new Float32Array(INSTANCES.length);
+      const maxYArr = new Float32Array(INSTANCES.length);
+
       for (let i = 0; i < INSTANCES.length; i++) {
         const cfg = INSTANCES[i];
+
+        // instance matrix
         dummy.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
         dummy.rotation.set(
           cfg.rotation[0] || 0,
@@ -365,11 +369,28 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           cfg.rotation[2] || 0
         );
         const sc = cfg.scale ?? 1;
-        if (typeof sc === "number") dummy.scale.set(sc, sc, sc);
-        else dummy.scale.set(sc[0], sc[1], sc[2]);
+        const sx = typeof sc === "number" ? sc : sc[0];
+        const sy = typeof sc === "number" ? sc : sc[1];
+        const sz = typeof sc === "number" ? sc : sc[2];
+        dummy.scale.set(sx, sy, sz);
         dummy.updateMatrix();
         imesh.setMatrixAt(i, dummy.matrix);
+
+        // Because we only rotate around Y, world Y is affected only by translation and scaleY
+        minYArr[i] = cfg.position[1] + sy * minY0;
+        maxYArr[i] = cfg.position[1] + sy * maxY0;
       }
+
+      // Attach instanced attributes
+      imesh.geometry.setAttribute(
+        "iMinY",
+        new THREE.InstancedBufferAttribute(minYArr, 1)
+      );
+      imesh.geometry.setAttribute(
+        "iMaxY",
+        new THREE.InstancedBufferAttribute(maxYArr, 1)
+      );
+
       imesh.instanceMatrix.needsUpdate = true;
     });
   }, [sources, INSTANCES]);
@@ -379,9 +400,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   return (
     <group
       ref={(n) => {
-        groupRef.current = n;
         if (typeof ref === "function") ref(n);
         else if (ref) ref.current = n;
+        groupRef.current = n;
       }}
       name="MagicMushrooms"
       {...props}
