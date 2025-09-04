@@ -1,73 +1,14 @@
 // src/components/MagicMushrooms.jsx
-import React, { useMemo, useRef, useEffect, forwardRef } from "react";
+import React, { useEffect, useMemo, useRef, forwardRef } from "react";
 import * as THREE from "three";
-import { useGLTF, Clone } from "@react-three/drei";
-import { useControls, folder } from "leva";
+import { useGLTF } from "@react-three/drei";
 
-const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb"; // public/
+const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
-  // Optional: global tint (kept from your version)
-  const { tintColor, tintIntensity } = useControls({
-    Tint: folder({
-      tintColor: { value: "#ffffff", label: "Color" },
-      tintIntensity: {
-        value: 0.0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        label: "Intensity",
-      },
-    }),
-  });
-
-  // Collect materials to reapply tint on change
-  const materialsRef = useRef(new Set());
-
-  // Clone hook — also applies transparent + depthWrite=false to prevent fog clipping
-  const onCloneRegister = (root) => {
-    root.traverse((n) => {
-      if (!n.isMesh) return;
-      n.castShadow = true;
-      n.receiveShadow = true;
-
-      const mats = Array.isArray(n.material) ? n.material : [n.material];
-      const cloned = mats.map((m) => {
-        const c = m.clone();
-        if (c.color && !c.userData._origColor) {
-          c.userData._origColor = c.color.clone();
-        }
-        c.transparent = true; // sort with translucents
-        c.depthWrite = false; // <-- key fix to avoid harsh fog clipping
-        c.needsUpdate = true;
-        materialsRef.current.add(c);
-        return c;
-      });
-      n.material = Array.isArray(n.material) ? cloned : cloned[0];
-    });
-
-    // Apply current tint immediately for this clone
-    applyTint();
-  };
-
-  const applyTint = () => {
-    const target = new THREE.Color(tintColor);
-    materialsRef.current.forEach((m) => {
-      if (!m || !m.color) return;
-      if (!m.userData._origColor) m.userData._origColor = m.color.clone();
-      m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
-      m.needsUpdate = true;
-    });
-  };
-
-  useEffect(() => {
-    applyTint();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tintColor, tintIntensity]);
-
-  // Hard-coded mushrooms (your values)
+  // Your original placements
   const INSTANCES = useMemo(
     () => [
       {
@@ -109,19 +50,88 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     []
   );
 
-  if (!scene) return null;
+  // Extract source meshes, bake world transform into cloned geometry,
+  // and clone materials (transparent + no depthWrite).
+  const sources = useMemo(() => {
+    if (!scene) return [];
+    const list = [];
+    scene.updateMatrixWorld(true);
+
+    scene.traverse((n) => {
+      if (!n.isMesh) return;
+
+      // Bake world matrix → geometry local space
+      const g = n.geometry.clone();
+      g.applyMatrix4(n.matrixWorld);
+      g.computeBoundingBox();
+      g.computeBoundingSphere();
+
+      const srcMats = Array.isArray(n.material) ? n.material : [n.material];
+      const clonedMats = srcMats.map((m) => {
+        const c = m.clone();
+        c.transparent = true;
+        c.depthWrite = false; // soft intersections with fog/dither
+        if (c.opacity === undefined) c.opacity = 1;
+        c.needsUpdate = true;
+        return c;
+      });
+
+      list.push({
+        geometry: g,
+        material: Array.isArray(n.material) ? clonedMats : clonedMats[0],
+      });
+    });
+
+    return list;
+  }, [scene]);
+
+  const meshRefs = useRef([]);
+  meshRefs.current = [];
+
+  // Write per-instance transforms once
+  useEffect(() => {
+    if (!sources.length) return;
+    const dummy = new THREE.Object3D();
+
+    for (let s = 0; s < sources.length; s++) {
+      const imesh = meshRefs.current[s];
+      if (!imesh) continue;
+
+      for (let i = 0; i < INSTANCES.length; i++) {
+        const cfg = INSTANCES[i];
+        dummy.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
+        dummy.rotation.set(
+          cfg.rotation[0] || 0,
+          cfg.rotation[1] || 0,
+          cfg.rotation[2] || 0
+        );
+        const sc = cfg.scale ?? 1;
+        if (typeof sc === "number") dummy.scale.set(sc, sc, sc);
+        else dummy.scale.set(sc[0], sc[1], sc[2]);
+        dummy.updateMatrix();
+        imesh.setMatrixAt(i, dummy.matrix);
+      }
+      imesh.instanceMatrix.needsUpdate = true;
+    }
+  }, [sources, INSTANCES]);
+
+  if (!scene || sources.length === 0) return null;
 
   return (
     <group {...props} ref={ref} name="MagicMushrooms">
-      {INSTANCES.map((cfg, i) => (
-        <group
-          key={i}
-          position={cfg.position}
-          rotation={cfg.rotation}
-          scale={cfg.scale}
-        >
-          <Clone object={scene} onClone={onCloneRegister} />
-        </group>
+      {sources.map((src, idx) => (
+        <instancedMesh
+          key={idx}
+          ref={(el) => (meshRefs.current[idx] = el)}
+          args={[src.geometry, src.material, INSTANCES.length]}
+          // Bake → identity; instances carry all placement
+          position={[0, 0, 0]}
+          rotation={[0, 0, 0]}
+          scale={[1, 1, 1]}
+          castShadow
+          receiveShadow
+          frustumCulled={false} // important to avoid accidental culling
+        />
       ))}
     </group>
   );
