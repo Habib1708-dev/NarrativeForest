@@ -4,13 +4,15 @@ import { useControls } from "leva";
 
 export default function TestTree() {
   // Load the tree model
-  const { scene } = useGLTF("/models/magicPlantsAndCrystal/PurpleFlowers.glb");
+  const { scene } = useGLTF(
+    "/models/magicPlantsAndCrystal/CrystalCluster2.glb"
+  );
 
   // Controls for testing different properties
   const { position, rotation, scale } = useControls("Test Tree", {
     position: { value: [-2, -4, -2], step: 0.1 },
     rotation: { value: [0, 0, 0], step: 0.1 },
-    scale: { value: 0.1, min: 0.005, max: 3, step: 0.001 },
+    scale: { value: 0.5, min: 0.005, max: 3, step: 0.001 },
   });
 
   return (
@@ -24,4 +26,4 @@ export default function TestTree() {
 }
 
 // Preload the model for better performance
-useGLTF.preload("/models/magicPlantsAndCrystal/PurpleFlowers.glb");
+useGLTF.preload("/models/magicPlantsAndCrystal/CrystalCluster2.glb");

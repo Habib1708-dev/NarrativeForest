@@ -95,7 +95,7 @@ export default function ForestDynamic({
 
     // Optional tint
     treeTint: { value: "#000000" },
-    treeTintIntensity: { value: 0.0, min: 0, max: 1, step: 0.01 },
+    treeTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
     rockTint: { value: "#444444" },
     rockTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
   });

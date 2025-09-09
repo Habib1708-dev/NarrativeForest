@@ -29,7 +29,7 @@ import "./three-bvh-setup";
 import RaycastClickLogger from "./debug/RaycastClickLogger";
 import ClickLogger from "./utils/ClickLogger";
 import TestTree from "./components/TestTree";
-import MagicFlowers from "./components/MagicFlowers";
+import MagicCrystalClusters from "./components/MagicCrystalClusters";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -41,7 +41,6 @@ export default function Experience() {
   const radioTowerRef = useRef(null);
   const lakeRef = useRef(null);
   const terrainRef = useRef(null);
-  const flowersRef = useRef(null);
   const mushroomsRef = useRef(null);
 
   // Forest occluders (instanced trees + rocks) — NEW
@@ -139,7 +138,6 @@ export default function Experience() {
         manRef.current,
         catRef.current,
         radioTowerRef.current,
-        flowersRef.current,
         mushroomsRef.current,
         ...forestOccluders,
       ].filter(Boolean),
@@ -149,7 +147,6 @@ export default function Experience() {
       manRef.current,
       catRef.current,
       radioTowerRef.current,
-      flowersRef.current,
       mushroomsRef.current,
       forestOccluders, // updates when ForestDynamic publishes
     ]
@@ -283,7 +280,8 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         <MagicMushrooms ref={mushroomsRef} />
-        <MagicFlowers ref={flowersRef} />
+        <TestTree />
+        <MagicCrystalClusters />
       </Suspense>
 
       <DistanceFade
