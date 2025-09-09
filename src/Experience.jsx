@@ -254,7 +254,7 @@ export default function Experience() {
         <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
-        <FogParticleSystem
+        {/* <FogParticleSystem
           terrainGroup={terrainRef.current}
           cellSize={2}
           occluders={occluders}
@@ -272,7 +272,7 @@ export default function Experience() {
             lightIntensity: fLightIntensity,
             anisotropy: fAnisotropy,
           }}
-        />
+        /> */}
 
         {/* Forest — publish instanced meshes for fog occlusion */}
         <ForestDynamic

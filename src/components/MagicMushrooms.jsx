@@ -10,7 +10,7 @@ const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
-  // Instance placements (unchanged)
+  // Instance placements (7th mushroom Y adjusted to -4.82)
   const INSTANCES = useMemo(
     () => [
       {
@@ -43,8 +43,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         rotation: [0, 1.71, -0.287],
         scale: 0.2,
       },
+      // 7th: keep x,z; set y = -4.82
       {
-        position: [-1.31, -4.78, -1.71],
+        position: [-1.31, -4.82, -1.71],
         rotation: [0, 0.0, 0.117],
         scale: 0.19,
       },
@@ -52,7 +53,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     []
   );
 
-  // Extract sources: bake world → geometry, clone materials (bloom-friendly)
+  // GLB → list of source meshes (world-baked geometry + bloom-friendly cloned materials)
   const sources = useMemo(() => {
     if (!scene) return [];
     const list = [];
@@ -60,7 +61,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     scene.traverse((n) => {
       if (!n.isMesh) return;
 
-      // Clone *world-baked* geometry for consistent base space
       const g = n.geometry.clone();
       g.applyMatrix4(n.matrixWorld);
       g.computeBoundingBox();
@@ -69,16 +69,18 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       const srcMats = Array.isArray(n.material) ? n.material : [n.material];
       const clonedMats = srcMats.map((m) => {
         const c = m.clone();
-        c.transparent = false; // we discard in shader; keep depth writes
+        // We discard pixels in shader; keep depth writes for solid look
+        c.transparent = false;
         c.depthWrite = true;
-        c.toneMapped = false; // allow strong additive glow pre-tonemap
+        // Allow strong additive glow to feed bloom
+        c.toneMapped = false;
         c.needsUpdate = true;
         return c;
       });
 
       list.push({
         geometry: g,
-        bboxY: { min: g.boundingBox.min.y, max: g.boundingBox.max.y }, // source bbox (world-baked)
+        bboxY: { min: g.boundingBox.min.y, max: g.boundingBox.max.y },
         material: Array.isArray(n.material) ? clonedMats : clonedMats[0],
       });
     });
@@ -132,7 +134,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             step: 0.1,
             label: "Glow Strength",
           },
-          glowColor: { value: "#ffb97d", label: "Glow Color" },
+          glowColor: { value: "#ffb97d", label: "Glow Color" }, // single color for all
           seed: { value: 321, min: 0, max: 1000, step: 1, label: "Noise Seed" },
           Replay: button(() => {
             progressRef.current = -0.2;
@@ -155,7 +157,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     });
   };
 
-  // Patch materials for dissolve + glow (now with per-instance min/max via instanced attributes)
+  // ---- Shader patch: per-instance min/max; single uniform glow color ----
   useEffect(() => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -168,16 +170,16 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         m.onBeforeCompile = (shader) => {
           prev?.(shader);
 
-          // Per-instance attributes for height normalization
+          // Attributes/varyings for per-instance height normalization
           shader.vertexShader =
             `
             attribute float iMinY;
             attribute float iMaxY;
             varying float vMinY;
             varying float vMaxY;
-          ` + shader.vertexShader;
+            ` + shader.vertexShader;
 
-          // Varying world position (instancing-safe)
+          // World position varying
           if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
             shader.vertexShader = shader.vertexShader.replace(
               "#include <common>",
@@ -191,7 +193,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             );
           }
 
-          // compute worldPos and pass iMinY/iMaxY
+          // world position (instancing-safe) + pass per-instance min/max
           shader.vertexShader = shader.vertexShader.replace(
             "#include <worldpos_vertex>",
             `
@@ -207,7 +209,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `
           );
 
-          // uniforms
+          // Uniforms (single glow color)
           shader.uniforms.uProgress = { value: progressRef.current };
           shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
           shader.uniforms.uNoiseScale = { value: params.noiseScale };
@@ -254,7 +256,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `#include <common>\n${fragPrelude}`
           );
 
-          // Use per-instance Y range (vMinY/vMaxY) for uniform edge width
+          // Dissolve gate + edge
           shader.fragmentShader = shader.fragmentShader.replace(
             "void main() {",
             `void main() {
@@ -266,7 +268,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `
           );
 
-          // Add additive glow before tonemapping (with fallback)
+          // Add single-color glow before tonemapping (with fallback)
           if (
             shader.fragmentShader.includes("#include <tonemapping_fragment>")
           ) {
@@ -330,7 +332,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   );
   useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
 
-  // Animate dissolve progress
+  // Animate dissolve progress (in/out)
   useFrame((_, dt) => {
     const target = params.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
@@ -342,27 +344,26 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     }
   });
 
-  // Build instance matrices once + set per-instance Y ranges as instanced attributes
-  useEffect(() => {
+  // Assign transforms + per-instance Y-range attributes (no per-instance colors)
+  const assignInstances = () => {
     if (!sources.length) return;
-
-    const dummy = new THREE.Object3D();
 
     meshRefs.current.forEach((imesh, sIdx) => {
       if (!imesh) return;
 
-      // Per-source base bbox (world-baked)
       const { min: minY0, max: maxY0 } = sources[sIdx].bboxY;
 
-      // Prepare instanced attribute arrays
       const minYArr = new Float32Array(INSTANCES.length);
       const maxYArr = new Float32Array(INSTANCES.length);
 
+      const dummy = new THREE.Object3D();
+
       for (let i = 0; i < INSTANCES.length; i++) {
         const cfg = INSTANCES[i];
+        const pos = cfg.position;
 
-        // instance matrix
-        dummy.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
+        // Transform (positions from INSTANCES; rotations/scales unchanged)
+        dummy.position.set(pos[0], pos[1], pos[2]);
         dummy.rotation.set(
           cfg.rotation[0] || 0,
           cfg.rotation[1] || 0,
@@ -376,12 +377,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         dummy.updateMatrix();
         imesh.setMatrixAt(i, dummy.matrix);
 
-        // Because we only rotate around Y, world Y is affected only by translation and scaleY
-        minYArr[i] = cfg.position[1] + sy * minY0;
-        maxYArr[i] = cfg.position[1] + sy * maxY0;
+        // Per-instance Y range (rotation around Y only → Y scales by sy)
+        minYArr[i] = pos[1] + sy * minY0;
+        maxYArr[i] = pos[1] + sy * maxY0;
       }
 
-      // Attach instanced attributes
       imesh.geometry.setAttribute(
         "iMinY",
         new THREE.InstancedBufferAttribute(minYArr, 1)
@@ -393,6 +393,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
 
       imesh.instanceMatrix.needsUpdate = true;
     });
+  };
+
+  useEffect(() => {
+    assignInstances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, INSTANCES]);
 
   if (!scene || sources.length === 0) return null;
