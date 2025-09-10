@@ -21,7 +21,9 @@ uniform samplerCube uEnvironmentMap;
 uniform sampler2D uTrailMap;      // R: dye intensity 0..1
 uniform sampler2D uStampMap;      // R: last-write time in seconds
 
-// Alternating color controls
+// NEW (Step 2): texel size for uTrailMap/uStampMap (1/size, 1/size)
+uniform vec2 uTrailTexel;
+
 uniform vec3  uBioColorA;
 uniform vec3  uBioColorB;
 uniform float uBioIntensity;      // emissive boost multiplier
@@ -36,8 +38,9 @@ void main(){
   vec3 N = normalize(vNormalW);
   vec3 V = normalize(vWorldPosition - cameraPosition);
 
+  // keep existing handedness hack for reflections (we'll fix in Step 4)
   vec3 R = reflect(V, N);
-  R.x = -R.x; // handedness fix to match your original
+  R.x = -R.x;
 
   vec3 reflection = textureCube(uEnvironmentMap, R).rgb;
 
@@ -53,27 +56,23 @@ void main(){
   vec3 baseColor = mix(base2, reflection, fresnel);
 
   // --- Bioluminescent dye sampling (soft watercolor look) ---
-  vec2 texel = 1.0 / vec2(textureSize(uTrailMap, 0));
+  // REPLACED: vec2 texel = 1.0 / vec2(textureSize(uTrailMap, 0));
+  vec2 texel = uTrailTexel;
   float d0 = texture2D(uTrailMap, vUv0).r * 0.36;
-  float d1 = texture2D(uTrailMap, vUv0 + vec2(texel.x, 0.0)).r * 0.16;
-  float d2 = texture2D(uTrailMap, vUv0 - vec2(texel.x, 0.0)).r * 0.16;
-  float d3 = texture2D(uTrailMap, vUv0 + vec2(0.0, texel.y)).r * 0.16;
-  float d4 = texture2D(uTrailMap, vUv0 - vec2(0.0, texel.y)).r * 0.16;
+  float d1 = texture2D(uTrailMap, vUv0 + vec2( texel.x, 0.0)).r * 0.16;
+  float d2 = texture2D(uTrailMap, vUv0 + vec2(-texel.x, 0.0)).r * 0.16;
+  float d3 = texture2D(uTrailMap, vUv0 + vec2(0.0,  texel.y)).r * 0.16;
+  float d4 = texture2D(uTrailMap, vUv0 + vec2(0.0, -texel.y)).r * 0.16;
   float dye = clamp(d0 + d1 + d2 + d3 + d4, 0.0, 1.0);
 
   // --- Alternation between two colors along the trail's age ---
-  // Stamp encodes the time (seconds) the pixel was last splatted.
   float stamp = texture2D(uStampMap, vUv0).r;
-  // Age in seconds (0 near the head/front of the trail)
   float ageSec = max(uTime - stamp, 0.0);
 
-  // Smooth oscillation between two colors: 0.5 + 0.5 * sin(...)
   float w = 0.5 + 0.5 * sin(ageSec * uBioAltFreq + uBioAltPhase);
   vec3 dyeColor = mix(uBioColorA, uBioColorB, w);
 
-  // Additive emission for glow; multiplied by dye coverage
   vec3 emission = dyeColor * (dye * uBioIntensity);
-
   vec3 finalColor = baseColor + emission;
 
   gl_FragColor = vec4(finalColor, uOpacity);

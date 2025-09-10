@@ -1,9 +1,10 @@
-//src/fx/TrailFluid.js
+// src/fx/TrailFluid.js
 import * as THREE from "three";
 
 /**
  * TrailFluid — dye + timestamp fields (ping-pong), progressive tail fade.
  * Pass .texture (ink) to your lake fragment as uTrailMap.
+ * Pass .stampTexture (timestamp) as uStampMap.
  */
 export class TrailFluid {
   constructor(
@@ -49,40 +50,44 @@ export class TrailFluid {
     // Fullscreen quad
     const quadGeo = new THREE.PlaneGeometry(2, 2);
 
+    // Precompute texel size for GLSL1-friendly shaders
+    const tex = 1 / size;
+    const texelVec2 = new THREE.Vector2(tex, tex);
+
     // --- Common flow function in both shaders
     const flowGLSL = `
-  // 2D value noise (cheap) and its gradient; rotate gradient by 90° to get a pseudo-curl
-  float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
-  float noise(vec2 p){
-    vec2 i = floor(p), f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f*f*(3.0-2.0*f);
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-  }
-  vec2 gradNoise(vec2 p){
-    // finite diff gradient
-    float e = 0.001;
-    float n0 = noise(p);
-    float dx = noise(p + vec2(e, 0.0)) - n0;
-    float dy = noise(p + vec2(0.0, e)) - n0;
-    return vec2(dx, dy) / e;
-  }
-  vec2 flow(vec2 uv, float t, float freq, float scale){
-    // animate domain, sum a couple of octaves
-    vec2 p = uv * freq + vec2(t*0.07, -t*0.05);
-    vec2 g1 = gradNoise(p);
-    vec2 g2 = gradNoise(p*1.93 + 17.3);
-    vec2 g = g1 + 0.5*g2;
-    // rotate gradient by 90° (perp) for a divergence-free field
-    vec2 v = vec2(-g.y, g.x);
-    return normalize(v) * scale;
-  }
-`;
+      // 2D value noise (cheap) and its gradient; rotate gradient by 90° to get a pseudo-curl
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+      float noise(vec2 p){
+        vec2 i = floor(p), f = fract(p);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+      }
+      vec2 gradNoise(vec2 p){
+        // finite diff gradient
+        float e = 0.001;
+        float n0 = noise(p);
+        float dx = noise(p + vec2(e, 0.0)) - n0;
+        float dy = noise(p + vec2(0.0, e)) - n0;
+        return vec2(dx, dy) / e;
+      }
+      vec2 flow(vec2 uv, float t, float freq, float scale){
+        // animate domain, sum a couple of octaves
+        vec2 p = uv * freq + vec2(t*0.07, -t*0.05);
+        vec2 g1 = gradNoise(p);
+        vec2 g2 = gradNoise(p*1.93 + 17.3);
+        vec2 g = g1 + 0.5*g2;
+        // rotate gradient by 90° (perp) for a divergence-free field
+        vec2 v = vec2(-g.y, g.x);
+        return normalize(v) * scale;
+      }
+    `;
 
-    // STAMP material (advect timestamps; write now inside splats)
+    // STAMP material (advect timestamps; write "now" inside splats)
     this.matStamp = new THREE.ShaderMaterial({
       uniforms: {
         uPrevStamp: { value: this.stampA.texture },
@@ -93,6 +98,8 @@ export class TrailFluid {
         uStampDiff: { value: stampDiffusion },
         uSplatUv: { value: new THREE.Vector2(-10, -10) },
         uSplatRadius: { value: splatRadius },
+        // NEW: explicit texel size (GLSL1-friendly)
+        uTexel: { value: texelVec2.clone() },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -102,12 +109,13 @@ export class TrailFluid {
         precision highp float;
         uniform sampler2D uPrevStamp;
         uniform float uTime, uDt, uFlowScale, uFlowFreq, uStampDiff;
-        uniform vec2 uSplatUv;
+        uniform vec2 uSplatUv, uTexel;
         uniform float uSplatRadius;
         varying vec2 vUv;
         ${flowGLSL}
         void main(){
-          vec2 texel = 1.0 / vec2(textureSize(uPrevStamp, 0));
+          vec2 texel = uTexel;
+
           // Advect timestamp
           vec2 vel = flow(vUv, uTime, uFlowFreq, uFlowScale);
           float stamp = texture2D(uPrevStamp, vUv - vel * uDt).r;
@@ -123,7 +131,6 @@ export class TrailFluid {
           // Splat: write current time inside the radius (hard write to "now")
           float d = distance(vUv, uSplatUv);
           float mask = step(d, uSplatRadius);
-          // If mask>0, set to current time; else keep advected value
           stamp = mix(stamp, uTime, mask);
 
           gl_FragColor = vec4(stamp, 0.0, 0.0, 1.0);
@@ -149,6 +156,8 @@ export class TrailFluid {
         uSplatUv: { value: new THREE.Vector2(-10, -10) },
         uSplatRadius: { value: splatRadius },
         uSplatStrength: { value: splatStrength },
+        // NEW: explicit texel size (GLSL1-friendly)
+        uTexel: { value: texelVec2.clone() },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -159,12 +168,12 @@ export class TrailFluid {
         uniform sampler2D uPrevInk;
         uniform sampler2D uStamp;
         uniform float uTime, uDt, uDecay, uDiffusion, uFlowScale, uFlowFreq, uFadeWindow;
-        uniform vec2 uSplatUv;
+        uniform vec2 uSplatUv, uTexel;
         uniform float uSplatRadius, uSplatStrength;
         varying vec2 vUv;
         ${flowGLSL}
         void main(){
-          vec2 texel = 1.0 / vec2(textureSize(uPrevInk, 0));
+          vec2 texel = uTexel;
 
           // Advect ink
           vec2 vel = flow(vUv, uTime, uFlowFreq, uFlowScale);
@@ -187,7 +196,7 @@ export class TrailFluid {
           float surv = smoothstep(uTime - uFadeWindow, uTime, stamp);
           ink *= surv;
 
-          // Splat fresh dye
+          // Splat fresh dye (Gaussian)
           float d = distance(vUv, uSplatUv);
           float sigma = uSplatRadius * 0.6;
           float g = exp(-(d*d) / (2.0*sigma*sigma));
@@ -219,8 +228,9 @@ export class TrailFluid {
       splatStrength,
     };
 
-    // Expose ink texture
+    // Expose ink + stamp textures initially
     this.texture = this.inkA.texture;
+    this.stampTexture = this.stampA.texture;
   }
 
   setParams({
@@ -254,6 +264,7 @@ export class TrailFluid {
     }
     if (splatStrength !== undefined)
       this.matInk.uniforms.uSplatStrength.value = splatStrength;
+
     Object.assign(this.params, {
       decay,
       diffusion,
@@ -322,7 +333,9 @@ export class TrailFluid {
     this.renderer.render(this.scene, this.camera);
     this.renderer.setRenderTarget(null);
 
+    // Expose latest textures
     this.texture = dstInk.texture;
+    this.stampTexture = dstStamp.texture;
   }
 
   dispose() {
