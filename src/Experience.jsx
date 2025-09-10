@@ -31,6 +31,7 @@ import ClickLogger from "./utils/ClickLogger";
 import TestTree from "./components/TestTree";
 import MagicCrystalClusters from "./components/MagicCrystalClusters";
 import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
+import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -283,6 +284,7 @@ export default function Experience() {
         <MagicMushrooms ref={mushroomsRef} />
         <MagicCrystalClusters />
         <MagicCrystalClusters2 />
+        <MagicCrystalClusters3 />
       </Suspense>
 
       <DistanceFade

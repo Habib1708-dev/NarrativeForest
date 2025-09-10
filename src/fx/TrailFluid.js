@@ -12,13 +12,16 @@ export class TrailFluid {
     {
       size = 128,
       decay = 0.975, // multiplicative fade of dye
-      diffusion = 0.15, // Laplacian strength on dye
+      diffusion = 0.15, // base Laplacian strength on dye
       stampDiffusion = 0.02, // slight blur so stamp isn't too blocky
       flowScale = 0.0035,
       flowFrequency = 3.0,
       fadeWindow = 1.25, // seconds; width of the tail "front"
       splatRadius = 0.04,
       splatStrength = 0.9,
+      // NEW look controls:
+      diffusionCoreDampen = 0.6, // 0..1, how much to reduce diffusion near core
+      splatFeather = 0.6, // 0..1, lower = harder splat, higher = softer
     } = {}
   ) {
     this.renderer = renderer;
@@ -56,7 +59,6 @@ export class TrailFluid {
 
     // --- Common flow function in both shaders
     const flowGLSL = `
-      // 2D value noise (cheap) and its gradient; rotate gradient by 90° to get a pseudo-curl
       float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
       float noise(vec2 p){
         vec2 i = floor(p), f = fract(p);
@@ -68,7 +70,6 @@ export class TrailFluid {
         return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
       }
       vec2 gradNoise(vec2 p){
-        // finite diff gradient
         float e = 0.001;
         float n0 = noise(p);
         float dx = noise(p + vec2(e, 0.0)) - n0;
@@ -76,12 +77,10 @@ export class TrailFluid {
         return vec2(dx, dy) / e;
       }
       vec2 flow(vec2 uv, float t, float freq, float scale){
-        // animate domain, sum a couple of octaves
         vec2 p = uv * freq + vec2(t*0.07, -t*0.05);
         vec2 g1 = gradNoise(p);
         vec2 g2 = gradNoise(p*1.93 + 17.3);
         vec2 g = g1 + 0.5*g2;
-        // rotate gradient by 90° (perp) for a divergence-free field
         vec2 v = vec2(-g.y, g.x);
         return normalize(v) * scale;
       }
@@ -98,7 +97,6 @@ export class TrailFluid {
         uStampDiff: { value: stampDiffusion },
         uSplatUv: { value: new THREE.Vector2(-10, -10) },
         uSplatRadius: { value: splatRadius },
-        // NEW: explicit texel size (GLSL1-friendly)
         uTexel: { value: texelVec2.clone() },
       },
       vertexShader: /* glsl */ `
@@ -150,13 +148,14 @@ export class TrailFluid {
         uDt: { value: 1 / 60 },
         uDecay: { value: decay },
         uDiffusion: { value: diffusion },
+        uDiffCoreDampen: { value: diffusionCoreDampen }, // NEW
         uFlowScale: { value: flowScale },
         uFlowFreq: { value: flowFrequency },
         uFadeWindow: { value: fadeWindow },
         uSplatUv: { value: new THREE.Vector2(-10, -10) },
         uSplatRadius: { value: splatRadius },
         uSplatStrength: { value: splatStrength },
-        // NEW: explicit texel size (GLSL1-friendly)
+        uSplatFeather: { value: splatFeather }, // NEW
         uTexel: { value: texelVec2.clone() },
       },
       vertexShader: /* glsl */ `
@@ -167,9 +166,9 @@ export class TrailFluid {
         precision highp float;
         uniform sampler2D uPrevInk;
         uniform sampler2D uStamp;
-        uniform float uTime, uDt, uDecay, uDiffusion, uFlowScale, uFlowFreq, uFadeWindow;
+        uniform float uTime, uDt, uDecay, uDiffusion, uDiffCoreDampen, uFlowScale, uFlowFreq, uFadeWindow;
         uniform vec2 uSplatUv, uTexel;
-        uniform float uSplatRadius, uSplatStrength;
+        uniform float uSplatRadius, uSplatStrength, uSplatFeather;
         varying vec2 vUv;
         ${flowGLSL}
         void main(){
@@ -179,26 +178,29 @@ export class TrailFluid {
           vec2 vel = flow(vUv, uTime, uFlowFreq, uFlowScale);
           float ink = texture2D(uPrevInk, vUv - vel * uDt).r;
 
-          // Diffusion (watercolor bleed)
+          // Diffusion (value-aware: keep cores crisp)
           float n = texture2D(uPrevInk, vUv + vec2(0.0,  texel.y)).r;
           float s = texture2D(uPrevInk, vUv + vec2(0.0, -texel.y)).r;
           float e = texture2D(uPrevInk, vUv + vec2( texel.x, 0.0)).r;
           float w = texture2D(uPrevInk, vUv + vec2(-texel.x, 0.0)).r;
           float lap = (n + s + e + w - 4.0*ink);
-          ink += uDiffusion * lap;
+
+          // Reduce diffusion near bright cores, stronger at edges
+          float edgeFactor = 1.0 - smoothstep(0.25, 0.85, ink);
+          float diff = uDiffusion * mix(1.0, uDiffCoreDampen, 1.0 - edgeFactor);
+          ink += diff * lap;
 
           // Baseline decay
           ink *= uDecay;
 
-          // Progressive tail erase based on stamp age:
-          // keep where stamp in [now - window, now]
+          // Progressive tail erase based on stamp age
           float stamp = texture2D(uStamp, vUv).r;
           float surv = smoothstep(uTime - uFadeWindow, uTime, stamp);
           ink *= surv;
 
-          // Splat fresh dye (Gaussian)
+          // Splat fresh dye (Gaussian with configurable feather)
           float d = distance(vUv, uSplatUv);
-          float sigma = uSplatRadius * 0.6;
+          float sigma = max(1e-4, uSplatRadius * clamp(uSplatFeather, 0.2, 1.5));
           float g = exp(-(d*d) / (2.0*sigma*sigma));
           ink = clamp(ink + g * uSplatStrength, 0.0, 1.0);
 
@@ -226,6 +228,8 @@ export class TrailFluid {
       fadeWindow,
       splatRadius,
       splatStrength,
+      diffusionCoreDampen,
+      splatFeather,
     };
 
     // Expose ink + stamp textures initially
@@ -242,10 +246,14 @@ export class TrailFluid {
     fadeWindow,
     splatRadius,
     splatStrength,
+    diffusionCoreDampen,
+    splatFeather,
   } = {}) {
     if (decay !== undefined) this.matInk.uniforms.uDecay.value = decay;
     if (diffusion !== undefined)
       this.matInk.uniforms.uDiffusion.value = diffusion;
+    if (diffusionCoreDampen !== undefined)
+      this.matInk.uniforms.uDiffCoreDampen.value = diffusionCoreDampen;
     if (stampDiffusion !== undefined)
       this.matStamp.uniforms.uStampDiff.value = stampDiffusion;
     if (flowScale !== undefined) {
@@ -264,6 +272,8 @@ export class TrailFluid {
     }
     if (splatStrength !== undefined)
       this.matInk.uniforms.uSplatStrength.value = splatStrength;
+    if (splatFeather !== undefined)
+      this.matInk.uniforms.uSplatFeather.value = splatFeather;
 
     Object.assign(this.params, {
       decay,
@@ -274,6 +284,8 @@ export class TrailFluid {
       fadeWindow,
       splatRadius,
       splatStrength,
+      diffusionCoreDampen,
+      splatFeather,
     });
   }
 

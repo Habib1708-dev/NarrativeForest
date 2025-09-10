@@ -5,7 +5,7 @@ import { useControls } from "leva";
 export default function TestTree() {
   // Load the tree model
   const { scene } = useGLTF(
-    "/models/magicPlantsAndCrystal/CrystalCluster2.glb"
+    "/models/magicPlantsAndCrystal/CrystalCluster4.glb"
   );
 
   // Controls for testing different properties
@@ -26,4 +26,4 @@ export default function TestTree() {
 }
 
 // Preload the model for better performance
-useGLTF.preload("/models/magicPlantsAndCrystal/CrystalCluster2.glb");
+useGLTF.preload("/models/magicPlantsAndCrystal/CrystalCluster4.glb");
