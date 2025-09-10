@@ -1,3 +1,4 @@
+// src/components/Lake.jsx
 import React, {
   useMemo,
   useRef,
@@ -102,7 +103,7 @@ const Lake = forwardRef(function Lake(
       uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
     Colors: folder({
-      uTroughColor: { value: "#939393" },
+      uTroughColor: { value: "#767676" },
       uSurfaceColor: { value: "#9bd8c0" },
       uPeakColor: { value: "#bbd8e0" },
     }),
@@ -148,6 +149,13 @@ const Lake = forwardRef(function Lake(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl]); // created once
 
+  // Step 1A: Dispose TrailFluid on unmount (GPU RT leak guard)
+  useEffect(() => {
+    return () => {
+      trail?.dispose?.();
+    };
+  }, [trail]);
+
   // Push runtime params to the fluid when controls change
   useEffect(() => {
     trail.setParams({
@@ -159,7 +167,16 @@ const Lake = forwardRef(function Lake(
       splatRadius,
       splatStrength,
     });
-  }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow, splatRadius, splatStrength]);
+  }, [
+    trail,
+    decay,
+    diffusion,
+    flowScale,
+    flowFrequency,
+    fadeWindow,
+    splatRadius,
+    splatStrength,
+  ]);
 
   // === Shader material (always opaque) ===
   const material = useMemo(() => {
@@ -202,6 +219,9 @@ const Lake = forwardRef(function Lake(
         uBioIntensity: { value: bioIntensity },
         uBioAltFreq: { value: bioAltFreq },
         uBioAltPhase: { value: bioAltPhase },
+
+        // Step 1B: pre-wire uTrailTexel (used in Step 2)
+        uTrailTexel: { value: new THREE.Vector2(1 / 128, 1 / 128) },
       },
       transparent: false,
       depthTest: true,
@@ -209,6 +229,13 @@ const Lake = forwardRef(function Lake(
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Step 1B (cont.): keep uTrailTexel synced to the TrailFluid size
+  useEffect(() => {
+    if (!material || !trail) return;
+    const tex = 1 / (trail.size ?? 128);
+    material.uniforms.uTrailTexel.value.set(tex, tex);
+  }, [material, trail]);
 
   // Live-update uniforms from controls
   useEffect(() => {
@@ -236,7 +263,29 @@ const Lake = forwardRef(function Lake(
     material.uniforms.uBioIntensity.value = bioIntensity;
     material.uniforms.uBioAltFreq.value = bioAltFreq;
     material.uniforms.uBioAltPhase.value = bioAltPhase;
-  }, [material, uWavesAmplitude, uWavesFrequency, uWavesPersistence, uWavesLacunarity, uWavesIterations, uWavesSpeed, uTroughColor, uSurfaceColor, uPeakColor, uPeakThreshold, uPeakTransition, uTroughThreshold, uTroughTransition, uFresnelScale, uFresnelPower, bioColorA, bioColorB, bioIntensity, bioAltFreq, bioAltPhase]);
+  }, [
+    material,
+    uWavesAmplitude,
+    uWavesFrequency,
+    uWavesPersistence,
+    uWavesLacunarity,
+    uWavesIterations,
+    uWavesSpeed,
+    uTroughColor,
+    uSurfaceColor,
+    uPeakColor,
+    uPeakThreshold,
+    uPeakTransition,
+    uTroughThreshold,
+    uTroughTransition,
+    uFresnelScale,
+    uFresnelPower,
+    bioColorA,
+    bioColorB,
+    bioIntensity,
+    bioAltFreq,
+    bioAltPhase,
+  ]);
 
   // === Geometry ===
   const geom = useMemo(
@@ -277,9 +326,6 @@ const Lake = forwardRef(function Lake(
   });
 
   // === Expose world-space footprint via ref ===
-  // We report a footprint that is **invariant to visual size**:
-  // dividing world AABB width/depth by the visual scale keeps the exclusion the same
-  // even when the lake is doubled (or changed) in size.
   useImperativeHandle(ref, () => ({
     getFootprint: (extraMargin = 0.45) => {
       const m = meshRef.current;
