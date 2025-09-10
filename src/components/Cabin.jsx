@@ -65,7 +65,7 @@ export default forwardRef(function Cabin(_, ref) {
   } = useControls({
     Cabin: folder({
       Transform: folder({
-        positionX: { value: -2.2, min: -50, max: 50, step: 0.1 },
+        positionX: { value: -2.3, min: -50, max: 50, step: 0.1 },
         positionY: { value: -4.85, min: -20, max: 20, step: 0.01 },
         positionZ: { value: -2.7, min: -50, max: 50, step: 0.1 },
         rotationYDeg: {
@@ -76,7 +76,7 @@ export default forwardRef(function Cabin(_, ref) {
           label: "Rotation Y (deg)",
         },
         scale: {
-          value: 0.05,
+          value: 0.06,
           min: 0.01,
           max: 5,
           step: 0.01,
@@ -95,7 +95,7 @@ export default forwardRef(function Cabin(_, ref) {
       }),
       "Bulb Light": folder({
         bulbEnabled: { value: true, label: "Enabled" },
-        bulbColor: { value: "#ffd8a8", label: "Color" },
+        bulbColor: { value: "#ffc37b", label: "Color" },
         bulbIntensity: {
           value: 0.1,
           min: 0,
@@ -104,15 +104,15 @@ export default forwardRef(function Cabin(_, ref) {
           label: "Intensity",
         },
         bulbSize: {
-          value: 0.005,
+          value: 0.01,
           min: 0.001,
           max: 0.1,
           step: 0.001,
           label: "Size",
         },
-        bulbX: { value: -1.705, min: -50, max: 50, step: 0.001, label: "X" },
-        bulbY: { value: -4.64, min: -50, max: 50, step: 0.01, label: "Y" },
-        bulbZ: { value: -2.9, min: -50, max: 50, step: 0.01, label: "Z" },
+        bulbX: { value: -1.71, min: -50, max: 50, step: 0.001, label: "X" },
+        bulbY: { value: -4.6, min: -50, max: 50, step: 0.01, label: "Y" },
+        bulbZ: { value: -2.94, min: -50, max: 50, step: 0.01, label: "Z" },
       }),
     }),
   });

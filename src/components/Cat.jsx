@@ -44,9 +44,9 @@ export default forwardRef(function Cat(_, ref) {
   } = useControls({
     Cat: folder({
       Transform: folder({
-        positionX: { value: -1.7, min: -50, max: 50, step: 0.001 },
-        positionY: { value: -4.46, min: -50, max: 50, step: 0.001 },
-        positionZ: { value: -2.86, min: -50, max: 50, step: 0.001 },
+        positionX: { value: -1.71, min: -50, max: 50, step: 0.001 },
+        positionY: { value: -4.38, min: -50, max: 50, step: 0.001 },
+        positionZ: { value: -2.91, min: -50, max: 50, step: 0.001 },
         rotationYDeg: {
           value: 180,
           min: -180,
@@ -55,7 +55,7 @@ export default forwardRef(function Cat(_, ref) {
           label: "Rotation Y (deg)",
         },
         scale: {
-          value: 0.06,
+          value: 0.07,
           min: 0.001,
           max: 1,
           step: 0.001,
