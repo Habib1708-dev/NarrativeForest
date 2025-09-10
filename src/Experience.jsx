@@ -30,6 +30,7 @@ import RaycastClickLogger from "./debug/RaycastClickLogger";
 import ClickLogger from "./utils/ClickLogger";
 import TestTree from "./components/TestTree";
 import MagicCrystalClusters from "./components/MagicCrystalClusters";
+import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -280,8 +281,8 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         <MagicMushrooms ref={mushroomsRef} />
-        <TestTree />
         <MagicCrystalClusters />
+        <MagicCrystalClusters2 />
       </Suspense>
 
       <DistanceFade
