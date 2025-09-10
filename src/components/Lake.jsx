@@ -19,7 +19,7 @@ const Lake = forwardRef(function Lake(
     // initial transform
     position = [-2, 0.0, -2],
     rotation = [Math.PI * 0.5, 0, 0],
-    resolution = 128, //128,
+    resolution = 128,
     envMap = null, // optional THREE.CubeTexture
   },
   ref
@@ -33,13 +33,12 @@ const Lake = forwardRef(function Lake(
   const { lakePosX, lakePosY, lakePosZ } = useControls("Lake", {
     Transform: folder({
       lakePosX: { value: -1.8, min: -20, max: 20, step: 0.01 },
-      lakePosY: { value: -4.82, min: -5, max: 5, step: 0.01 },
+      lakePosY: { value: -4.82, min: -10, max: 10, step: 0.01 },
       lakePosZ: { value: -2.8, min: -20, max: 20, step: 0.01 },
     }),
   });
 
-  // 2) Size — DOUBLE the visual size by default, without changing exclusion
-  //    The plane is on LOCAL XY; after a 90° X-rotation, local X→world X, local Y→world Z.
+  // 2) Size — DOUBLE the visual size by default
   const { lakeSizeX, lakeSizeZ } = useControls("Lake", {
     Size: folder({
       lakeSizeX: {
@@ -47,19 +46,19 @@ const Lake = forwardRef(function Lake(
         min: 0.25,
         max: 10,
         step: 0.01,
-        label: "Size X (world)",
+        label: "Size X",
       },
       lakeSizeZ: {
         value: 2.0,
         min: 0.25,
         max: 10,
         step: 0.01,
-        label: "Size Z (world)",
+        label: "Size Z",
       },
     }),
   });
 
-  // 3) Waves, colors, thresholds, fresnel, bioluminescence
+  // 3) Waves, colors, thresholds, fresnel, bioluminescence, opacity
   const {
     // waves
     uWavesAmplitude,
@@ -68,7 +67,7 @@ const Lake = forwardRef(function Lake(
     uWavesLacunarity,
     uWavesIterations,
     uWavesSpeed,
-    // colors/thresholds
+    // colors/thresholds (now relative to lake Y, i.e. small numbers around 0)
     uTroughColor,
     uSurfaceColor,
     uPeakColor,
@@ -79,6 +78,8 @@ const Lake = forwardRef(function Lake(
     // fresnel
     uFresnelScale,
     uFresnelPower,
+    // opacity
+    lakeOpacity,
     // bioluminescence (fluid)
     bioColorA,
     bioColorB,
@@ -104,18 +105,26 @@ const Lake = forwardRef(function Lake(
     }),
     Colors: folder({
       uTroughColor: { value: "#767676" },
-      uSurfaceColor: { value: "#9bd8c0" },
-      uPeakColor: { value: "#bbd8e0" },
+      uSurfaceColor: { value: "#b1b1b1" },
+      uPeakColor: { value: "#bebebe" },
     }),
+    // IMPORTANT: thresholds tuned for local elevation (± few centimeters)
     Thresholds: folder({
-      uPeakThreshold: { value: 0.08, min: -0.1, max: 0.2, step: 0.001 },
-      uPeakTransition: { value: 0.05, min: 0.001, max: 0.1, step: 0.001 },
-      uTroughThreshold: { value: -0.01, min: -0.1, max: 0.1, step: 0.001 },
-      uTroughTransition: { value: 0.15, min: 0.001, max: 0.3, step: 0.001 },
+      uPeakThreshold: { value: 0.01, min: -0.1, max: 0.1, step: 0.001 },
+      uPeakTransition: { value: 0.02, min: 0.001, max: 0.1, step: 0.001 },
+      uTroughThreshold: { value: -0.005, min: -0.1, max: 0.1, step: 0.001 },
+      uTroughTransition: { value: 0.06, min: 0.001, max: 0.3, step: 0.001 },
     }),
     Material: folder({
       uFresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
       uFresnelPower: { value: 1.0, min: 0.1, max: 2, step: 0.01 },
+      lakeOpacity: {
+        value: 0.2,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        label: "Opacity",
+      },
     }),
     Bioluminescence: folder({
       bioColorA: { value: "#2cc3ff" },
@@ -149,7 +158,7 @@ const Lake = forwardRef(function Lake(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl]); // created once
 
-  // Step 1A: Dispose TrailFluid on unmount (GPU RT leak guard)
+  // Dispose TrailFluid on unmount (GPU RT leak guard)
   useEffect(() => {
     return () => {
       trail?.dispose?.();
@@ -167,25 +176,16 @@ const Lake = forwardRef(function Lake(
       splatRadius,
       splatStrength,
     });
-  }, [
-    trail,
-    decay,
-    diffusion,
-    flowScale,
-    flowFrequency,
-    fadeWindow,
-    splatRadius,
-    splatStrength,
-  ]);
+  }, [trail, decay, diffusion, flowScale, flowFrequency, fadeWindow, splatRadius, splatStrength]);
 
-  // === Shader material (always opaque) ===
+  // === Shader material (opacity now controlled) ===
   const material = useMemo(() => {
     return new THREE.ShaderMaterial({
       vertexShader: lakeVertexShader,
       fragmentShader: lakeFragmentShader,
       uniforms: {
         uTime: { value: 0 },
-        uOpacity: { value: 1.0 },
+        uOpacity: { value: 0.9 }, // default; will be synced from leva
         uEnvironmentMap: { value: envMap },
 
         // Waves
@@ -201,7 +201,7 @@ const Lake = forwardRef(function Lake(
         uSurfaceColor: { value: new THREE.Color(uSurfaceColor) },
         uPeakColor: { value: new THREE.Color(uPeakColor) },
 
-        // Thresholds
+        // Thresholds (now relative to lake Y)
         uPeakThreshold: { value: uPeakThreshold },
         uPeakTransition: { value: uPeakTransition },
         uTroughThreshold: { value: uTroughThreshold },
@@ -220,17 +220,20 @@ const Lake = forwardRef(function Lake(
         uBioAltFreq: { value: bioAltFreq },
         uBioAltPhase: { value: bioAltPhase },
 
-        // Step 1B: pre-wire uTrailTexel (used in Step 2)
+        // GLSL1-friendly texel size
         uTrailTexel: { value: new THREE.Vector2(1 / 128, 1 / 128) },
+
+        // NEW: lake base Y so thresholds are local to the water surface
+        uLakeBaseY: { value: lakePosY },
       },
-      transparent: false,
+      transparent: lakeOpacity < 1.0, // enable blending when needed
       depthTest: true,
       side: THREE.DoubleSide,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Step 1B (cont.): keep uTrailTexel synced to the TrailFluid size
+  // Keep uTrailTexel in sync with the TrailFluid size
   useEffect(() => {
     if (!material || !trail) return;
     const tex = 1 / (trail.size ?? 128);
@@ -240,6 +243,12 @@ const Lake = forwardRef(function Lake(
   // Live-update uniforms from controls
   useEffect(() => {
     if (!material) return;
+
+    // Opacity + transparent toggle
+    material.uniforms.uOpacity.value = lakeOpacity;
+    material.transparent = lakeOpacity < 1.0;
+
+    // Waves
     material.uniforms.uWavesAmplitude.value = uWavesAmplitude;
     material.uniforms.uWavesFrequency.value = uWavesFrequency;
     material.uniforms.uWavesPersistence.value = uWavesPersistence;
@@ -247,6 +256,7 @@ const Lake = forwardRef(function Lake(
     material.uniforms.uWavesIterations.value = uWavesIterations;
     material.uniforms.uWavesSpeed.value = uWavesSpeed;
 
+    // Colors & thresholds (relative)
     material.uniforms.uTroughColor.value.setStyle(uTroughColor);
     material.uniforms.uSurfaceColor.value.setStyle(uSurfaceColor);
     material.uniforms.uPeakColor.value.setStyle(uPeakColor);
@@ -255,37 +265,20 @@ const Lake = forwardRef(function Lake(
     material.uniforms.uTroughThreshold.value = uTroughThreshold;
     material.uniforms.uTroughTransition.value = uTroughTransition;
 
+    // Fresnel
     material.uniforms.uFresnelScale.value = uFresnelScale;
     material.uniforms.uFresnelPower.value = uFresnelPower;
 
+    // Bio
     material.uniforms.uBioColorA.value.setStyle(bioColorA);
     material.uniforms.uBioColorB.value.setStyle(bioColorB);
     material.uniforms.uBioIntensity.value = bioIntensity;
     material.uniforms.uBioAltFreq.value = bioAltFreq;
     material.uniforms.uBioAltPhase.value = bioAltPhase;
-  }, [
-    material,
-    uWavesAmplitude,
-    uWavesFrequency,
-    uWavesPersistence,
-    uWavesLacunarity,
-    uWavesIterations,
-    uWavesSpeed,
-    uTroughColor,
-    uSurfaceColor,
-    uPeakColor,
-    uPeakThreshold,
-    uPeakTransition,
-    uTroughThreshold,
-    uTroughTransition,
-    uFresnelScale,
-    uFresnelPower,
-    bioColorA,
-    bioColorB,
-    bioIntensity,
-    bioAltFreq,
-    bioAltPhase,
-  ]);
+
+    // Keep lake base Y up to date as you move the lake
+    material.uniforms.uLakeBaseY.value = lakePosY;
+  }, [material, lakeOpacity, uWavesAmplitude, uWavesFrequency, uWavesPersistence, uWavesLacunarity, uWavesIterations, uWavesSpeed, uTroughColor, uSurfaceColor, uPeakColor, uPeakThreshold, uPeakTransition, uTroughThreshold, uTroughTransition, uFresnelScale, uFresnelPower, bioColorA, bioColorB, bioIntensity, bioAltFreq, bioAltPhase, lakePosY]);
 
   // === Geometry ===
   const geom = useMemo(
@@ -320,7 +313,7 @@ const Lake = forwardRef(function Lake(
 
     if (material) {
       material.uniforms.uTrailMap.value = trail.texture;
-      material.uniforms.uStampMap.value = trail.stampTexture; // now exposed
+      material.uniforms.uStampMap.value = trail.stampTexture;
       material.uniforms.uTime.value += dt;
     }
   });
@@ -378,7 +371,6 @@ const Lake = forwardRef(function Lake(
       ref={meshRef}
       position={[lakePosX, lakePosY, lakePosZ]}
       rotation={rotation}
-      // DOUBLE SIZE visually (default 2.0 each). Z scale stays 1 (thickness).
       scale={[lakeSizeX, lakeSizeZ, 1]}
       geometry={geom}
       onPointerMove={handlePointerMove}
