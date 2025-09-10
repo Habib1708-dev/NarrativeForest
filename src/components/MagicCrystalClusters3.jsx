@@ -22,44 +22,44 @@ export default forwardRef(function MagicCrystalCluster3(props, ref) {
     bottomFresnelPower,
   } = useControls("Crystal3 / Gradient", {
     colorA: { value: "#20c4ff", label: "Bottom Color (A)" },
-    colorB: { value: "#7bffcf", label: "Top Color (B)" },
+    colorB: { value: "#7a92ff", label: "Top Color (B)" },
     mid: {
-      value: 0.5,
+      value: 0.6,
       min: 0.0,
       max: 1.0,
       step: 0.001,
       label: "Blend Midpoint",
     },
     softness: {
-      value: 0.15,
+      value: 0.37,
       min: 0.0,
       max: 0.5,
       step: 0.001,
       label: "Blend Softness",
     },
     bottomSatBoost: {
-      value: 0.5,
+      value: 1.5,
       min: 0.0,
       max: 1.5,
       step: 0.01,
       label: "Bottom Saturation +",
     },
     bottomEmissiveBoost: {
-      value: 0.8,
+      value: 2.0,
       min: 0.0,
       max: 2.0,
       step: 0.01,
       label: "Bottom Glow +",
     },
     bottomFresnelBoost: {
-      value: 1.0,
+      value: 3.0,
       min: 0.0,
       max: 3.0,
       step: 0.01,
       label: "Bottom Fresnel +",
     },
     bottomFresnelPower: {
-      value: 2.0,
+      value: 0.6,
       min: 0.5,
       max: 6.0,
       step: 0.1,
@@ -79,11 +79,11 @@ export default forwardRef(function MagicCrystalCluster3(props, ref) {
 
   // Transform (single model)
   const { pX, pY, pZ, rY, s } = useControls("Crystal3 / Transform", {
-    pX: { value: -2, min: -3, max: 0, step: 0.001, label: "x" },
-    pY: { value: -4, min: -5, max: -1, step: 0.001, label: "y" },
-    pZ: { value: -2, min: -3, max: 0, step: 0.001, label: "z" },
-    rY: { value: 0, min: -180, max: 180, step: 0.1, label: "rotY°" },
-    s: { value: 0.1, min: 0.01, max: 0.2, step: 0.001, label: "scale" },
+    pX: { value: -2.61, min: -3, max: 0, step: 0.001, label: "x" },
+    pY: { value: -4.45, min: -5, max: -1, step: 0.001, label: "y" },
+    pZ: { value: -3.47, min: -3, max: 0, step: 0.001, label: "z" },
+    rY: { value: 127.9, min: -180, max: 180, step: 0.1, label: "rotY°" },
+    s: { value: 0.17, min: 0.01, max: 0.2, step: 0.001, label: "scale" },
   });
 
   // ===== Shared material with WORLD-Y gradient/fresnel/emissive =====

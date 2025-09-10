@@ -8,12 +8,11 @@ const CRYSTAL2_GLB = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
 const COUNT = 15;
 
 // ---- 15 baked placements (rotY in degrees; rounded to sensible precision) ----
-// Note: #4 (index 3) only had y/z/rot/scale provided; px assumed -2.0.
 const BAKED = [
   { px: -2.32, py: -4.66, pz: -1.52, ry: 77.4, s: 0.077 },
   { px: -2.48, py: -4.71, pz: -1.97, ry: 30.7, s: 0.041 },
   { px: -2.23, py: -4.8, pz: -1.69, ry: 0.0, s: 0.068 },
-  { px: -2.48, py: -4.63, pz: -2.22, ry: 20.2, s: 0.093 }, // px fallback
+  { px: -2.48, py: -4.63, pz: -2.22, ry: 20.2, s: 0.093 },
   { px: -0.98, py: -4.31, pz: -3.0, ry: -3.4, s: 0.079 },
   { px: -0.99, py: -4.28, pz: -0.19, ry: -16.8, s: 0.128 },
   { px: -1.03, py: -4.54, pz: -2.33, ry: 118.2, s: 0.05 },
@@ -31,53 +30,7 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
   const { scene } = useGLTF(CRYSTAL2_GLB);
   const instancedRef = useRef();
 
-  // ===== Material controls (same system as MagicCrystalClusters.jsx) =====
-  const {
-    color,
-    attenuationColor,
-    ior,
-    thickness,
-    attenuationDistance,
-    roughness,
-    fresnelStrength,
-    fresnelPower,
-    fresnelColor,
-    emissiveColor,
-    emissiveIntensity,
-  } = useControls(
-    "Crystal2 / Material",
-    {
-      Glow: folder(
-        {
-          emissiveColor: { value: "#ffffff" },
-          emissiveIntensity: { value: 0.0, min: 0, max: 8, step: 0.01 },
-        },
-        { collapsed: false }
-      ),
-      Glass: folder(
-        {
-          color: { value: "#ffffff" },
-          attenuationColor: { value: "#ffffff" },
-          ior: { value: 1.0, min: 1.0, max: 2.333, step: 0.001 },
-          thickness: { value: 4.68, min: 0, max: 10, step: 0.01 },
-          attenuationDistance: { value: 57.5, min: 0.1, max: 200, step: 0.1 },
-          roughness: { value: 0.61, min: 0, max: 1, step: 0.001 },
-        },
-        { collapsed: false }
-      ),
-      Fresnel: folder(
-        {
-          fresnelStrength: { value: 1.85, min: 0, max: 2, step: 0.001 },
-          fresnelPower: { value: 1.3, min: 0.1, max: 8, step: 0.01 },
-          fresnelColor: { value: "#ffffff" },
-        },
-        { collapsed: true }
-      ),
-    },
-    { collapsed: false }
-  );
-
-  // ===== Instance controls (x/y/z, rotY°, uniform scale) with baked defaults =====
+  // ===== Instance transforms (kept) =====
   const instanceSchema = useMemo(() => {
     const schema = {};
     for (let i = 0; i < COUNT; i++) {
@@ -126,12 +79,81 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     }
     return schema;
   }, []);
-
   const ctl = useControls("Crystal2 / Instances", instanceSchema, {
     collapsed: false,
   });
 
-  // ===== Geometry (fix -90° tilt: rotate +90° around X to make Y-up) =====
+  // ===== 2-Color Gradient & Glass controls (same as MagicCrystalCluster3) =====
+  const {
+    colorA,
+    colorB,
+    mid,
+    softness,
+    bottomSatBoost,
+    bottomEmissiveBoost,
+    bottomFresnelBoost,
+    bottomFresnelPower,
+  } = useControls(
+    "Crystal2 / Gradient",
+    {
+      colorA: { value: "#20c4ff", label: "Bottom Color (A)" },
+      colorB: { value: "#7bffcf", label: "Top Color (B)" },
+      mid: {
+        value: 0.5,
+        min: 0.0,
+        max: 1.0,
+        step: 0.001,
+        label: "Blend Midpoint",
+      },
+      softness: {
+        value: 0.15,
+        min: 0.0,
+        max: 0.5,
+        step: 0.001,
+        label: "Blend Softness",
+      },
+      bottomSatBoost: {
+        value: 0.5,
+        min: 0.0,
+        max: 1.5,
+        step: 0.01,
+        label: "Bottom Saturation +",
+      },
+      bottomEmissiveBoost: {
+        value: 0.8,
+        min: 0.0,
+        max: 2.0,
+        step: 0.01,
+        label: "Bottom Glow +",
+      },
+      bottomFresnelBoost: {
+        value: 1.0,
+        min: 0.0,
+        max: 3.0,
+        step: 0.01,
+        label: "Bottom Fresnel +",
+      },
+      bottomFresnelPower: {
+        value: 2.0,
+        min: 0.5,
+        max: 6.0,
+        step: 0.1,
+        label: "Bottom Fresnel Falloff",
+      },
+    },
+    { collapsed: false }
+  );
+
+  const { ior, thickness, attenuationDistance, roughness, emissiveIntensity } =
+    useControls("Crystal2 / Glass", {
+      ior: { value: 1.0, min: 1.0, max: 2.333, step: 0.001 },
+      thickness: { value: 4.68, min: 0, max: 10, step: 0.01 },
+      attenuationDistance: { value: 57.5, min: 0.1, max: 200, step: 0.1 },
+      roughness: { value: 0.61, min: 0, max: 1, step: 0.001 },
+      emissiveIntensity: { value: 0.3, min: 0, max: 8, step: 0.01 },
+    });
+
+  // ===== Geometry (rotate to Y-up, cache bbox) =====
   const geometry = useMemo(() => {
     if (!scene) return null;
     let g = null;
@@ -141,17 +163,15 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     if (!g) return null;
 
     if (g.index) g = g.toNonIndexed();
-
     const fix = new THREE.Matrix4().makeRotationX(+Math.PI / 2);
     g.applyMatrix4(fix);
-
     g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
     return g;
   }, [scene]);
 
-  // ===== Material (glassy/translucent + Fresnel + emissive) =====
+  // ===== Shared material with PER-INSTANCE world-Y gradient/fresnel/emissive =====
   const material = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
@@ -159,42 +179,98 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
       ior,
       roughness,
       metalness: 0.0,
-
       iridescence: 0.6,
       iridescenceIOR: 1.3,
       iridescenceThicknessRange: [120, 600],
-
       clearcoat: 1.0,
       clearcoatRoughness: 0.02,
       specularIntensity: 1.0,
-
-      color: new THREE.Color(color),
-      attenuationColor: new THREE.Color(attenuationColor),
+      color: new THREE.Color("#ffffff"), // base white; tinted in shader
+      attenuationColor: new THREE.Color("#ffffff"),
       attenuationDistance,
-
       transparent: false,
       opacity: 1.0,
       toneMapped: true,
       flatShading: true,
       side: THREE.FrontSide,
-
-      emissive: new THREE.Color(emissiveColor),
+      emissive: new THREE.Color("#000000"),
       emissiveIntensity,
     });
 
-    // Fresnel sparkle (same as MagicCrystalClusters.jsx)
     m.onBeforeCompile = (shader) => {
-      shader.uniforms.uFresnelStrength = { value: fresnelStrength };
-      shader.uniforms.uFresnelPower = { value: fresnelPower };
-      shader.uniforms.uFresnelColor = { value: new THREE.Color(fresnelColor) };
+      // Object-space Y bounds (same for all instances)
+      shader.uniforms.uObjMinY = { value: 0.0 };
+      shader.uniforms.uObjMaxY = { value: 1.0 };
+
+      // Gradient/boost uniforms
+      shader.uniforms.uColorA = { value: new THREE.Color(colorA) };
+      shader.uniforms.uColorB = { value: new THREE.Color(colorB) };
+      shader.uniforms.uMid = { value: mid };
+      shader.uniforms.uSoft = { value: softness };
+      shader.uniforms.uBottomSatBoost = { value: bottomSatBoost };
+      shader.uniforms.uBottomEmissiveBoost = { value: bottomEmissiveBoost };
+      shader.uniforms.uBottomFresnelBoost = { value: bottomFresnelBoost };
+      shader.uniforms.uBottomFresnelPower = { value: bottomFresnelPower };
+      shader.uniforms.uEmissiveIntensity = { value: emissiveIntensity };
+
+      // Per-vertex normalized height vH computed from instanceMatrix
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        `
+        #include <common>
+        uniform float uObjMinY, uObjMaxY;
+        varying float vH;
+        `
+      );
+
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `
+        #include <begin_vertex>
+        vec3 pos = transformed;
+
+        // World position (instance-aware)
+        #ifdef USE_INSTANCING
+          mat4 MI = modelMatrix * instanceMatrix;
+          vec4 wp = MI * vec4(pos, 1.0);
+          // translation.y
+          float ty = MI[3].y;
+          // scale along world Y axis (length of Y column)
+          float sy = length(vec3(MI[1].x, MI[1].y, MI[1].z));
+          float yMin = ty + sy * uObjMinY;
+          float yMax = ty + sy * uObjMaxY;
+        #else
+          mat4 MI = modelMatrix;
+          vec4 wp = MI * vec4(pos, 1.0);
+          float ty = MI[3].y;
+          float sy = length(vec3(MI[1].x, MI[1].y, MI[1].z));
+          float yMin = ty + sy * uObjMinY;
+          float yMax = ty + sy * uObjMaxY;
+        #endif
+
+        vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
+        `
+      );
 
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
         `
         #include <common>
-        uniform float uFresnelStrength;
-        uniform float uFresnelPower;
-        uniform vec3  uFresnelColor;
+        uniform vec3  uColorA;
+        uniform vec3  uColorB;
+        uniform float uMid, uSoft;
+        uniform float uBottomSatBoost;
+        uniform float uBottomEmissiveBoost;
+        uniform float uBottomFresnelBoost;
+        uniform float uBottomFresnelPower;
+        uniform float uEmissiveIntensity;
+        varying float vH;
+
+        vec3 boostSaturation(vec3 c, float amount) {
+          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          float f = clamp(1.0 + amount, 0.0, 2.5);
+          return mix(vec3(l), c, f);
+        }
         `
       );
 
@@ -207,9 +283,26 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
       shader.fragmentShader = shader.fragmentShader.replace(
         hook,
         `
+        float t = smoothstep(uMid - uSoft, uMid + uSoft, vH);
+        vec3 grad = mix(uColorA, uColorB, t);
+
+        // bottom emphasis
+        float bottom = 1.0 - vH;
+        grad = boostSaturation(grad, uBottomSatBoost * bottom);
+
+        // tint base shading
+        gl_FragColor.rgb *= grad;
+
+        // fresnel (stronger near bottom)
         vec3 V = normalize(-vViewPosition);
-        float fres = pow(1.0 - abs(dot(normalize(normal), V)), uFresnelPower);
-        gl_FragColor.rgb += uFresnelColor * (fres * uFresnelStrength);
+        float fres = pow(1.0 - abs(dot(normalize(normal), V)), 1.3);
+        float fresBoost = 1.0 + uBottomFresnelBoost * pow(bottom, uBottomFresnelPower);
+        gl_FragColor.rgb += grad * fres * fresBoost;
+
+        // emissive bump near bottom
+        float eBoost = 1.0 + uBottomEmissiveBoost * bottom;
+        gl_FragColor.rgb += grad * uEmissiveIntensity * eBoost;
+
         ${hook}
         `
       );
@@ -221,27 +314,7 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live material updates
-  useEffect(() => {
-    if (!material) return;
-    material.color.set(color);
-    material.attenuationColor.set(attenuationColor);
-    material.ior = ior;
-    material.thickness = thickness;
-    material.attenuationDistance = attenuationDistance;
-    material.roughness = roughness;
-    material.emissive.set(emissiveColor);
-    material.emissiveIntensity = emissiveIntensity;
-
-    const s = material.userData.shader;
-    if (s) {
-      s.uniforms.uFresnelStrength.value = fresnelStrength;
-      s.uniforms.uFresnelPower.value = fresnelPower;
-      s.uniforms.uFresnelColor.value.set(fresnelColor);
-    }
-  }, [material, color, attenuationColor, ior, thickness, attenuationDistance, roughness, emissiveColor, emissiveIntensity, fresnelStrength, fresnelPower, fresnelColor]);
-
-  // ===== Instancing: write matrices on control changes =======================
+  // ===== Instancing: write matrices to GPU whenever controls change =====
   useEffect(() => {
     const mesh = instancedRef.current;
     if (!mesh) return;
@@ -270,6 +343,53 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     mesh.count = COUNT;
     mesh.instanceMatrix.needsUpdate = true;
   }, [ctl]);
+
+  // ===== Keep uniforms / physical params live & seed bbox Y range =====
+  useEffect(() => {
+    if (!material) return;
+    material.ior = ior;
+    material.thickness = thickness;
+    material.attenuationDistance = attenuationDistance;
+    material.roughness = roughness;
+    material.emissiveIntensity = emissiveIntensity;
+
+    const sdr = material.userData.shader;
+    if (sdr) {
+      sdr.uniforms.uColorA.value.set(colorA);
+      sdr.uniforms.uColorB.value.set(colorB);
+      sdr.uniforms.uMid.value = mid;
+      sdr.uniforms.uSoft.value = softness;
+      sdr.uniforms.uBottomSatBoost.value = bottomSatBoost;
+      sdr.uniforms.uBottomEmissiveBoost.value = bottomEmissiveBoost;
+      sdr.uniforms.uBottomFresnelBoost.value = bottomFresnelBoost;
+      sdr.uniforms.uBottomFresnelPower.value = bottomFresnelPower;
+      sdr.uniforms.uEmissiveIntensity.value = emissiveIntensity;
+
+      // Geometry object-space Y bounds (shared across instances)
+      if (geometry?.boundingBox) {
+        sdr.uniforms.uObjMinY.value = geometry.boundingBox.min.y;
+        sdr.uniforms.uObjMaxY.value = geometry.boundingBox.max.y;
+      }
+    }
+  }, [
+    material,
+    geometry,
+    // gradient/glow controls
+    colorA,
+    colorB,
+    mid,
+    softness,
+    bottomSatBoost,
+    bottomEmissiveBoost,
+    bottomFresnelBoost,
+    bottomFresnelPower,
+    emissiveIntensity,
+    // physical
+    ior,
+    thickness,
+    attenuationDistance,
+    roughness,
+  ]);
 
   if (!geometry) return null;
 
