@@ -3,6 +3,7 @@ import React, { forwardRef, useMemo, useRef, useEffect } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
+import { useFrame, useThree } from "@react-three/fiber";
 
 // Uses the Cluster4 model
 const CLUSTER4_GLB = "/models/magicPlantsAndCrystal/CrystalCluster4.glb";
@@ -25,7 +26,7 @@ const BAKED = [
   { px: -2.8, py: -4.47, pz: -2.9, ry: 0.0, s: 0.18 },
   // 4
   { px: -2.48, py: -4.46, pz: -3.6, ry: 0.0, s: 0.12 },
-  // 5 (pY not provided → fallback -4.0)
+  // 5
   { px: -2.8, py: -4.48, pz: -3.121, ry: 0.0, s: 0.14 },
   // 6
   { px: -2.6, py: -4.5, pz: -1.47, ry: -144.7, s: 0.16 },
@@ -36,8 +37,9 @@ const BAKED = [
 ];
 
 /**
- * Material: simple physical “glass” base with a 2-color vertical gradient/Fresnel,
- * same pattern as Crystal2 but namespace-prefixed to keep it independent (C_…).
+ * Glass material with 2-color vertical gradient + fresnel.
+ * Adds per-instance hover glow via instanced attribute `aHover`:
+ * shader adds grad * mix(uC_HoverMin, uC_HoverMax, vHover).
  */
 function useCrystalMaterialC({
   ior,
@@ -53,13 +55,15 @@ function useCrystalMaterialC({
   bottomEmissiveBoost,
   bottomFresnelBoost,
   bottomFresnelPower,
+  hoverMin,
+  hoverMax,
 }) {
   const mat = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
-      thickness: thickness,
-      ior: ior,
-      roughness: roughness,
+      thickness,
+      ior,
+      roughness,
       metalness: 0.0,
       iridescence: 0.6,
       iridescenceIOR: 1.3,
@@ -69,14 +73,14 @@ function useCrystalMaterialC({
       specularIntensity: 1.0,
       color: new THREE.Color("#ffffff"),
       attenuationColor: new THREE.Color("#ffffff"),
-      attenuationDistance: attenuationDistance,
+      attenuationDistance,
       transparent: false,
       opacity: 1.0,
       toneMapped: true,
       flatShading: true,
       side: THREE.FrontSide,
       emissive: new THREE.Color("#000000"),
-      emissiveIntensity: emissiveIntensity,
+      emissiveIntensity,
     });
 
     m.onBeforeCompile = (shader) => {
@@ -95,13 +99,19 @@ function useCrystalMaterialC({
       shader.uniforms.uC_BottomFresnelPower = { value: bottomFresnelPower };
       shader.uniforms.uC_EmissiveIntensity = { value: emissiveIntensity };
 
-      // Per-vertex normalized height vH computed from instanceMatrix (world Y)
+      // Hover glow range
+      shader.uniforms.uC_HoverMin = { value: hoverMin };
+      shader.uniforms.uC_HoverMax = { value: hoverMax };
+
+      // Add instanced hover attribute → varying
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
         `
         #include <common>
         uniform float uObjMinY, uObjMaxY;
+        attribute float aHover;
         varying float vH;
+        varying float vHover;
         `
       );
 
@@ -111,7 +121,7 @@ function useCrystalMaterialC({
         #include <begin_vertex>
         vec3 pos = transformed;
 
-        // World position (instance-aware)
+        // World position (instance-aware) to compute normalized height
         #ifdef USE_INSTANCING
           mat4 MI = modelMatrix * instanceMatrix;
           vec4 wp = MI * vec4(pos, 1.0);
@@ -129,6 +139,7 @@ function useCrystalMaterialC({
         #endif
 
         vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
+        vHover = aHover;
         `
       );
 
@@ -144,7 +155,10 @@ function useCrystalMaterialC({
         uniform float uC_BottomFresnelBoost;
         uniform float uC_BottomFresnelPower;
         uniform float uC_EmissiveIntensity;
+        uniform float uC_HoverMin;
+        uniform float uC_HoverMax;
         varying float vH;
+        varying float vHover;
 
         vec3 boostSaturation(vec3 c, float amount) {
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -163,25 +177,30 @@ function useCrystalMaterialC({
       shader.fragmentShader = shader.fragmentShader.replace(
         hook,
         `
+        // base gradient (A->B)
         float t = smoothstep(uC_Mid - uC_Soft, uC_Mid + uC_Soft, vH);
         vec3 grad = mix(uC_ColorA, uC_ColorB, t);
 
-        // bottom emphasis
+        // more saturation near bottom
         float bottom = 1.0 - vH;
         grad = boostSaturation(grad, uC_BottomSatBoost * bottom);
 
         // tint base shading
         gl_FragColor.rgb *= grad;
 
-        // fresnel (stronger near bottom)
+        // fresnel, stronger near bottom
         vec3 V = normalize(-vViewPosition);
         float fres = pow(1.0 - abs(dot(normalize(normal), V)), 1.3);
         float fresBoost = 1.0 + uC_BottomFresnelBoost * pow(bottom, uC_BottomFresnelPower);
         gl_FragColor.rgb += grad * fres * fresBoost;
 
-        // emissive bump near bottom
+        // base emissive near bottom
         float eBoost = 1.0 + uC_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uC_EmissiveIntensity * eBoost;
+
+        // ADD: per-instance hover glow
+        float hoverGlow = mix(uC_HoverMin, uC_HoverMax, clamp(vHover, 0.0, 1.0));
+        gl_FragColor.rgb += grad * hoverGlow;
 
         ${hook}
         `
@@ -191,7 +210,7 @@ function useCrystalMaterialC({
     };
 
     // Ensure a unique WebGLProgram (independent from other crystals)
-    m.customProgramCacheKey = () => "MagicCrystal_C_v1";
+    m.customProgramCacheKey = () => "MagicCrystal_C_hoverGlow_v1";
 
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,6 +236,8 @@ function useCrystalMaterialC({
       s.uniforms.uC_BottomFresnelBoost.value = bottomFresnelBoost;
       s.uniforms.uC_BottomFresnelPower.value = bottomFresnelPower;
       s.uniforms.uC_EmissiveIntensity.value = emissiveIntensity;
+      s.uniforms.uC_HoverMin.value = hoverMin;
+      s.uniforms.uC_HoverMax.value = hoverMax;
     }
   }, [
     mat,
@@ -233,6 +254,8 @@ function useCrystalMaterialC({
     bottomEmissiveBoost,
     bottomFresnelBoost,
     bottomFresnelPower,
+    hoverMin,
+    hoverMax,
   ]);
 
   return mat;
@@ -254,7 +277,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     C_bottomFresnelPower,
   } = useControls("Crystal C / Gradient", {
     C_colorA: { value: "#20c4ff", label: "Bottom Color (A)" },
-    C_colorB: { value: "#9600c4ff", label: "Top Color (B)" },
+    C_colorB: { value: "#9600c4", label: "Top Color (B)" },
     C_mid: {
       value: 0.36,
       min: 0.0,
@@ -313,7 +336,54 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     C_emissiveIntensity: { value: 0.3, min: 0, max: 8, step: 0.01 },
   });
 
-  // ——— Instance transform controls (C_… with your requested ranges) ———
+  // ——— Hover glow controls ———
+  const {
+    C_hoverEnabled,
+    C_hoverOuterMult,
+    C_hoverFalloffExp,
+    C_hoverEase,
+    C_hoverMinGlow,
+    C_hoverMaxGlow,
+  } = useControls("Crystal C / Hover Glow", {
+    C_hoverEnabled: { value: true, label: "Enabled" },
+    C_hoverOuterMult: {
+      value: 3.0,
+      min: 0.5,
+      max: 4.0,
+      step: 0.05,
+      label: "Outer Radius ×",
+    },
+    C_hoverFalloffExp: {
+      value: 0.5,
+      min: 0.5,
+      max: 6.0,
+      step: 0.1,
+      label: "Falloff Exp",
+    },
+    C_hoverEase: {
+      value: 12.0,
+      min: 1.0,
+      max: 30.0,
+      step: 0.5,
+      label: "Ease (1/s)",
+    },
+    C_hoverMinGlow: {
+      value: 0.0,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Min Extra Glow",
+    },
+    C_hoverMaxGlow: {
+      value: 1.65,
+      min: 0.0,
+      max: 2.0,
+      step: 0.01,
+      label: "Max Extra Glow",
+    },
+  });
+
+  // ——— Instance transform controls (C_… with your ranges) ———
   const instanceSchema = useMemo(() => {
     const schema = {};
     for (let i = 0; i < COUNT; i++) {
@@ -367,23 +437,21 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
   });
 
   // ——— Geometry: extract + fix orientation (+90° around X → Y-up) ———
-  const geometry = useMemo(() => {
-    if (!scene) return null;
+  const { geometry, baseRadius } = useMemo(() => {
+    if (!scene) return { geometry: null, baseRadius: 1 };
     let g = null;
     scene.traverse((n) => {
       if (!g && n.isMesh && n.geometry) g = n.geometry.clone();
     });
-    if (!g) return null;
+    if (!g) return { geometry: null, baseRadius: 1 };
     if (g.index) g = g.toNonIndexed();
 
     // Fix the -90° issue by rotating +90° around X (Z-up → Y-up)
-    const fix = new THREE.Matrix4().makeRotationX(+Math.PI / 2);
-    g.applyMatrix4(fix);
-
+    g.applyMatrix4(new THREE.Matrix4().makeRotationX(+Math.PI / 2));
     g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
-    return g;
+    return { geometry: g, baseRadius: g.boundingSphere?.radius || 1 };
   }, [scene]);
 
   // ——— Material (independent C) ———
@@ -401,6 +469,8 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     bottomEmissiveBoost: C_bottomEmissiveBoost,
     bottomFresnelBoost: C_bottomFresnelBoost,
     bottomFresnelPower: C_bottomFresnelPower,
+    hoverMin: C_hoverMinGlow,
+    hoverMax: C_hoverMaxGlow,
   });
 
   // Seed object-space Y bounds into the shader
@@ -413,6 +483,16 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
       sdr.uniforms.uObjMaxY.value = bb.max.y;
     }
   }, [geometry, material]);
+
+  // ——— Per-instance hover attribute (aHover) ———
+  const hoverAttrRef = useRef(null);
+  useEffect(() => {
+    if (!geometry) return;
+    const arr = new Float32Array(COUNT).fill(0);
+    const attr = new THREE.InstancedBufferAttribute(arr, 1);
+    geometry.setAttribute("aHover", attr);
+    hoverAttrRef.current = attr;
+  }, [geometry]);
 
   // ——— Upload instance matrices (on any control change) ———
   useEffect(() => {
@@ -445,6 +525,61 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     mesh.count = COUNT;
     mesh.instanceMatrix.needsUpdate = true;
   }, [ctl]);
+
+  // ——— Gradual glow on hover (ray-to-instance proximity, eased) ———
+  const { camera, pointer } = useThree();
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const tmpM = useMemo(() => new THREE.Matrix4(), []);
+  const tmpP = useMemo(() => new THREE.Vector3(), []);
+  const tmpQ = useMemo(() => new THREE.Quaternion(), []);
+  const tmpS = useMemo(() => new THREE.Vector3(), []);
+
+  const hoverTargetRef = useRef(new Float32Array(COUNT).fill(0));
+
+  useFrame((_, dt) => {
+    const attr = hoverAttrRef.current;
+    const mesh = instancedRef.current;
+    if (!attr || !mesh || !geometry) return;
+
+    // Build mouse ray
+    const rc = raycasterRef.current;
+    rc.setFromCamera(pointer, camera);
+    const ray = rc.ray;
+
+    // For each instance, compute distance from ray to instance center
+    for (let i = 0; i < COUNT; i++) {
+      mesh.getMatrixAt(i, tmpM);
+      tmpM.decompose(tmpP, tmpQ, tmpS);
+
+      const maxScale = Math.max(tmpS.x, tmpS.y, tmpS.z);
+      const radius = (baseRadius || 1) * maxScale * C_hoverOuterMult;
+
+      // distance from mouse ray to center (world units)
+      const d = Math.sqrt(ray.distanceSqToPoint(tmpP));
+      let closeness = 1.0 - d / Math.max(1e-6, radius); // 1 at center of ray, 0 at outer edge
+      closeness = Math.max(0.0, Math.min(1.0, closeness));
+
+      // Optional falloff exponent
+      hoverTargetRef.current[i] = Math.pow(closeness, C_hoverFalloffExp);
+    }
+
+    // Ease aHover towards targets
+    const a = attr.array;
+    const t = hoverTargetRef.current;
+    const easeK = C_hoverEnabled
+      ? 1 - Math.exp(-C_hoverEase * dt)
+      : 1 - Math.exp(-C_hoverEase * dt);
+    let dirty = false;
+    for (let i = 0; i < COUNT; i++) {
+      const target = C_hoverEnabled ? t[i] : 0;
+      const ni = a[i] + (target - a[i]) * easeK;
+      if (Math.abs(ni - a[i]) > 1e-4) {
+        a[i] = ni;
+        dirty = true;
+      }
+    }
+    if (dirty) attr.needsUpdate = true;
+  });
 
   if (!geometry) return null;
 
