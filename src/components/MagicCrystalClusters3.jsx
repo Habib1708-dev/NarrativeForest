@@ -347,7 +347,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
   } = useControls("Crystal C / Hover Glow", {
     C_hoverEnabled: { value: true, label: "Enabled" },
     C_hoverOuterMult: {
-      value: 3.0,
+      value: 4.0,
       min: 0.5,
       max: 4.0,
       step: 0.05,
@@ -375,7 +375,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
       label: "Min Extra Glow",
     },
     C_hoverMaxGlow: {
-      value: 1.65,
+      value: 2.0,
       min: 0.0,
       max: 2.0,
       step: 0.01,

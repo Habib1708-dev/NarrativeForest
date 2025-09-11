@@ -169,8 +169,8 @@ const Lake = forwardRef(function Lake(
     enableAdditiveTrail,
   } = useControls("Lake", {
     Bioluminescence: folder({
-      bioColorA: { value: "#780096ff" },
-      bioColorB: { value: "#780096ff" },
+      bioColorA: { value: "#daa3ffff" },
+      bioColorB: { value: "#daa3ffff" },
       bioIntensity: { value: 3, min: 0, max: 4, step: 0.05 },
       bioAltFreq: { value: 6.28318, min: 0.0, max: 20.0, step: 0.05 },
       bioAltPhase: { value: 0.0, min: -6.28318, max: 6.28318, step: 0.01 },

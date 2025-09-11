@@ -1,7 +1,9 @@
+// src/components/MagicCrystalClusters.jsx
 import React, { forwardRef, useMemo, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
+import { useFrame, useThree } from "@react-three/fiber";
 
 const CRYSTAL_GLB = "/models/magicPlantsAndCrystal/CrystalCluster.glb";
 const COUNT = 15;
@@ -252,7 +254,7 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     collapsed: false,
   });
 
-  // ===== 2-Color Gradient & Glass controls (same system as Crystal2, but A-prefixed) =====
+  // ===== 2-Color Gradient & Glass controls (A-prefixed) =====
   const {
     A_colorA,
     A_colorB,
@@ -262,56 +264,52 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     A_bottomEmissiveBoost,
     A_bottomFresnelBoost,
     A_bottomFresnelPower,
-  } = useControls(
-    "Crystal A / Gradient",
-    {
-      A_colorA: { value: "#ffd000", label: "Bottom Color (A)" },
-      A_colorB: { value: "#fff6cf", label: "Top Color (B)" },
-      A_mid: {
-        value: 0.38,
-        min: 0.0,
-        max: 1.0,
-        step: 0.001,
-        label: "Blend Midpoint",
-      },
-      A_softness: {
-        value: 0.44,
-        min: 0.0,
-        max: 0.5,
-        step: 0.001,
-        label: "Blend Softness",
-      },
-      A_bottomSatBoost: {
-        value: 0.1,
-        min: 0.0,
-        max: 1.5,
-        step: 0.01,
-        label: "Bottom Saturation +",
-      },
-      A_bottomEmissiveBoost: {
-        value: 2.0,
-        min: 0.0,
-        max: 2.0,
-        step: 0.01,
-        label: "Bottom Glow +",
-      },
-      A_bottomFresnelBoost: {
-        value: 3.0,
-        min: 0.0,
-        max: 3.0,
-        step: 0.01,
-        label: "Bottom Fresnel +",
-      },
-      A_bottomFresnelPower: {
-        value: 0.5,
-        min: 0.5,
-        max: 6.0,
-        step: 0.1,
-        label: "Bottom Fresnel Falloff",
-      },
+  } = useControls("Crystal A / Gradient", {
+    A_colorA: { value: "#20c4ff", label: "Bottom Color (A)" },
+    A_colorB: { value: "#9600c4", label: "Top Color (B)" },
+    A_mid: {
+      value: 0.38,
+      min: 0.0,
+      max: 1.0,
+      step: 0.001,
+      label: "Blend Midpoint",
     },
-    { collapsed: false }
-  );
+    A_softness: {
+      value: 0.44,
+      min: 0.0,
+      max: 0.5,
+      step: 0.001,
+      label: "Blend Softness",
+    },
+    A_bottomSatBoost: {
+      value: 0.1,
+      min: 0.0,
+      max: 1.5,
+      step: 0.01,
+      label: "Bottom Saturation +",
+    },
+    A_bottomEmissiveBoost: {
+      value: 2.0,
+      min: 0.0,
+      max: 2.0,
+      step: 0.01,
+      label: "Bottom Glow +",
+    },
+    A_bottomFresnelBoost: {
+      value: 3.0,
+      min: 0.0,
+      max: 3.0,
+      step: 0.01,
+      label: "Bottom Fresnel +",
+    },
+    A_bottomFresnelPower: {
+      value: 0.5,
+      min: 0.5,
+      max: 6.0,
+      step: 0.1,
+      label: "Bottom Fresnel Falloff",
+    },
+  });
 
   const {
     A_ior,
@@ -327,14 +325,61 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     A_emissiveIntensity: { value: 0.3, min: 0, max: 8, step: 0.01 },
   });
 
-  // ===== Geometry (rotate to Y-up, cache bbox)
-  const geometry = useMemo(() => {
-    if (!scene) return null;
+  // ===== Hover Glow controls (A-prefixed) =====
+  const {
+    A_hoverEnabled,
+    A_hoverOuterMult,
+    A_hoverFalloffExp,
+    A_hoverEase,
+    A_hoverMinGlow,
+    A_hoverMaxGlow,
+  } = useControls("Crystal A / Hover Glow", {
+    A_hoverEnabled: { value: true, label: "Enabled" },
+    A_hoverOuterMult: {
+      value: 4.0,
+      min: 0.5,
+      max: 4.0,
+      step: 0.05,
+      label: "Outer Radius ×",
+    },
+    A_hoverFalloffExp: {
+      value: 0.5,
+      min: 0.5,
+      max: 6.0,
+      step: 0.1,
+      label: "Falloff Exp",
+    },
+    A_hoverEase: {
+      value: 12.0,
+      min: 1.0,
+      max: 30.0,
+      step: 0.5,
+      label: "Ease (1/s)",
+    },
+    A_hoverMinGlow: {
+      value: 0.0,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Min Extra Glow",
+    },
+    A_hoverMaxGlow: {
+      value: 2.0,
+      min: 0.0,
+      max: 2.0,
+      step: 0.01,
+      label: "Max Extra Glow",
+    },
+  });
+
+  // ===== Geometry (rotate to Y-up, cache bbox/sphere) =====
+  const { geometry, baseRadius } = useMemo(() => {
+    if (!scene) return { geometry: null, baseRadius: 1 };
     let g = null;
     scene.traverse((n) => {
       if (!g && n.isMesh && n.geometry) g = n.geometry.clone();
     });
-    if (!g) return null;
+    if (!g) return { geometry: null, baseRadius: 1 };
 
     if (g.index) g = g.toNonIndexed();
     const fix = new THREE.Matrix4().makeRotationX(+Math.PI / 2);
@@ -342,10 +387,10 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
-    return g;
+    return { geometry: g, baseRadius: g.boundingSphere?.radius || 1 };
   }, [scene]);
 
-  // ===== Independent material for Crystal A (same shader pattern as Crystal2 but A-namespaced)
+  // ===== Material (A-namespaced) with per-instance hover =====
   const material = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
@@ -376,7 +421,7 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       shader.uniforms.uObjMinY = { value: 0.0 };
       shader.uniforms.uObjMaxY = { value: 1.0 };
 
-      // Gradient / boosts — A-namespaced (independent from B)
+      // Gradient / boosts — A-namespaced (independent)
       shader.uniforms.uA_ColorA = { value: new THREE.Color(A_colorA) };
       shader.uniforms.uA_ColorB = { value: new THREE.Color(A_colorB) };
       shader.uniforms.uA_Mid = { value: A_mid };
@@ -387,13 +432,20 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       shader.uniforms.uA_BottomFresnelPower = { value: A_bottomFresnelPower };
       shader.uniforms.uA_EmissiveIntensity = { value: A_emissiveIntensity };
 
+      // Hover glow range
+      shader.uniforms.uA_HoverMin = { value: A_hoverMinGlow };
+      shader.uniforms.uA_HoverMax = { value: A_hoverMaxGlow };
+
       // Per-vertex normalized height vH (instance-aware, world-Y)
+      // + instanced hover attribute
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
         `
         #include <common>
         uniform float uObjMinY, uObjMaxY;
+        attribute float aHover;
         varying float vH;
+        varying float vHover;
         `
       );
 
@@ -420,6 +472,7 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         #endif
 
         vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
+        vHover = aHover;
         `
       );
 
@@ -435,7 +488,10 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         uniform float uA_BottomFresnelBoost;
         uniform float uA_BottomFresnelPower;
         uniform float uA_EmissiveIntensity;
+        uniform float uA_HoverMin;
+        uniform float uA_HoverMax;
         varying float vH;
+        varying float vHover;
 
         vec3 boostSaturation(vec3 c, float amount) {
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -470,9 +526,13 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         float fresBoost = 1.0 + uA_BottomFresnelBoost * pow(bottom, uA_BottomFresnelPower);
         gl_FragColor.rgb += grad * fres * fresBoost;
 
-        // emissive bump near bottom
+        // base emissive near bottom
         float eBoost = 1.0 + uA_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uA_EmissiveIntensity * eBoost;
+
+        // per-instance hover glow
+        float hoverGlow = mix(uA_HoverMin, uA_HoverMax, clamp(vHover, 0.0, 1.0));
+        gl_FragColor.rgb += grad * hoverGlow;
 
         ${hook}
         `
@@ -481,8 +541,8 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       m.userData.shader = shader;
     };
 
-    // 🔒 Ensure it never shares a program with Crystal B
-    m.customProgramCacheKey = () => "MagicCrystal_A_vGradient_1";
+    // 🔒 Make sure it doesn't share programs with other crystal variants
+    m.customProgramCacheKey = () => "MagicCrystal_A_vGradientHover_1";
 
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -492,6 +552,8 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
   useEffect(() => {
     const mesh = instancedRef.current;
     if (!mesh) return;
+
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     const m4 = new THREE.Matrix4();
     const p = new THREE.Vector3();
@@ -542,31 +604,83 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       sdr.uniforms.uA_BottomFresnelBoost.value = A_bottomFresnelBoost;
       sdr.uniforms.uA_BottomFresnelPower.value = A_bottomFresnelPower;
       sdr.uniforms.uA_EmissiveIntensity.value = A_emissiveIntensity;
+    }
+  }, [material, A_colorA, A_colorB, A_mid, A_softness, A_bottomSatBoost, A_bottomEmissiveBoost, A_bottomFresnelBoost, A_bottomFresnelPower, A_ior, A_thickness, A_attenuationDistance, A_roughness, A_emissiveIntensity]);
 
-      if (geometry?.boundingBox) {
-        sdr.uniforms.uObjMinY.value = geometry.boundingBox.min.y;
-        sdr.uniforms.uObjMaxY.value = geometry.boundingBox.max.y;
+  // ===== Seed object-space Y bounds into the shader (after geometry ready)
+  useEffect(() => {
+    if (!geometry || !material?.userData?.shader) return;
+    const sdr = material.userData.shader;
+    const bb = geometry.boundingBox;
+    if (bb) {
+      sdr.uniforms.uObjMinY.value = bb.min.y;
+      sdr.uniforms.uObjMaxY.value = bb.max.y;
+    }
+  }, [geometry, material]);
+
+  // ===== Per-instance hover attribute (aHover)
+  const hoverAttrRef = useRef(null);
+  useEffect(() => {
+    if (!geometry) return;
+    const arr = new Float32Array(COUNT).fill(0);
+    const attr = new THREE.InstancedBufferAttribute(arr, 1);
+    geometry.setAttribute("aHover", attr);
+    hoverAttrRef.current = attr;
+  }, [geometry]);
+
+  // ===== Gradual glow on hover (ray-to-instance proximity, eased)
+  const { camera, pointer } = useThree();
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const tmpM = useMemo(() => new THREE.Matrix4(), []);
+  const tmpP = useMemo(() => new THREE.Vector3(), []);
+  const tmpQ = useMemo(() => new THREE.Quaternion(), []);
+  const tmpS = useMemo(() => new THREE.Vector3(), []);
+  const hoverTargetRef = useRef(new Float32Array(COUNT).fill(0));
+
+  useFrame((_, dt) => {
+    const attr = hoverAttrRef.current;
+    const mesh = instancedRef.current;
+    if (!attr || !mesh || !geometry) return;
+
+    // Build mouse ray
+    const rc = raycasterRef.current;
+    rc.setFromCamera(pointer, camera);
+    const ray = rc.ray;
+
+    // Compute closeness per instance
+    const sphereRadius = baseRadius || 1;
+
+    for (let i = 0; i < COUNT; i++) {
+      mesh.getMatrixAt(i, tmpM);
+      tmpM.decompose(tmpP, tmpQ, tmpS);
+
+      const maxScale = Math.max(tmpS.x, tmpS.y, tmpS.z);
+      const radius = sphereRadius * maxScale * A_hoverOuterMult;
+
+      const d = Math.sqrt(ray.distanceSqToPoint(tmpP));
+      let closeness = 1.0 - d / Math.max(1e-6, radius);
+      if (closeness < 0) closeness = 0;
+      if (closeness > 1) closeness = 1;
+
+      hoverTargetRef.current[i] = Math.pow(closeness, A_hoverFalloffExp);
+    }
+
+    // Ease aHover towards target values
+    const a = attr.array;
+    const t = hoverTargetRef.current;
+    const easeK = 1 - Math.exp(-A_hoverEase * dt);
+    let dirty = false;
+
+    for (let i = 0; i < COUNT; i++) {
+      const target = A_hoverEnabled ? t[i] : 0;
+      const ni = a[i] + (target - a[i]) * easeK;
+      if (Math.abs(ni - a[i]) > 1e-4) {
+        a[i] = ni;
+        dirty = true;
       }
     }
-  }, [
-    material,
-    geometry,
-    // gradient/glow controls
-    A_colorA,
-    A_colorB,
-    A_mid,
-    A_softness,
-    A_bottomSatBoost,
-    A_bottomEmissiveBoost,
-    A_bottomFresnelBoost,
-    A_bottomFresnelPower,
-    A_emissiveIntensity,
-    // physical
-    A_ior,
-    A_thickness,
-    A_attenuationDistance,
-    A_roughness,
-  ]);
+    if (dirty) attr.needsUpdate = true;
+  });
 
   if (!geometry) return null;
 
