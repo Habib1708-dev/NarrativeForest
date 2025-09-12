@@ -167,7 +167,7 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
   const { scene } = useGLTF(CRYSTAL_GLB);
   const instancedRef = useRef();
 
-  // ===== Instance transforms (prefixed + unique group for A) =====
+  // ===== Instance transforms (A-prefixed) =====
   const makeInstanceFolder = (i) => {
     const d = BAKED[i] ?? {
       px: -2,
@@ -325,50 +325,76 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     A_emissiveIntensity: { value: 0.3, min: 0, max: 8, step: 0.01 },
   });
 
-  // ===== Hover Glow controls (A-prefixed) =====
+  // ===== Global Color Hover (soft range while hovered) + ONE-SHOT GLOW BURST =====
   const {
     A_hoverEnabled,
-    A_hoverOuterMult,
-    A_hoverFalloffExp,
-    A_hoverEase,
-    A_hoverMinGlow,
-    A_hoverMaxGlow,
-  } = useControls("Crystal A / Hover Glow", {
+    A_hoverOuterMult, // baked 2.8
+    A_hoverEase, // baked 0.3
+    A_hueSpeedDeg, // baked 20
+    A_hueStartDeg, // hue window start (deg rel. to base)
+    A_hueEndDeg, // hue window end   (deg rel. to base)
+    A_coolTime, // baked 5.0
+    // New one-shot glow controls
+    A_glowStrength, // burst amplitude
+    A_glowFadeTime, // seconds to fade the burst to 0
+  } = useControls("Crystal A / Color Hover", {
     A_hoverEnabled: { value: true, label: "Enabled" },
     A_hoverOuterMult: {
-      value: 4.0,
-      min: 0.5,
+      value: 2.8,
+      min: 0.1,
       max: 4.0,
       step: 0.05,
-      label: "Outer Radius ×",
-    },
-    A_hoverFalloffExp: {
-      value: 0.5,
-      min: 0.5,
-      max: 6.0,
-      step: 0.1,
-      label: "Falloff Exp",
+      label: "Screen Radius ×",
     },
     A_hoverEase: {
-      value: 12.0,
-      min: 1.0,
-      max: 30.0,
-      step: 0.5,
+      value: 0.3,
+      min: 0.1,
+      max: 20,
+      step: 0.1,
       label: "Ease (1/s)",
     },
-    A_hoverMinGlow: {
-      value: 0.0,
-      min: 0.0,
-      max: 1.0,
-      step: 0.01,
-      label: "Min Extra Glow",
+    A_hueSpeedDeg: {
+      value: 20,
+      min: 0,
+      max: 360,
+      step: 1,
+      label: "Hue Speed (°/s)",
     },
-    A_hoverMaxGlow: {
-      value: 2.0,
+    A_hueStartDeg: {
+      value: 0,
+      min: -360,
+      max: 360,
+      step: 1,
+      label: "Hue Start (°)",
+    },
+    A_hueEndDeg: {
+      value: 120,
+      min: -360,
+      max: 360,
+      step: 1,
+      label: "Hue End (°)",
+    },
+    A_coolTime: {
+      value: 5.0,
+      min: 0.05,
+      max: 20,
+      step: 0.05,
+      label: "Cool Back (s)",
+    },
+    // One-shot glow
+    A_glowStrength: {
+      value: 1.2,
       min: 0.0,
-      max: 2.0,
+      max: 8.0,
       step: 0.01,
-      label: "Max Extra Glow",
+      label: "Glow Strength +",
+    },
+    A_glowFadeTime: {
+      value: 1.6,
+      min: 0.05,
+      max: 20,
+      step: 0.05,
+      label: "Glow Fade (s)",
     },
   });
 
@@ -382,15 +408,14 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     if (!g) return { geometry: null, baseRadius: 1 };
 
     if (g.index) g = g.toNonIndexed();
-    const fix = new THREE.Matrix4().makeRotationX(+Math.PI / 2);
-    g.applyMatrix4(fix);
+    g.applyMatrix4(new THREE.Matrix4().makeRotationX(+Math.PI / 2));
     g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
     return { geometry: g, baseRadius: g.boundingSphere?.radius || 1 };
   }, [scene]);
 
-  // ===== Material (A-namespaced) with per-instance hover =====
+  // ===== Material (A-namespaced) =====
   const material = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
@@ -432,20 +457,16 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       shader.uniforms.uA_BottomFresnelPower = { value: A_bottomFresnelPower };
       shader.uniforms.uA_EmissiveIntensity = { value: A_emissiveIntensity };
 
-      // Hover glow range
-      shader.uniforms.uA_HoverMin = { value: A_hoverMinGlow };
-      shader.uniforms.uA_HoverMax = { value: A_hoverMaxGlow };
+      // NEW: dynamic extra glow (burst decay)
+      shader.uniforms.uA_GlowExtra = { value: 0.0 };
 
       // Per-vertex normalized height vH (instance-aware, world-Y)
-      // + instanced hover attribute
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
         `
         #include <common>
         uniform float uObjMinY, uObjMaxY;
-        attribute float aHover;
         varying float vH;
-        varying float vHover;
         `
       );
 
@@ -472,7 +493,6 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         #endif
 
         vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
-        vHover = aHover;
         `
       );
 
@@ -488,10 +508,8 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         uniform float uA_BottomFresnelBoost;
         uniform float uA_BottomFresnelPower;
         uniform float uA_EmissiveIntensity;
-        uniform float uA_HoverMin;
-        uniform float uA_HoverMax;
+        uniform float uA_GlowExtra;   // NEW
         varying float vH;
-        varying float vHover;
 
         vec3 boostSaturation(vec3 c, float amount) {
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -530,9 +548,8 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
         float eBoost = 1.0 + uA_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uA_EmissiveIntensity * eBoost;
 
-        // per-instance hover glow
-        float hoverGlow = mix(uA_HoverMin, uA_HoverMax, clamp(vHover, 0.0, 1.0));
-        gl_FragColor.rgb += grad * hoverGlow;
+        // NEW: one-shot burst glow (decayed on CPU)
+        gl_FragColor.rgb += grad * uA_GlowExtra;
 
         ${hook}
         `
@@ -541,8 +558,8 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       m.userData.shader = shader;
     };
 
-    // 🔒 Make sure it doesn't share programs with other crystal variants
-    m.customProgramCacheKey = () => "MagicCrystal_A_vGradientHover_1";
+    // keep separate from other variants
+    m.customProgramCacheKey = () => "MagicCrystal_A_colorHover_burstGlow_v1";
 
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -604,6 +621,7 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
       sdr.uniforms.uA_BottomFresnelBoost.value = A_bottomFresnelBoost;
       sdr.uniforms.uA_BottomFresnelPower.value = A_bottomFresnelPower;
       sdr.uniforms.uA_EmissiveIntensity.value = A_emissiveIntensity;
+      // uA_GlowExtra is driven in the frame loop
     }
   }, [material, A_colorA, A_colorB, A_mid, A_softness, A_bottomSatBoost, A_bottomEmissiveBoost, A_bottomFresnelBoost, A_bottomFresnelPower, A_ior, A_thickness, A_attenuationDistance, A_roughness, A_emissiveIntensity]);
 
@@ -618,68 +636,132 @@ export default forwardRef(function MagicCrystalClusters(props, ref) {
     }
   }, [geometry, material]);
 
-  // ===== Per-instance hover attribute (aHover)
-  const hoverAttrRef = useRef(null);
+  // ===== Global hover-driven hue (soft range while hovered) + one-shot glow burst
+  const baseARef = useRef(new THREE.Color(A_colorA));
+  const baseBRef = useRef(new THREE.Color(A_colorB));
   useEffect(() => {
-    if (!geometry) return;
-    const arr = new Float32Array(COUNT).fill(0);
-    const attr = new THREE.InstancedBufferAttribute(arr, 1);
-    geometry.setAttribute("aHover", attr);
-    hoverAttrRef.current = attr;
-  }, [geometry]);
+    baseARef.current.set(A_colorA);
+  }, [A_colorA]);
+  useEffect(() => {
+    baseBRef.current.set(A_colorB);
+  }, [A_colorB]);
 
-  // ===== Gradual glow on hover (ray-to-instance proximity, eased)
+  const hoverMixRef = useRef(0); // 0→base, 1→shifted
+  const phaseDegRef = useRef(0); // drives sine; advances only while hovered
+  const burstGlowRef = useRef(0); // current burst glow (decays to 0)
+  const prevHoveredRef = useRef(false); // for rising-edge detection
+
   const { camera, pointer } = useThree();
-  const raycasterRef = useRef(new THREE.Raycaster());
   const tmpM = useMemo(() => new THREE.Matrix4(), []);
   const tmpP = useMemo(() => new THREE.Vector3(), []);
   const tmpQ = useMemo(() => new THREE.Quaternion(), []);
   const tmpS = useMemo(() => new THREE.Vector3(), []);
-  const hoverTargetRef = useRef(new Float32Array(COUNT).fill(0));
+  const camRight = useMemo(() => new THREE.Vector3(), []);
+
+  // color workers (avoid GC)
+  const workA = useMemo(() => new THREE.Color(), []);
+  const workB = useMemo(() => new THREE.Color(), []);
+  const shiftedA = useMemo(() => new THREE.Color(), []);
+  const shiftedB = useMemo(() => new THREE.Color(), []);
+  const ndcCenter = useMemo(() => new THREE.Vector3(), []);
+  const ndcSample = useMemo(() => new THREE.Vector3(), []);
+  const sampleWorld = useMemo(() => new THREE.Vector3(), []);
+
+  function shiftHueTHREE(outColor, srcColor, deg) {
+    const hsl = { h: 0, s: 0, l: 0 };
+    srcColor.getHSL(hsl);
+    let h = hsl.h + deg / 360;
+    h = h - Math.floor(h); // wrap to [0,1)
+    outColor.setHSL(h, hsl.s, hsl.l);
+    return outColor;
+  }
 
   useFrame((_, dt) => {
-    const attr = hoverAttrRef.current;
     const mesh = instancedRef.current;
-    if (!attr || !mesh || !geometry) return;
+    const sdr = material?.userData?.shader;
+    if (!mesh || !geometry || !sdr) return;
 
-    // Build mouse ray
-    const rc = raycasterRef.current;
-    rc.setFromCamera(pointer, camera);
-    const ray = rc.ray;
+    // ---- Screen-space hover test across all instances (global) ----
+    camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
 
-    // Compute closeness per instance
+    let anyHovered = false;
     const sphereRadius = baseRadius || 1;
 
-    for (let i = 0; i < COUNT; i++) {
+    for (let i = 0; i < COUNT && !anyHovered; i++) {
       mesh.getMatrixAt(i, tmpM);
       tmpM.decompose(tmpP, tmpQ, tmpS);
 
-      const maxScale = Math.max(tmpS.x, tmpS.y, tmpS.z);
-      const radius = sphereRadius * maxScale * A_hoverOuterMult;
+      const rWorld = sphereRadius * Math.max(tmpS.x, tmpS.y, tmpS.z);
 
-      const d = Math.sqrt(ray.distanceSqToPoint(tmpP));
-      let closeness = 1.0 - d / Math.max(1e-6, radius);
-      if (closeness < 0) closeness = 0;
-      if (closeness > 1) closeness = 1;
+      ndcCenter.copy(tmpP).project(camera);
+      sampleWorld
+        .copy(tmpP)
+        .addScaledVector(camRight, rWorld * A_hoverOuterMult);
+      ndcSample.copy(sampleWorld).project(camera);
 
-      hoverTargetRef.current[i] = Math.pow(closeness, A_hoverFalloffExp);
+      const rNdc = Math.hypot(
+        ndcSample.x - ndcCenter.x,
+        ndcSample.y - ndcCenter.y
+      );
+      const dNdc = Math.hypot(pointer.x - ndcCenter.x, pointer.y - ndcCenter.y);
+
+      if (dNdc <= rNdc) anyHovered = true;
     }
 
-    // Ease aHover towards target values
-    const a = attr.array;
-    const t = hoverTargetRef.current;
+    // ---- Rising edge → trigger burst; otherwise decay burst ----
+    const wasHovered = prevHoveredRef.current;
+    if (A_hoverEnabled && anyHovered && !wasHovered) {
+      burstGlowRef.current = A_glowStrength; // fire once on entry
+    } else if (burstGlowRef.current > 0) {
+      const rate = A_glowStrength / Math.max(1e-3, A_glowFadeTime); // linear fade
+      burstGlowRef.current = Math.max(0, burstGlowRef.current - rate * dt);
+    }
+    prevHoveredRef.current = anyHovered;
+
+    // ---- Color: move ONLY while hovered; cool back on exit ----
     const easeK = 1 - Math.exp(-A_hoverEase * dt);
-    let dirty = false;
 
-    for (let i = 0; i < COUNT; i++) {
-      const target = A_hoverEnabled ? t[i] : 0;
-      const ni = a[i] + (target - a[i]) * easeK;
-      if (Math.abs(ni - a[i]) > 1e-4) {
-        a[i] = ni;
-        dirty = true;
-      }
+    if (A_hoverEnabled && anyHovered) {
+      phaseDegRef.current += A_hueSpeedDeg * dt;
+      if (phaseDegRef.current > 1e6) phaseDegRef.current -= 1e6; // keep bounded
+      hoverMixRef.current += (1 - hoverMixRef.current) * easeK;
+    } else {
+      const coolRate = A_coolTime > 0 ? dt / Math.max(1e-3, A_coolTime) : 1.0;
+      hoverMixRef.current = Math.max(0, hoverMixRef.current - coolRate);
     }
-    if (dirty) attr.needsUpdate = true;
+
+    // If no color mix and no burst left, snap to base & zero glow and bail early
+    if (hoverMixRef.current <= 1e-4 && burstGlowRef.current <= 1e-4) {
+      hoverMixRef.current = 0;
+      sdr.uniforms.uA_ColorA.value.copy(baseARef.current);
+      sdr.uniforms.uA_ColorB.value.copy(baseBRef.current);
+      sdr.uniforms.uA_GlowExtra.value = 0.0;
+      return;
+    }
+
+    // ---- Soft range mapping (sine ping-pong between start & end) ----
+    const start = A_hueStartDeg;
+    const end = A_hueEndDeg;
+    const minD = Math.min(start, end);
+    const maxD = Math.max(start, end);
+    const mid = (minD + maxD) * 0.5;
+    const amp = (maxD - minD) * 0.5;
+    const phase = (phaseDegRef.current * Math.PI) / 180.0;
+
+    const offsetDeg = mid + amp * Math.sin(phase);
+
+    // ---- Compute hue-shifted endpoints and blend by hoverMix ----
+    shiftHueTHREE(shiftedA, baseARef.current, offsetDeg);
+    shiftHueTHREE(shiftedB, baseBRef.current, offsetDeg);
+
+    workA.copy(baseARef.current).lerp(shiftedA, hoverMixRef.current);
+    workB.copy(baseBRef.current).lerp(shiftedB, hoverMixRef.current);
+
+    sdr.uniforms.uA_ColorA.value.copy(workA);
+    sdr.uniforms.uA_ColorB.value.copy(workB);
+
+    // ---- Apply burst glow (independent of hoverMix) ----
+    sdr.uniforms.uA_GlowExtra.value = burstGlowRef.current;
   });
 
   if (!geometry) return null;
