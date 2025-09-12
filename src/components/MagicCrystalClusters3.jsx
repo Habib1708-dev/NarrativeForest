@@ -28,6 +28,7 @@ const BAKED = [
 /**
  * Glass material with vertical gradient + fresnel.
  * Adds uC_GlowExtra (one-shot burst) and live color uniforms uC_ColorA/B.
+ * NEW: "Artificial reflection" via Fresnel-mixed envMap + white rim (Option A).
  */
 function useCrystalMaterialC({
   ior,
@@ -85,8 +86,14 @@ function useCrystalMaterialC({
       shader.uniforms.uC_BottomFresnelPower = { value: bottomFresnelPower };
       shader.uniforms.uC_EmissiveIntensity = { value: emissiveIntensity };
 
-      // NEW: one-shot extra glow burst (CPU-decayed)
+      // One-shot extra glow burst (CPU-decayed)
       shader.uniforms.uC_GlowExtra = { value: 0.0 };
+
+      // NEW: Option A uniforms (Fresnel env reflection + rim light)
+      shader.uniforms.uC_ReflectBoost = { value: 1.2 }; // mix strength
+      shader.uniforms.uC_ReflectPower = { value: 2.0 }; // fresnel exponent
+      shader.uniforms.uC_RimBoost = { value: 0.25 }; // white rim add
+      shader.uniforms.uC_RimPower = { value: 2.5 }; // rim sharpness
 
       // Per-vertex normalized height vH (instance-aware, world-Y)
       shader.vertexShader = shader.vertexShader.replace(
@@ -136,7 +143,14 @@ function useCrystalMaterialC({
         uniform float uC_BottomFresnelBoost;
         uniform float uC_BottomFresnelPower;
         uniform float uC_EmissiveIntensity;
-        uniform float uC_GlowExtra; // NEW
+        uniform float uC_GlowExtra;
+
+        // NEW: Option A uniforms
+        uniform float uC_ReflectBoost;
+        uniform float uC_ReflectPower;
+        uniform float uC_RimBoost;
+        uniform float uC_RimPower;
+
         varying float vH;
 
         vec3 boostSaturation(vec3 c, float amount) {
@@ -168,8 +182,9 @@ function useCrystalMaterialC({
         gl_FragColor.rgb *= grad;
 
         // fresnel, stronger near bottom
+        vec3 N = normalize(normal);
         vec3 V = normalize(-vViewPosition);
-        float fres = pow(1.0 - abs(dot(normalize(normal), V)), 1.3);
+        float fres = pow(1.0 - abs(dot(N, V)), 1.3);
         float fresBoost = 1.0 + uC_BottomFresnelBoost * pow(bottom, uC_BottomFresnelPower);
         gl_FragColor.rgb += grad * fres * fresBoost;
 
@@ -177,8 +192,24 @@ function useCrystalMaterialC({
         float eBoost = 1.0 + uC_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uC_EmissiveIntensity * eBoost;
 
-        // NEW: one-shot burst glow (CPU-decayed)
+        // one-shot burst glow (CPU-decayed)
         gl_FragColor.rgb += grad * uC_GlowExtra;
+
+        // === NEW: Artificial reflection & rim (Option A) ===
+        float fresRef = pow(1.0 - abs(dot(N, V)), max(0.0001, uC_ReflectPower));
+
+        #ifdef USE_ENVMAP
+          vec3 R = reflect(-V, N);
+          vec3 envBoost = vec3(0.0);
+          #ifdef ENVMAP_TYPE_CUBE_UV
+            // envMapIntensity is declared by the standard envmap chunk
+            envBoost = envMapIntensity * textureCubeUV(envMap, R, 0.0).rgb;
+          #endif
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, envBoost, clamp(uC_ReflectBoost * fresRef, 0.0, 1.0));
+        #endif
+
+        float rim = pow(1.0 - abs(dot(N, V)), max(0.0001, uC_RimPower));
+        gl_FragColor.rgb += rim * uC_RimBoost;
 
         ${hook}
         `
@@ -187,7 +218,8 @@ function useCrystalMaterialC({
       m.userData.shader = shader;
     };
 
-    m.customProgramCacheKey = () => "MagicCrystal_C_colorHover_burstGlow_v1";
+    m.customProgramCacheKey = () =>
+      "MagicCrystal_C_colorHover_burstGlow_shine_v1";
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -308,7 +340,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     C_emissiveIntensity: { value: 0.3, min: 0, max: 8, step: 0.01 },
   });
 
-  // ——— Color Hover (same controls & defaults as the other components) ———
+  // ——— Color Hover (same family as your other components) ———
   const {
     C_hoverEnabled,
     C_hoverOuterMult, // 2.8
@@ -376,6 +408,39 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
       max: 20,
       step: 0.05,
       label: "Glow Fade (s)",
+    },
+  });
+
+  // ——— NEW: Shine (Option A) controls ———
+  const {
+    C_reflectBoost,
+    C_reflectPower,
+    C_rimBoost,
+    C_rimPower,
+    C_envIntensity,
+  } = useControls("Crystal C / Shine", {
+    C_reflectBoost: {
+      value: 1.2,
+      min: 0,
+      max: 3,
+      step: 0.01,
+      label: "Reflect Boost",
+    },
+    C_reflectPower: {
+      value: 2.0,
+      min: 1,
+      max: 6,
+      step: 0.1,
+      label: "Reflect Power",
+    },
+    C_rimBoost: { value: 0.25, min: 0, max: 3, step: 0.01, label: "Rim Boost" },
+    C_rimPower: { value: 2.5, min: 1, max: 6, step: 0.1, label: "Rim Power" },
+    C_envIntensity: {
+      value: 2.0,
+      min: 0,
+      max: 8,
+      step: 0.1,
+      label: "EnvMap Intensity",
     },
   });
 
@@ -551,7 +616,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     const sdr = material?.userData?.shader;
     if (!mesh || !geometry || !sdr) return;
 
-    // Global hover test in screen-space (same logic as other components)
+    // Global hover test in screen-space
     camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
 
     let anyHovered = false;
@@ -631,6 +696,19 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     sdr.uniforms.uC_ColorB.value.copy(workB);
     sdr.uniforms.uC_GlowExtra.value = burstGlowRef.current;
   });
+
+  // ——— Live shine/env intensity updates ———
+  useEffect(() => {
+    if (!material) return;
+    material.envMapIntensity = C_envIntensity;
+    const sdr = material.userData.shader;
+    if (sdr) {
+      sdr.uniforms.uC_ReflectBoost.value = C_reflectBoost;
+      sdr.uniforms.uC_ReflectPower.value = C_reflectPower;
+      sdr.uniforms.uC_RimBoost.value = C_rimBoost;
+      sdr.uniforms.uC_RimPower.value = C_rimPower;
+    }
+  }, [material, C_reflectBoost, C_reflectPower, C_rimBoost, C_rimPower, C_envIntensity]);
 
   if (!geometry) return null;
 
