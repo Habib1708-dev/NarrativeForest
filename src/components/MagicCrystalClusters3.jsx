@@ -21,6 +21,7 @@ const BAKED = [
   { px: -0.97, py: -4.28, pz: -2.8, ry: 180.0, s: 0.14 },
 ];
 
+// ⬇️ Accept shine parameters so we can seed uniforms at first compile
 function useCrystalMaterialC({
   ior,
   thickness,
@@ -35,6 +36,10 @@ function useCrystalMaterialC({
   bottomEmissiveBoost,
   bottomFresnelBoost,
   bottomFresnelPower,
+  reflectBoost, // NEW
+  reflectPower, // NEW
+  rimBoost, // NEW
+  rimPower, // NEW
 }) {
   const mat = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
@@ -75,10 +80,11 @@ function useCrystalMaterialC({
       shader.uniforms.uC_BottomFresnelPower = { value: bottomFresnelPower };
       shader.uniforms.uC_EmissiveIntensity = { value: emissiveIntensity };
 
-      shader.uniforms.uC_ReflectBoost = { value: 1.2 };
-      shader.uniforms.uC_ReflectPower = { value: 2.0 };
-      shader.uniforms.uC_RimBoost = { value: 0.25 };
-      shader.uniforms.uC_RimPower = { value: 2.5 };
+      // ✅ Seed with the CURRENT control values on first compile
+      shader.uniforms.uC_ReflectBoost = { value: reflectBoost };
+      shader.uniforms.uC_ReflectPower = { value: reflectPower };
+      shader.uniforms.uC_RimBoost = { value: rimBoost };
+      shader.uniforms.uC_RimPower = { value: rimPower };
 
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
@@ -193,8 +199,10 @@ function useCrystalMaterialC({
     m.customProgramCacheKey = () =>
       "MagicCrystal_C_colorHover_triplet_noGlow_v2";
     return m;
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // one material instance; we live-update uniforms via effects
 
+  // Live-update for all non-shine gradient/glass params
   useEffect(() => {
     if (!mat) return;
     mat.ior = ior;
@@ -375,8 +383,8 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
       step: 0.1,
       label: "Reflect Power",
     },
-    C_rimBoost: { value: 1.4, min: 0, max: 3, step: 0.01, label: "Rim Boost" },
-    C_rimPower: { value: 1.1, min: 1, max: 6, step: 0.1, label: "Rim Power" },
+    C_rimBoost: { value: 2.25, min: 0, max: 3, step: 0.01, label: "Rim Boost" },
+    C_rimPower: { value: 1.2, min: 1, max: 6, step: 0.1, label: "Rim Power" },
     C_envIntensity: {
       value: 2.0,
       min: 0,
@@ -455,7 +463,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     return { geometry: g, baseRadius: g.boundingSphere?.radius || 1 };
   }, [scene]);
 
-  // Material
+  // Material (now passes shine defaults for first-compile seeding)
   const material = useCrystalMaterialC({
     ior: C_ior,
     thickness: C_thickness,
@@ -470,6 +478,10 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     bottomEmissiveBoost: C_bottomEmissiveBoost,
     bottomFresnelBoost: C_bottomFresnelBoost,
     bottomFresnelPower: C_bottomFresnelPower,
+    reflectBoost: C_reflectBoost, // NEW
+    reflectPower: C_reflectPower, // NEW
+    rimBoost: C_rimBoost, // NEW
+    rimPower: C_rimPower, // NEW
   });
 
   // Y bounds
@@ -514,7 +526,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     mesh.instanceMatrix.needsUpdate = true;
   }, [ctl]);
 
-  // Hover triplet logic
+  // Hover triplet logic (unchanged)
   const baseARef = useRef(new THREE.Color(C_colorA));
   const baseBRef = useRef(new THREE.Color(C_colorB));
   useEffect(() => {
@@ -667,7 +679,7 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     sdr.uniforms.uC_ColorB.value.copy(outB);
   });
 
-  // Shine live updates
+  // Shine live updates (still needed when sliders change)
   useEffect(() => {
     if (!material) return;
     material.envMapIntensity = C_envIntensity;

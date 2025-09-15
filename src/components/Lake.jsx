@@ -28,14 +28,13 @@ uniform float uBioIntensity;
 uniform float uBioAltFreq;
 uniform float uBioAltPhase;
 
-uniform float uTrailGlow; // NEW: independent glow multiplier
+uniform float uTrailGlow;
 
 varying vec3 vNormalW;
 varying vec3 vWorldPosition;
 varying vec2 vUv0;
 
 void main(){
-  // Soft gather for watercolor look
   vec2 texel = uTrailTexel;
   float d0 = texture2D(uTrailMap, vUv0).r * 0.36;
   float d1 = texture2D(uTrailMap, vUv0 + vec2( texel.x, 0.0)).r * 0.16;
@@ -44,13 +43,11 @@ void main(){
   float d4 = texture2D(uTrailMap, vUv0 + vec2(0.0, -texel.y)).r * 0.16;
   float dye = clamp(d0 + d1 + d2 + d3 + d4, 0.0, 1.0);
 
-  // Color alternation over age
   float stamp = texture2D(uStampMap, vUv0).r;
   float ageSec = max(uTime - stamp, 0.0);
   float w = 0.5 + 0.5 * sin(ageSec * uBioAltFreq + uBioAltPhase);
   vec3 dyeColor = mix(uBioColorA, uBioColorB, w);
 
-  // Emission only; alpha just a soft mask (not used by additive blend)
   vec3 emission = dyeColor * (dye * uBioIntensity * uTrailGlow);
   gl_FragColor = vec4(emission, dye);
 }
@@ -167,6 +164,8 @@ const Lake = forwardRef(function Lake(
     fadeWindow,
     trailGlow,
     enableAdditiveTrail,
+    // NEW: master toggle to disable trail effect entirely
+    enableTrailEffect,
   } = useControls("Lake", {
     Bioluminescence: folder({
       bioColorA: { value: "#daa3ffff" },
@@ -182,6 +181,7 @@ const Lake = forwardRef(function Lake(
         label: "Trail Glow (additive)",
       },
       enableAdditiveTrail: { value: true, label: "Additive Trail Pass" },
+      enableTrailEffect: { value: true, label: "Trail Effect" }, // <— added
     }),
     FluidSim: folder({
       decay: { value: 0.975, min: 0.9, max: 0.995, step: 0.001 },
@@ -208,8 +208,7 @@ const Lake = forwardRef(function Lake(
         splatStrength,
       }),
     [gl]
-  ); // once
-
+  );
   useEffect(() => () => trail?.dispose?.(), [trail]);
 
   useEffect(() => {
@@ -285,8 +284,8 @@ const Lake = forwardRef(function Lake(
 
   const addMaterial = useMemo(() => {
     const mat = new THREE.ShaderMaterial({
-      vertexShader: lakeVertexShader, // reuse same vertex (displacement)
-      fragmentShader: emissionFragmentShader, // emission only
+      vertexShader: lakeVertexShader,
+      fragmentShader: emissionFragmentShader,
       uniforms: {
         uTime: { value: 0 },
         uTrailMap: { value: null },
@@ -303,10 +302,22 @@ const Lake = forwardRef(function Lake(
       depthTest: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending, // key line
+      blending: THREE.AdditiveBlending,
     });
     return mat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Static empty texture to zero-out dye when trails are disabled
+  const emptyTexture = useMemo(() => {
+    const t = new THREE.DataTexture(
+      new Uint8Array([0, 0, 0, 255]),
+      1,
+      1,
+      THREE.RGBAFormat
+    );
+    t.needsUpdate = true;
+    return t;
   }, []);
 
   // Keep texel in sync with sim size
@@ -342,7 +353,9 @@ const Lake = forwardRef(function Lake(
 
     baseMaterial.uniforms.uBioColorA.value.setStyle(bioColorA);
     baseMaterial.uniforms.uBioColorB.value.setStyle(bioColorB);
-    baseMaterial.uniforms.uBioIntensity.value = bioIntensity;
+    baseMaterial.uniforms.uBioIntensity.value = enableTrailEffect
+      ? bioIntensity
+      : 0.0; // <- hard disable emission
     baseMaterial.uniforms.uBioAltFreq.value = bioAltFreq;
     baseMaterial.uniforms.uBioAltPhase.value = bioAltPhase;
     baseMaterial.uniforms.uLakeBaseY.value = lakePosY;
@@ -350,13 +363,15 @@ const Lake = forwardRef(function Lake(
     // Additive overlay
     addMaterial.uniforms.uBioColorA.value.setStyle(bioColorA);
     addMaterial.uniforms.uBioColorB.value.setStyle(bioColorB);
-    addMaterial.uniforms.uBioIntensity.value = bioIntensity;
+    addMaterial.uniforms.uBioIntensity.value = enableTrailEffect
+      ? bioIntensity
+      : 0.0;
     addMaterial.uniforms.uBioAltFreq.value = bioAltFreq;
     addMaterial.uniforms.uBioAltPhase.value = bioAltPhase;
     addMaterial.uniforms.uTrailGlow.value = trailGlow;
 
-    // toggle visibility
-    addMaterial.visible = !!enableAdditiveTrail;
+    // Toggle overlay only if both toggles are on
+    addMaterial.visible = !!enableTrailEffect && !!enableAdditiveTrail;
   }, [
     baseMaterial,
     addMaterial,
@@ -384,6 +399,7 @@ const Lake = forwardRef(function Lake(
     lakePosY,
     trailGlow,
     enableAdditiveTrail,
+    enableTrailEffect,
   ]);
 
   // === Geometry ===
@@ -397,6 +413,7 @@ const Lake = forwardRef(function Lake(
   const lastInteractT = useRef(performance.now());
   const handlePointerMove = useCallback(
     (e) => {
+      if (!enableTrailEffect) return; // <- disable splats
       const now = performance.now();
       if (now - lastSplatT.current < 12) return;
       lastSplatT.current = now;
@@ -404,29 +421,40 @@ const Lake = forwardRef(function Lake(
       if (!e.uv) return;
       trail.splat(e.uv, splatStrength, splatRadius);
     },
-    [trail, splatStrength, splatRadius]
+    [enableTrailEffect, trail, splatStrength, splatRadius]
   );
 
   // === Tick ===
   useFrame((_, dt) => {
-    const now = performance.now();
-    const idleMs = now - lastInteractT.current;
-    const maxDt = idleMs < 1000 ? 1 / 30 : 1 / 20;
-    const step = Math.min(dt, maxDt);
-
-    trail.update(step);
-
-    const ink = trail.texture;
-    const stamp = trail.stampTexture;
-
-    // feed both passes
-    baseMaterial.uniforms.uTrailMap.value = ink;
-    baseMaterial.uniforms.uStampMap.value = stamp;
+    // Waves time always advances
     baseMaterial.uniforms.uTime.value += dt;
 
-    addMaterial.uniforms.uTrailMap.value = ink;
-    addMaterial.uniforms.uStampMap.value = stamp;
-    addMaterial.uniforms.uTime.value += dt;
+    if (enableTrailEffect) {
+      const now = performance.now();
+      const idleMs = now - lastInteractT.current;
+      const maxDt = idleMs < 1000 ? 1 / 30 : 1 / 20;
+      const step = Math.min(dt, maxDt);
+
+      trail.update(step);
+
+      const ink = trail.texture;
+      const stamp = trail.stampTexture;
+
+      // feed both passes
+      baseMaterial.uniforms.uTrailMap.value = ink;
+      baseMaterial.uniforms.uStampMap.value = stamp;
+
+      addMaterial.uniforms.uTrailMap.value = ink;
+      addMaterial.uniforms.uStampMap.value = stamp;
+      addMaterial.uniforms.uTime.value += dt;
+    } else {
+      // Ensure dye is zeroed when disabled
+      baseMaterial.uniforms.uTrailMap.value = emptyTexture;
+      baseMaterial.uniforms.uStampMap.value = emptyTexture;
+      addMaterial.uniforms.uTrailMap.value = emptyTexture;
+      addMaterial.uniforms.uStampMap.value = emptyTexture;
+      // (addMaterial.visible is already handled in live updates)
+    }
   });
 
   // === Ref API: footprint ===
