@@ -145,6 +145,104 @@ export default forwardRef(function Cabin(_, ref) {
     [bulbX, bulbY, bulbZ]
   );
 
+  // -------------------- ADDED: Rocks instanced meshes (baked transforms) --------------------
+  // Switched to the material-less rock model as requested
+  const ROCK_GLB = "/models/cabin/MateriallessRock.glb";
+  const { scene: rockScene } = useGLTF(ROCK_GLB);
+
+  const rockGeoMat = useMemo(() => {
+    let geo = null;
+
+    if (rockScene) {
+      rockScene.traverse((o) => {
+        if (!geo && o.isMesh && o.geometry) {
+          geo = o.geometry;
+        }
+      });
+    }
+
+    // Fallback geometry if GLB failed to load/has no meshes
+    if (!geo) {
+      geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    }
+
+    // Material-less → provide a solid MeshStandardMaterial with #444444 @ intensity 1.0
+    const mat = new THREE.MeshStandardMaterial({
+      color: "#444444",
+      metalness: 0.0,
+      roughness: 0.95,
+    });
+
+    return { geometry: geo, material: mat };
+  }, [rockScene]);
+
+  const instRef = useRef(null);
+  const COUNT = 5;
+  const d2r = (deg) => (deg * Math.PI) / 180;
+
+  const rockTransforms = useMemo(
+    () => [
+      // First instance
+      {
+        position: [-1.944, -4.832, -1.841],
+        scale: 0.168,
+        rotDeg: [0, -100.9, -67.3],
+      },
+      // Second instance
+      {
+        position: [-1.505, -4.862, -1.664],
+        scale: 0.2,
+        rotDeg: [3.4, 53.8, -6.7],
+      },
+      // Third instance
+      {
+        position: [-1.411, -5.023, -1.72],
+        scale: 0.278,
+        rotDeg: [40.3, -10.1, 0],
+      },
+      // Fourth instance
+      {
+        position: [-1.262, -4.841, -1.623],
+        scale: 0.294,
+        rotDeg: [0, 0, -97.6],
+      },
+      // Fifth instance
+      { position: [-1.0, -4.855, -1.804], scale: 0.241, rotDeg: [0, 0, 0] },
+    ],
+    []
+  );
+
+  useEffect(() => {
+    const inst = instRef.current;
+    const { geometry, material } = rockGeoMat || {};
+    if (!inst || !geometry || !material) return;
+
+    const m4 = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+
+    for (let i = 0; i < COUNT; i++) {
+      const t = rockTransforms[i];
+      const [rx, ry, rz] = t.rotDeg;
+      p.fromArray(t.position);
+      q.setFromEuler(new THREE.Euler(d2r(rx), d2r(ry), d2r(rz)));
+      s.setScalar(t.scale);
+      m4.compose(p, q, s);
+      inst.setMatrixAt(i, m4);
+    }
+    inst.count = COUNT;
+    inst.instanceMatrix.needsUpdate = true;
+  }, [rockGeoMat, rockTransforms]);
+
+  useEffect(() => {
+    if (!instRef.current) return;
+    instRef.current.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    instRef.current.frustumCulled = false;
+    instRef.current.matrixAutoUpdate = false;
+  }, []);
+  // ------------------------------------------------------------------------------------------
+
   return (
     <group ref={rootRef}>
       {/* Cabin model */}
@@ -156,6 +254,16 @@ export default forwardRef(function Cabin(_, ref) {
       >
         <primitive object={clonedScene} />
       </group>
+
+      {/* ADDED: Rock instances (absolute/world space) */}
+      {rockGeoMat?.geometry && rockGeoMat?.material && (
+        <instancedMesh
+          ref={instRef}
+          args={[rockGeoMat.geometry, rockGeoMat.material, COUNT]}
+          castShadow={false}
+          receiveShadow
+        />
+      )}
 
       {/* Miniature light bulb near the Man (absolute/world position) */}
       {bulbEnabled && (

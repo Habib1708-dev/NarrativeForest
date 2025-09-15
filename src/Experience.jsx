@@ -33,6 +33,7 @@ import MagicCrystalClusters from "./components/MagicCrystalClusters";
 import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
 import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
 import MagicCrystalRods from "./components/MagicCrystalRods";
+import MossRockInstances from "./components/MossRockInstances";
 
 export default function Experience() {
   const { gl } = useThree();
