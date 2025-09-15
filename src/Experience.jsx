@@ -34,6 +34,7 @@ import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
 import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
 import MagicCrystalRods from "./components/MagicCrystalRods";
 import MossRockInstances from "./components/MossRockInstances";
+import Fireflies from "./components/Fireflies";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -287,7 +288,7 @@ export default function Experience() {
         <MagicCrystalClusters />
         <MagicCrystalClusters2 />
         <MagicCrystalClusters3 />
-        <MagicCrystalRods />
+        <Fireflies />
       </Suspense>
 
       <DistanceFade
