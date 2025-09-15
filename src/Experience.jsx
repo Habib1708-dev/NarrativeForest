@@ -32,6 +32,7 @@ import TestTree from "./components/TestTree";
 import MagicCrystalClusters from "./components/MagicCrystalClusters";
 import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
 import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
+import MagicCrystalRods from "./components/MagicCrystalRods";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -285,6 +286,7 @@ export default function Experience() {
         <MagicCrystalClusters />
         <MagicCrystalClusters2 />
         <MagicCrystalClusters3 />
+        <MagicCrystalRods />
       </Suspense>
 
       <DistanceFade

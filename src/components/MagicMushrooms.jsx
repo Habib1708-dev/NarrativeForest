@@ -10,7 +10,7 @@ const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
-  // Instance placements (7th mushroom Y adjusted to -4.82)
+  // ----- Instance placements (7th mushroom Y adjusted to -4.82) -----
   const INSTANCES = useMemo(
     () => [
       {
@@ -43,7 +43,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         rotation: [0, 1.71, -0.287],
         scale: 0.2,
       },
-      // 7th: keep x,z; set y = -4.82
       {
         position: [-1.31, -4.82, -1.71],
         rotation: [0, 0.0, 0.117],
@@ -53,7 +52,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     []
   );
 
-  // GLB → list of source meshes (world-baked geometry + bloom-friendly cloned materials)
+  // ----- Extract meshes from GLB (bake world transforms; clone materials) -----
   const sources = useMemo(() => {
     if (!scene) return [];
     const list = [];
@@ -69,11 +68,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       const srcMats = Array.isArray(n.material) ? n.material : [n.material];
       const clonedMats = srcMats.map((m) => {
         const c = m.clone();
-        // We discard pixels in shader; keep depth writes for solid look
         c.transparent = false;
         c.depthWrite = true;
-        // Allow strong additive glow to feed bloom
-        c.toneMapped = false;
+        c.toneMapped = false; // keep additive glow outside tonemapping
         c.needsUpdate = true;
         return c;
       });
@@ -91,10 +88,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const meshRefs = useRef([]);
   meshRefs.current = [];
 
-  // ---- Dissolve controls (start hidden) ----
+  // ----- Dissolve controls -----
   const progressRef = useRef(-0.2);
-
-  const params = useControls({
+  const dissolveCtl = useControls({
     Mushrooms: folder(
       {
         Dissolve: folder({
@@ -134,7 +130,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             step: 0.1,
             label: "Glow Strength",
           },
-          glowColor: { value: "#ffb97d", label: "Glow Color" }, // single color for all
           seed: { value: 321, min: 0, max: 1000, step: 1, label: "Noise Seed" },
           Replay: button(() => {
             progressRef.current = -0.2;
@@ -146,6 +141,39 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     ),
   });
 
+  // ----- Global gradient controls (shared by ALL instances) -----
+  const gradCtl = useControls({
+    Gradient: folder(
+      {
+        bottomColor: { value: "#da63ff", label: "Bottom" }, // requested defaults
+        topColor: { value: "#ffa22b", label: "Top" }, // requested defaults
+        height: {
+          value: 0.51,
+          min: 0,
+          max: 1,
+          step: 0.001,
+          label: "Height (midpoint)",
+        }, // requested 0.12
+        soft: {
+          value: 0.2,
+          min: 0.001,
+          max: 0.5,
+          step: 0.001,
+          label: "Soft (half-width)",
+        }, // requested 0.2
+        intensity: {
+          value: 1.0,
+          min: 0,
+          max: 1,
+          step: 0.01,
+          label: "Intensity",
+        },
+      },
+      { collapsed: false }
+    ),
+  });
+
+  // ----- Helper to update a uniform on all patched materials -----
   const updateUniformAll = (name, val) => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -157,7 +185,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     });
   };
 
-  // ---- Shader patch: per-instance min/max; single uniform glow color ----
+  // ----- Shader patch: dissolve + two-color height gradient (global mid/soft) -----
   useEffect(() => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -170,7 +198,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         m.onBeforeCompile = (shader) => {
           prev?.(shader);
 
-          // Attributes/varyings for per-instance height normalization
+          // Attributes + varyings for per-instance Y extents
           shader.vertexShader =
             `
             attribute float iMinY;
@@ -179,7 +207,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             varying float vMaxY;
             ` + shader.vertexShader;
 
-          // World position varying
+          // Pass world position (instancing-safe)
           if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
             shader.vertexShader = shader.vertexShader.replace(
               "#include <common>",
@@ -193,7 +221,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             );
           }
 
-          // world position (instancing-safe) + pass per-instance min/max
           shader.vertexShader = shader.vertexShader.replace(
             "#include <worldpos_vertex>",
             `
@@ -204,25 +231,35 @@ export default forwardRef(function MagicMushrooms(props, ref) {
               mat4 rtModel = modelMatrix;
             #endif
             worldPos = (rtModel * vec4(transformed, 1.0)).xyz;
+
             vMinY = iMinY;
             vMaxY = iMaxY;
             `
           );
 
-          // Uniforms (single glow color)
+          // Uniforms
           shader.uniforms.uProgress = { value: progressRef.current };
-          shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
-          shader.uniforms.uNoiseScale = { value: params.noiseScale };
-          shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
-          shader.uniforms.uGlowStrength = { value: params.glowStrength };
-          shader.uniforms.uGlowColor = {
-            value: new THREE.Color(params.glowColor),
+          shader.uniforms.uEdgeWidth = { value: dissolveCtl.edgeWidth };
+          shader.uniforms.uNoiseScale = { value: dissolveCtl.noiseScale };
+          shader.uniforms.uNoiseAmp = { value: dissolveCtl.noiseAmp };
+          shader.uniforms.uGlowStrength = { value: dissolveCtl.glowStrength };
+          shader.uniforms.uSeed = { value: dissolveCtl.seed };
+
+          // Global gradient
+          shader.uniforms.uBottomColor = {
+            value: new THREE.Color(gradCtl.bottomColor),
           };
-          shader.uniforms.uSeed = { value: params.seed };
+          shader.uniforms.uTopColor = {
+            value: new THREE.Color(gradCtl.topColor),
+          };
+          shader.uniforms.uMid = { value: gradCtl.height }; // 0..1 midpoint
+          shader.uniforms.uSoft = { value: gradCtl.soft }; // 0..0.5 half-width
+          shader.uniforms.uGradIntensity = { value: gradCtl.intensity };
 
           const fragPrelude = /* glsl */ `
             uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uSeed, uGlowStrength;
-            uniform vec3  uGlowColor;
+            uniform vec3  uBottomColor, uTopColor;
+            uniform float uMid, uSoft, uGradIntensity;
             varying float vMinY, vMaxY;
 
             float rt_hash(vec3 p){
@@ -250,52 +287,66 @@ export default forwardRef(function MagicMushrooms(props, ref) {
               float nxy1 = mix(nx01, nx11, u.y);
               return mix(nxy0, nxy1, u.z);
             }
+
+            float height01(vec3 wp, float minY, float maxY){
+              return clamp((wp.y - minY) / max(1e-5, (maxY - minY)), 0.0, 1.0);
+            }
+
+            // Smooth split around global midpoint with global softness (half-width)
+            float splitBlend(float y01, float mid, float soft){
+              float a = clamp(mid - soft, 0.0, 1.0);
+              float b = clamp(mid + soft, 0.0, 1.0);
+              if (abs(b - a) < 1e-5) return step(mid, y01);
+              return smoothstep(a, b, y01);
+            }
           `;
           shader.fragmentShader = shader.fragmentShader.replace(
             "#include <common>",
             `#include <common>\n${fragPrelude}`
           );
 
-          // Dissolve gate + edge
           shader.fragmentShader = shader.fragmentShader.replace(
             "void main() {",
             `void main() {
-              float y01 = clamp((worldPos.y - vMinY) / max(1e-5, (vMaxY - vMinY)), 0.0, 1.0);
+              float y01 = height01(worldPos, vMinY, vMaxY);
+
+              // Dissolve
               float n = rt_vnoise(worldPos * uNoiseScale + vec3(uSeed));
               float cutoff = uProgress + (n - 0.5) * uNoiseAmp;
               if (y01 > cutoff) { discard; }
               float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
+
+              // Height gradient color (shared mid/soft)
+              float t = splitBlend(y01, uMid, uSoft);
+              vec3 gradColor = mix(uBottomColor, uTopColor, t);
             `
           );
 
-          // Add single-color glow before tonemapping (with fallback)
+          const applyAfterBase = `
+              gl_FragColor.rgb = mix(gl_FragColor.rgb, gradColor, clamp(uGradIntensity, 0.0, 1.0));
+              gl_FragColor.rgb += edge * gradColor * uGlowStrength;
+          `;
+
           if (
             shader.fragmentShader.includes("#include <tonemapping_fragment>")
           ) {
             shader.fragmentShader = shader.fragmentShader.replace(
               "#include <tonemapping_fragment>",
-              `
-              gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
-              #include <tonemapping_fragment>
-              `
+              `${applyAfterBase}
+               #include <tonemapping_fragment>`
             );
           } else if (
             shader.fragmentShader.includes("#include <colorspace_fragment>")
           ) {
             shader.fragmentShader = shader.fragmentShader.replace(
               "#include <colorspace_fragment>",
-              `
-              gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
-              #include <colorspace_fragment>
-              `
+              `${applyAfterBase}
+               #include <colorspace_fragment>`
             );
           } else {
             shader.fragmentShader = shader.fragmentShader.replace(
               /}\s*$/,
-              `
-              gl_FragColor.rgb += edge * uGlowColor * uGlowStrength;
-              }
-              `
+              `${applyAfterBase}\n}`
             );
           }
 
@@ -307,44 +358,61 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sources]);
 
-  // Live uniform updates
+  // ----- Live uniform updates -----
+  // Dissolve
   useEffect(
-    () => updateUniformAll("uEdgeWidth", params.edgeWidth),
-    [params.edgeWidth]
+    () => updateUniformAll("uEdgeWidth", dissolveCtl.edgeWidth),
+    [dissolveCtl.edgeWidth]
   );
   useEffect(
-    () => updateUniformAll("uNoiseScale", params.noiseScale),
-    [params.noiseScale]
+    () => updateUniformAll("uNoiseScale", dissolveCtl.noiseScale),
+    [dissolveCtl.noiseScale]
   );
   useEffect(
-    () => updateUniformAll("uNoiseAmp", params.noiseAmp),
-    [params.noiseAmp]
+    () => updateUniformAll("uNoiseAmp", dissolveCtl.noiseAmp),
+    [dissolveCtl.noiseAmp]
   );
   useEffect(
-    () => updateUniformAll("uGlowStrength", params.glowStrength),
-    [params.glowStrength]
+    () => updateUniformAll("uGlowStrength", dissolveCtl.glowStrength),
+    [dissolveCtl.glowStrength]
   );
   useEffect(
-    () => updateUniformAll("uGlowColor", new THREE.Color(params.glowColor)),
-    [params.glowColor]
+    () => updateUniformAll("uSeed", dissolveCtl.seed),
+    [dissolveCtl.seed]
   );
-  useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
 
-  // Animate dissolve progress (in/out)
+  // Gradient (global)
+  useEffect(
+    () =>
+      updateUniformAll("uBottomColor", new THREE.Color(gradCtl.bottomColor)),
+    [gradCtl.bottomColor]
+  );
+  useEffect(
+    () => updateUniformAll("uTopColor", new THREE.Color(gradCtl.topColor)),
+    [gradCtl.topColor]
+  );
+  useEffect(() => updateUniformAll("uMid", gradCtl.height), [gradCtl.height]);
+  useEffect(() => updateUniformAll("uSoft", gradCtl.soft), [gradCtl.soft]);
+  useEffect(
+    () => updateUniformAll("uGradIntensity", gradCtl.intensity),
+    [gradCtl.intensity]
+  );
+
+  // ----- Dissolve animation -----
   useFrame((_, dt) => {
-    const target = params.build ? 1.1 : -0.2;
+    const target = dissolveCtl.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
-      const step = params.speed * dt * dir;
+      const step = dissolveCtl.speed * dt * dir;
       const next = progressRef.current + step;
       progressRef.current = (dir > 0 ? Math.min : Math.max)(next, target);
       updateUniformAll("uProgress", progressRef.current);
     }
   });
 
-  // Assign transforms + per-instance Y-range attributes (no per-instance colors)
+  // ----- Assign transforms and per-instance Y-range attributes -----
   const assignInstances = () => {
     if (!sources.length) return;
 
@@ -352,17 +420,16 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       if (!imesh) return;
 
       const { min: minY0, max: maxY0 } = sources[sIdx].bboxY;
-
-      const minYArr = new Float32Array(INSTANCES.length);
-      const maxYArr = new Float32Array(INSTANCES.length);
+      const N = INSTANCES.length;
+      const minYArr = new Float32Array(N);
+      const maxYArr = new Float32Array(N);
 
       const dummy = new THREE.Object3D();
 
-      for (let i = 0; i < INSTANCES.length; i++) {
+      for (let i = 0; i < N; i++) {
         const cfg = INSTANCES[i];
         const pos = cfg.position;
 
-        // Transform (positions from INSTANCES; rotations/scales unchanged)
         dummy.position.set(pos[0], pos[1], pos[2]);
         dummy.rotation.set(
           cfg.rotation[0] || 0,
@@ -377,7 +444,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         dummy.updateMatrix();
         imesh.setMatrixAt(i, dummy.matrix);
 
-        // Per-instance Y range (rotation around Y only → Y scales by sy)
+        // Per-instance Y range (account for scale.y only; rotations are Y-only in placements)
         minYArr[i] = pos[1] + sy * minY0;
         maxYArr[i] = pos[1] + sy * maxY0;
       }
@@ -390,8 +457,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         "iMaxY",
         new THREE.InstancedBufferAttribute(maxYArr, 1)
       );
-
       imesh.instanceMatrix.needsUpdate = true;
+      imesh.geometry.attributes.iMinY.needsUpdate = true;
+      imesh.geometry.attributes.iMaxY.needsUpdate = true;
     });
   };
 
