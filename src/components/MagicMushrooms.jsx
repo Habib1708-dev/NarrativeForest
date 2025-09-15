@@ -7,6 +7,247 @@ import { useControls, folder, button } from "leva";
 
 const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 
+// ---------------------------------------------------------------------
+// Particle system used by all mushroom instances
+// ---------------------------------------------------------------------
+function MushroomClickParticles({
+  INSTANCES,
+  getInstanceScale,
+  getInstancePosition,
+  // Tunables
+  maxPerBurst = 60,
+  maxBursts = 16,
+  riseSpeed = 1.2, // base upward velocity
+  lateralJitter = 0.4, // random lateral factor
+  gravity = 0.0, // downward accel if you want (0 by default)
+  lifeSeconds = [0.6, 1.1], // lifespan range per particle
+  boxRatio = { x: 0.6, y: 0.3, z: 0.6 }, // emitter box as fraction of instance scale
+  fadeHeight = 1.2, // altitude fade range
+  color = "#ffd2a0", // warm spores
+  sizePx = 10, // sprite size in px (screen-space)
+  refHook, // parent ref to call emitBurst(id)
+}) {
+  const totalParticles = maxPerBurst * maxBursts;
+
+  // Pool state
+  const positions = useRef(new Float32Array(totalParticles * 3));
+  const ages = useRef(new Float32Array(totalParticles));
+  const lifetimes = useRef(new Float32Array(totalParticles));
+  const alive = useRef(new Uint8Array(totalParticles));
+  const origins = useRef(new Float32Array(totalParticles * 3)); // emitter origin (for altitude fade)
+  const velocities = useRef(new Float32Array(totalParticles * 3)); // simple kinematics
+
+  // Free-list stack of indices
+  const freeList = useRef(Array.from({ length: totalParticles }, (_, i) => i));
+
+  const geometryRef = useRef(null);
+  const pointsRef = useRef(null);
+
+  // Utility
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const popIndex = () => freeList.current.pop();
+  const pushIndex = (i) => freeList.current.push(i);
+
+  // Build geometry & attributes once
+  const geom = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(positions.current, 3));
+    // Age & Lifetime are passed via uniforms (per-particle alpha computed CPU → packed in a separate attr if needed).
+    // We'll compute alpha in shader from (worldPos.y - origin.y) and lifetime-based fade via a per-particle age ratio we pass in an attribute.
+    // To keep it simple and fast, we won’t create a separate alpha attribute; we’ll compute lifeRatio in CPU and store in 'lifetimes' & 'ages' arrays,
+    // but shader only knows worldPos & origin; for lifetime fade we’ll pass a global multiplier, then let CPU pre-shrink size over time as needed.
+    // Instead, we will compute alpha in shader using height fade, and use lifetime as a uniform multiplier per-frame by storing an "opacity" per-particle in colors attribute.
+    // However, THREE's default Points shader expects 'color' if useVertexColors; we’ll instead write a tiny custom shader below and bind attributes we need.
+
+    // Add custom attributes for per-particle origin.y (for altitude fade) and life ratio (0..1)
+    // We'll store both origin and a lifeRatio per particle as separate attributes:
+    const lifeRatioArray = new Float32Array(totalParticles); // updated each frame: age/lifetime
+    const originYArray = new Float32Array(totalParticles); // origin Y for altitude fade ref
+    g.setAttribute("aLife", new THREE.BufferAttribute(lifeRatioArray, 1));
+    g.setAttribute("aOriginY", new THREE.BufferAttribute(originYArray, 1));
+    return g;
+  }, [totalParticles]);
+
+  // Shader material: simple round point sprite with alpha from height & life
+  const material = useMemo(() => {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uColor: { value: new THREE.Color(color) },
+        uSize: { value: sizePx }, // in pixels
+        uFadeHeight: { value: fadeHeight }, // world units
+        uViewport: { value: new THREE.Vector2(1, 1) }, // set in useFrame from renderer size
+      },
+      vertexShader: `
+        uniform float uSize;
+        uniform vec2  uViewport;
+        attribute float aLife;      // 0..1
+        attribute float aOriginY;   // origin y for altitude fade
+        varying float vLife;        // pass to frag
+        varying float vHeight;      // delta height from origin
+
+        void main() {
+          vLife = aLife;
+          vHeight = position.y - aOriginY;
+
+          // Standard projection
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+
+          // Size attenuation in screen space (similar to PointMaterial)
+          // Convert world size to pixels roughly: scale by perspective ( -mvPosition.z )
+          float size = uSize * (300.0 / -mvPosition.z); // tweak constant for taste
+          gl_PointSize = size;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3  uColor;
+        uniform float uFadeHeight;
+        varying float vLife;     // 0..1 life ratio
+        varying float vHeight;   // world-height from origin
+
+        void main() {
+          // Circular soft sprite
+          vec2 uv = gl_PointCoord.xy * 2.0 - 1.0;
+          float r2 = dot(uv, uv);
+          if (r2 > 1.0) discard;
+          float disk = smoothstep(1.0, 0.0, r2);
+
+          // Lifetime fade (1 at birth -> 0 at death)
+          float lifeFade = 1.0 - clamp(vLife, 0.0, 1.0);
+
+          // Height fade: from 0 height to uFadeHeight -> fade to zero
+          float h = clamp(vHeight / max(uFadeHeight, 1e-4), 0.0, 1.0);
+          float heightFade = 1.0 - h;
+
+          float alpha = disk * lifeFade * heightFade;
+          gl_FragColor = vec4(uColor, alpha);
+        }
+      `,
+    });
+    return mat;
+  }, [color, sizePx, fadeHeight]);
+
+  // Keep viewport uniform in sync (for perspective sizing if needed later)
+  useFrame(({ size }) => {
+    material.uniforms.uViewport.value.set(size.width, size.height);
+  });
+
+  // Update simulation
+  useFrame((_, dt) => {
+    if (!geometryRef.current) return;
+
+    const posAttr = geometryRef.current.getAttribute("position");
+    const lifeAttr = geometryRef.current.getAttribute("aLife");
+    const orgAttr = geometryRef.current.getAttribute("aOriginY");
+
+    let any = false;
+    const N = totalParticles;
+    for (let i = 0; i < N; i++) {
+      if (!alive.current[i]) continue;
+
+      ages.current[i] += dt;
+      const life = lifetimes.current[i];
+      if (ages.current[i] >= life) {
+        // Recycle
+        alive.current[i] = 0;
+        pushIndex(i);
+        continue;
+      }
+
+      const i3 = i * 3;
+
+      // dynamics
+      velocities.current[i3 + 1] += -gravity * dt;
+      positions.current[i3 + 0] += velocities.current[i3 + 0] * dt;
+      positions.current[i3 + 1] += velocities.current[i3 + 1] * dt;
+      positions.current[i3 + 2] += velocities.current[i3 + 2] * dt;
+
+      // write positions
+      posAttr.array[i3 + 0] = positions.current[i3 + 0];
+      posAttr.array[i3 + 1] = positions.current[i3 + 1];
+      posAttr.array[i3 + 2] = positions.current[i3 + 2];
+
+      // write life ratio and originY (for altitude fade)
+      lifeAttr.array[i] = ages.current[i] / life;
+      orgAttr.array[i] = origins.current[i3 + 1];
+
+      any = true;
+    }
+
+    if (any) {
+      posAttr.needsUpdate = true;
+      lifeAttr.needsUpdate = true;
+      orgAttr.needsUpdate = true;
+    }
+  });
+
+  // Expose "emitBurst" to parent
+  const emitBurst = (id, count = maxPerBurst) => {
+    const origin = getInstancePosition(id);
+    if (!origin) return;
+
+    const { sx, sy, sz } = getInstanceScale(id);
+    const halfX = Math.max(0.02, sx * boxRatio.x);
+    const halfY = Math.max(0.01, sy * boxRatio.y);
+    const halfZ = Math.max(0.02, sz * boxRatio.z);
+
+    for (let n = 0; n < count; n++) {
+      const idx = popIndex();
+      if (idx == null) break; // pool full
+
+      const i3 = idx * 3;
+
+      // Seed position within box
+      const px = origin.x + (Math.random() * 2 - 1) * halfX;
+      const py = origin.y + Math.random() * halfY; // slightly above cap
+      const pz = origin.z + (Math.random() * 2 - 1) * halfZ;
+      positions.current[i3 + 0] = px;
+      positions.current[i3 + 1] = py;
+      positions.current[i3 + 2] = pz;
+
+      // Save origin for altitude fade
+      origins.current[i3 + 0] = origin.x;
+      origins.current[i3 + 1] = origin.y;
+      origins.current[i3 + 2] = origin.z;
+
+      // Velocity: upwards + small lateral jitter
+      velocities.current[i3 + 0] =
+        (Math.random() * 2 - 1) * lateralJitter * 0.4;
+      velocities.current[i3 + 1] = riseSpeed * (0.8 + Math.random() * 0.4);
+      velocities.current[i3 + 2] =
+        (Math.random() * 2 - 1) * lateralJitter * 0.4;
+
+      // Life
+      ages.current[idx] = 0;
+      lifetimes.current[idx] = rand(lifeSeconds[0], lifeSeconds[1]);
+      alive.current[idx] = 1;
+    }
+
+    // mark position buffer dirty now
+    if (geometryRef.current) {
+      geometryRef.current.attributes.position.needsUpdate = true;
+    }
+  };
+
+  useEffect(() => {
+    if (!refHook) return;
+    refHook.current = { emitBurst };
+    return () => {
+      if (refHook.current) refHook.current = null;
+    };
+  }, [refHook]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry ref={geometryRef} {...geom} />
+      <primitive object={material} attach="material" />
+    </points>
+  );
+}
+
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
@@ -88,7 +329,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const meshRefs = useRef([]);
   meshRefs.current = [];
 
-  // ----- Dissolve controls -----
+  // =========================
+  // Dissolve controls (as before)
+  // =========================
   const progressRef = useRef(-0.2);
   const dissolveCtl = useControls({
     Mushrooms: folder(
@@ -141,26 +384,28 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     ),
   });
 
-  // ----- Global gradient controls (shared by ALL instances) -----
+  // =========================
+  // Global Gradient controls (as before)
+  // =========================
   const gradCtl = useControls({
     Gradient: folder(
       {
-        bottomColor: { value: "#da63ff", label: "Bottom" }, // requested defaults
-        topColor: { value: "#ffa22b", label: "Top" }, // requested defaults
+        bottomColor: { value: "#da63ff", label: "Bottom" },
+        topColor: { value: "#ffa22b", label: "Top" },
         height: {
           value: 0.51,
           min: 0,
           max: 1,
           step: 0.001,
           label: "Height (midpoint)",
-        }, // requested 0.12
+        }, // user-provided updated
         soft: {
           value: 0.2,
           min: 0.001,
           max: 0.5,
           step: 0.001,
           label: "Soft (half-width)",
-        }, // requested 0.2
+        },
         intensity: {
           value: 1.0,
           min: 0,
@@ -173,7 +418,104 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     ),
   });
 
-  // ----- Helper to update a uniform on all patched materials -----
+  // =========================
+  // Interaction (Click → Squeeze)
+  // =========================
+  const squeezeCtl = useControls({
+    Interaction: folder(
+      {
+        enabled: { value: true, label: "Enable Click" },
+        squeezeAmount: {
+          value: 0.13,
+          min: 0,
+          max: 0.8,
+          step: 0.01,
+          label: "Squeeze Amount",
+        }, // how much to squash Y
+        preserveVolume: { value: true, label: "Preserve Volume (inflate XZ)" },
+        squeezeSpeed: {
+          value: 4.8,
+          min: 1,
+          max: 20,
+          step: 0.1,
+          label: "Squeeze Speed",
+        },
+        releaseSpeed: {
+          value: 4.8,
+          min: 1,
+          max: 20,
+          step: 0.1,
+          label: "Release Speed",
+        },
+        autoRelease: { value: true, label: "Auto Release" },
+        holdSeconds: {
+          value: 0.2,
+          min: 0.0,
+          max: 2.0,
+          step: 0.01,
+          label: "Hold (s)",
+        },
+        ResetAll: button(() => {
+          const N = INSTANCES.length;
+          for (let i = 0; i < N; i++) {
+            targetSqueeze.current[i] = 0;
+            currentSqueeze.current[i] = 0;
+            holdTimers.current[i] = 0;
+          }
+          matricesDirtyRef.current = true;
+        }),
+      },
+      { collapsed: false }
+    ),
+  });
+
+  // Per-instance squeeze state
+  const currentSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
+  const targetSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
+  const holdTimers = useRef(Array(INSTANCES.length).fill(0));
+  const matricesDirtyRef = useRef(true);
+
+  // Particles ref + helpers for scale/position
+  const particlesRef = useRef(null);
+
+  const getInstanceScale = (id) => {
+    const sc = INSTANCES[id]?.scale ?? 1;
+    const sx = typeof sc === "number" ? sc : sc[0];
+    const sy = typeof sc === "number" ? sc : sc[1];
+    const sz = typeof sc === "number" ? sc : sc[2];
+    return { sx, sy, sz };
+  };
+  const getInstancePosition = (id) => {
+    const p = INSTANCES[id]?.position;
+    if (!p) return null;
+    return new THREE.Vector3(p[0], p[1], p[2]);
+  };
+
+  // Click handler (shared for all instanced submeshes)
+  const onClickInstance = (e) => {
+    if (!squeezeCtl.enabled) return;
+    e.stopPropagation();
+    const id = e.instanceId;
+    if (id == null) return;
+
+    // Squeeze
+    if (squeezeCtl.autoRelease) {
+      targetSqueeze.current[id] = squeezeCtl.squeezeAmount;
+      holdTimers.current[id] = Math.max(
+        holdTimers.current[id],
+        squeezeCtl.holdSeconds
+      );
+    } else {
+      const near = Math.abs(targetSqueeze.current[id]) < 1e-3;
+      targetSqueeze.current[id] = near ? squeezeCtl.squeezeAmount : 0.0;
+    }
+    matricesDirtyRef.current = true;
+
+    // Emit particle burst for this instance
+    particlesRef.current?.emitBurst(id);
+  };
+
+  // Helper to update a uniform on all patched materials
   const updateUniformAll = (name, val) => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -185,7 +527,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     });
   };
 
-  // ----- Shader patch: dissolve + two-color height gradient (global mid/soft) -----
+  // =========================
+  // Shader patch: dissolve + two-color height gradient (global mid/soft)
+  // =========================
   useEffect(() => {
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
@@ -292,7 +636,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
               return clamp((wp.y - minY) / max(1e-5, (maxY - minY)), 0.0, 1.0);
             }
 
-            // Smooth split around global midpoint with global softness (half-width)
             float splitBlend(float y01, float mid, float soft){
               float a = clamp(mid - soft, 0.0, 1.0);
               float b = clamp(mid + soft, 0.0, 1.0);
@@ -360,8 +703,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources]);
 
-  // ----- Live uniform updates -----
-  // Dissolve
+  // =========================
+  // Live uniform updates (as before)
+  // =========================
   useEffect(
     () => updateUniformAll("uEdgeWidth", dissolveCtl.edgeWidth),
     [dissolveCtl.edgeWidth]
@@ -383,7 +727,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     [dissolveCtl.seed]
   );
 
-  // Gradient (global)
   useEffect(
     () =>
       updateUniformAll("uBottomColor", new THREE.Color(gradCtl.bottomColor)),
@@ -400,7 +743,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     [gradCtl.intensity]
   );
 
-  // ----- Dissolve animation -----
+  // =========================
+  // Dissolve animation
+  // =========================
   useFrame((_, dt) => {
     const target = dissolveCtl.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
@@ -412,7 +757,9 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     }
   });
 
-  // ----- Assign transforms and per-instance Y-range attributes -----
+  // =========================
+  // Instance transforms (initial)
+  // =========================
   const assignInstances = () => {
     if (!sources.length) return;
 
@@ -423,15 +770,13 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       const N = INSTANCES.length;
       const minYArr = new Float32Array(N);
       const maxYArr = new Float32Array(N);
-
-      const dummy = new THREE.Object3D();
+      const tmp = new THREE.Object3D();
 
       for (let i = 0; i < N; i++) {
         const cfg = INSTANCES[i];
         const pos = cfg.position;
-
-        dummy.position.set(pos[0], pos[1], pos[2]);
-        dummy.rotation.set(
+        tmp.position.set(pos[0], pos[1], pos[2]);
+        tmp.rotation.set(
           cfg.rotation[0] || 0,
           cfg.rotation[1] || 0,
           cfg.rotation[2] || 0
@@ -440,11 +785,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         const sx = typeof sc === "number" ? sc : sc[0];
         const sy = typeof sc === "number" ? sc : sc[1];
         const sz = typeof sc === "number" ? sc : sc[2];
-        dummy.scale.set(sx, sy, sz);
-        dummy.updateMatrix();
-        imesh.setMatrixAt(i, dummy.matrix);
+        tmp.scale.set(sx, sy, sz);
+        tmp.updateMatrix();
+        imesh.setMatrixAt(i, tmp.matrix);
 
-        // Per-instance Y range (account for scale.y only; rotations are Y-only in placements)
+        // Per-instance Y range
         minYArr[i] = pos[1] + sy * minY0;
         maxYArr[i] = pos[1] + sy * maxY0;
       }
@@ -468,6 +813,79 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, INSTANCES]);
 
+  // =========================
+  // Animate squeeze + update matrices
+  // =========================
+  const tmpObj = useRef(new THREE.Object3D());
+  useFrame((_, dt) => {
+    const N = INSTANCES.length;
+    let anyChanged = false;
+
+    // timers + targets
+    for (let i = 0; i < N; i++) {
+      if (holdTimers.current[i] > 0) {
+        holdTimers.current[i] -= dt;
+        if (holdTimers.current[i] <= 0) {
+          holdTimers.current[i] = 0;
+          targetSqueeze.current[i] = 0; // release
+          matricesDirtyRef.current = true;
+        }
+      }
+    }
+
+    // integrate towards targets
+    for (let i = 0; i < N; i++) {
+      const curr = currentSqueeze.current[i];
+      const tgt = targetSqueeze.current[i];
+      const spd =
+        tgt > curr ? squeezeCtl.squeezeSpeed : squeezeCtl.releaseSpeed;
+      const alpha = 1.0 - Math.exp(-spd * dt);
+      const next = THREE.MathUtils.lerp(curr, tgt, alpha);
+      if (Math.abs(next - curr) > 1e-5) {
+        currentSqueeze.current[i] = next;
+        anyChanged = true;
+      }
+    }
+
+    if (!anyChanged && !matricesDirtyRef.current) return;
+    matricesDirtyRef.current = false;
+
+    // Recompute matrices with squeeze applied
+    meshRefs.current.forEach((imesh) => {
+      if (!imesh) return;
+      for (let i = 0; i < N; i++) {
+        const cfg = INSTANCES[i];
+        const pos = cfg.position;
+
+        const amount = currentSqueeze.current[i]; // 0..squeezeAmount
+        // Build squeezed scale:
+        // - Y compressed by (1 - amount)
+        // - X/Z inflated by (1 + k*amount) if preserveVolume
+        const baseS = cfg.scale ?? 1;
+        const baseSX = typeof baseS === "number" ? baseS : baseS[0];
+        const baseSY = typeof baseS === "number" ? baseS : baseS[1];
+        const baseSZ = typeof baseS === "number" ? baseS : baseS[2];
+
+        const inflate = squeezeCtl.preserveVolume ? 1 + 0.5 * amount : 1.0; // ~volume conservation
+        const sx = baseSX * inflate;
+        const sy = baseSY * (1 - amount);
+        const sz = baseSZ * inflate;
+
+        const d = tmpObj.current;
+        d.position.set(pos[0], pos[1], pos[2]);
+        d.rotation.set(
+          cfg.rotation[0] || 0,
+          cfg.rotation[1] || 0,
+          cfg.rotation[2] || 0
+        );
+        d.scale.set(sx, sy, sz);
+        d.updateMatrix();
+        imesh.setMatrixAt(i, d.matrix);
+      }
+      imesh.instanceMatrix.needsUpdate = true;
+    });
+  });
+
   if (!scene || sources.length === 0) return null;
 
   return (
@@ -480,6 +898,26 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       name="MagicMushrooms"
       {...props}
     >
+      {/* Particle pool (single) */}
+      <MushroomClickParticles
+        refHook={particlesRef}
+        INSTANCES={INSTANCES}
+        getInstanceScale={getInstanceScale}
+        getInstancePosition={getInstancePosition}
+        // Optional tunables:
+        maxPerBurst={60}
+        maxBursts={16}
+        riseSpeed={1.25}
+        lateralJitter={0.45}
+        gravity={0.0}
+        lifeSeconds={[0.6, 1.1]}
+        boxRatio={{ x: 0.6, y: 0.3, z: 0.6 }}
+        fadeHeight={1.25}
+        color={"#ffd2a0"}
+        sizePx={11}
+      />
+
+      {/* Instanced mushrooms (all submeshes) */}
       {sources.map((src, idx) => (
         <instancedMesh
           key={idx}
@@ -488,6 +926,8 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           castShadow
           receiveShadow
           frustumCulled={false}
+          onClick={onClickInstance}
+          onPointerDown={onClickInstance}
         />
       ))}
     </group>

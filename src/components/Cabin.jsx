@@ -12,7 +12,7 @@ import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 export default forwardRef(function Cabin(_, ref) {
   // Load GLB from /public
-  const { scene } = useGLTF("/models/cabin/Cabin.glb");
+  const { scene } = useGLTF("/models/cabin/Cabin2.glb");
 
   // Clone so this instance has its own materials/props
   const clonedScene = useMemo(() => (scene ? clone(scene) : null), [scene]);
