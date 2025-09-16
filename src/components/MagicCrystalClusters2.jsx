@@ -6,7 +6,7 @@ import { useControls, folder } from "leva";
 import { useThree, useFrame } from "@react-three/fiber";
 
 const CRYSTAL2_GLB = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
-const COUNT = 25;
+const COUNT = 34;
 const d2r = (deg) => (deg * Math.PI) / 180;
 
 // ---- 25 baked placements (rotY in degrees) ----
@@ -48,6 +48,17 @@ const BAKED = [
   { px: -1.012, py: -4.36, pz: -2.888, ry: -168.2, s: 0.112 },
   // 25th (index 24) — rotation not provided, defaulted to 0.0
   { px: -1.047, py: -4.416, pz: -3.0, ry: 0.0, s: 0.107 },
+
+  { px: -1.944, py: -4.7, pz: -1.92, ry: -32.9, s: 0.07 }, // 25
+  { px: -2.48, py: -4.62, pz: -2.18, ry: -63.9, s: 0.067 }, // 26
+  { px: -0.991, py: -4.72, pz: -2.075, ry: 0.0, s: 0.086 }, // 27
+  // 28 missing in provided data → will use component defaults unless you supply it
+  { px: -0.986, py: -4.35, pz: -3.058, ry: -155.2, s: 0.105 }, // 29
+  { px: -1.014, py: -4.336, pz: -2.972, ry: -107.6, s: 0.099 }, // 30
+  { px: -0.991, py: -4.353, pz: -3.271, ry: -87.1, s: 0.105 }, // 31
+  { px: -1.608, py: -4.653, pz: -3.753, ry: 0.0, s: 0.123 }, // 32
+  { px: -1.327, py: -4.598, pz: -1.627, ry: 20.2, s: 0.07 }, // 33
+  { px: -1.048, py: -4.579, pz: -2.374, s: 0.079 }, // 34
 ];
 
 export default forwardRef(function MagicCrystalClusters2(props, ref) {

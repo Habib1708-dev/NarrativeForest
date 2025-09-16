@@ -251,8 +251,8 @@ export default function Experience() {
         {/* Actors */}
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
-        <Cat ref={catRef} />
-        <RadioTower ref={radioTowerRef} />
+        {/* <Cat ref={catRef} /> */}
+        {/* <RadioTower ref={radioTowerRef} /> */}
         <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
@@ -288,7 +288,7 @@ export default function Experience() {
         <MagicCrystalClusters />
         <MagicCrystalClusters2 />
         <MagicCrystalClusters3 />
-        <Fireflies />
+        {/* <Fireflies /> */}
       </Suspense>
 
       <DistanceFade

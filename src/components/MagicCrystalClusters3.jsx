@@ -6,10 +6,12 @@ import { useControls, folder } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
 
 const CLUSTER4_GLB = "/models/magicPlantsAndCrystal/CrystalCluster4.glb";
-const COUNT = 8;
+const COUNT = 16; // ⬅️ total instances now 18
 const d2r = (deg) => (deg * Math.PI) / 180;
 
 const FALLBACK = { px: -2.0, py: -4.0, pz: -2.0, ry: 0.0, s: 0.15 };
+
+// Keep existing 8 baked placements
 const BAKED = [
   { px: -2.47, py: -4.56, pz: -1.5, ry: -30.4, s: 0.18 },
   { px: -2.22, py: -4.67, pz: -1.62, ry: 13.4, s: 0.13 },
@@ -19,6 +21,14 @@ const BAKED = [
   { px: -2.6, py: -4.5, pz: -1.47, ry: -144.7, s: 0.16 },
   { px: -2.7, py: -4.53, pz: -2.2, ry: -30.2, s: 0.17 },
   { px: -0.97, py: -4.28, pz: -2.8, ry: 180.0, s: 0.14 },
+  { px: -1.271, py: -4.542, pz: -1.626, ry: -50.5, s: 0.15 },
+  { px: -1.551, py: -4.8, pz: -1.766, ry: -70.7, s: 0.2 },
+  { px: -1.16, py: -4.77, pz: -1.86, ry: -33.7, s: 0.18 },
+  { px: -1.16, py: -4.69, pz: -3.73, ry: -33.7, s: 0.18 },
+  { px: -1.1, py: -4.59, pz: -2.37, ry: -33.7, s: 0.18 },
+  { px: -2.39, py: -4.75, pz: -3.5, ry: -33.7, s: 0.19 },
+  { px: -1.5, py: -4.73, pz: -3.68, ry: 0.0, s: 0.15 },
+  { px: -2.94, py: -4.22, pz: -3.26, ry: 0.0, s: 0.12 },
 ];
 
 // ⬇️ Accept shine parameters so we can seed uniforms at first compile
@@ -392,32 +402,32 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     },
   });
 
-  // Instance controls
+  // Instance controls — UPDATED RANGES + COUNT
   const instanceSchema = useMemo(() => {
     const schema = {};
     for (let i = 0; i < COUNT; i++) {
-      const d = { ...FALLBACK, ...(BAKED[i] || {}) };
+      const d = { ...FALLBACK, ...(BAKED[i] || {}) }; // baked for first 8; fallback (-2,-4,-2) for the added 10
       const label = `C / Instance ${String(i + 1).padStart(2, "0")}`;
       schema[label] = folder(
         {
           [`C_pX_${i}`]: {
             value: d.px,
-            min: -20,
-            max: 20,
+            min: -3,
+            max: 3,
             step: 0.001,
             label: "x",
           },
           [`C_pY_${i}`]: {
             value: d.py,
-            min: -20,
-            max: 20,
+            min: -6,
+            max: -4,
             step: 0.001,
             label: "y",
           },
           [`C_pZ_${i}`]: {
             value: d.pz,
-            min: -20,
-            max: 20,
+            min: -4,
+            max: 1,
             step: 0.001,
             label: "z",
           },
@@ -476,10 +486,10 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
     bottomEmissiveBoost: C_bottomEmissiveBoost,
     bottomFresnelBoost: C_bottomFresnelBoost,
     bottomFresnelPower: C_bottomFresnelPower,
-    reflectBoost: C_reflectBoost, // NEW
-    reflectPower: C_reflectPower, // NEW
-    rimBoost: C_rimBoost, // NEW
-    rimPower: C_rimPower, // NEW
+    reflectBoost: C_reflectBoost,
+    reflectPower: C_reflectPower,
+    rimBoost: C_rimBoost,
+    rimPower: C_rimPower,
   });
 
   // Y bounds
@@ -576,7 +586,6 @@ export default forwardRef(function MagicCrystalClusters3(props, ref) {
   }, [Pair_C_Top]);
 
   const curHoverBot = useMemo(() => new THREE.Color(), []);
-  const curHoverTop = useMemo(() => new THREE.Color(), []);
   const lerpFromBot = useMemo(() => new THREE.Color(), []);
   const lerpFromTop = useMemo(() => new THREE.Color(), []);
   const targetBot = useMemo(() => new THREE.Color(), []);
