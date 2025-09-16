@@ -6,48 +6,83 @@ import { useFrame, useThree } from "@react-three/fiber";
 
 /**
  * Shaders
- * - Vertex: your reference wobble + uSpeed (scales time)
- * - Fragment: circular sprite with soft Gaussian alpha, tinted by uColor
+ * - Vertex: vertical rise from bottom → top (looped), per-particle speed/phase, subtle lateral drift
+ * - Fragment: circular soft sprite, tinted by uColor; fades in at bottom, twinkles near top, then disappears
  */
 
-// Fragment: soft circular glow, no square cutout
+// Fragment: soft circular glow + fade/twinkle based on vProgress
 const firefliesFragmentShader = `
 uniform vec3 uColor;
+uniform float uTime;
+
+varying float vProgress;
+varying float vSeed;
 
 void main() {
   vec2 uv = gl_PointCoord - vec2(0.5);
   float r = length(uv);
-
-  // Hard discard outside circle
   if (r > 0.5) discard;
 
-  // Soft Gaussian falloff inside
+  // Soft Gaussian blob
   float x = r / 0.5;                  // 0..1
-  float strength = exp(-4.0 * x * x); // smooth blob
-  gl_FragColor = vec4(uColor, strength);
+  float blob = exp(-4.0 * x * x);
+
+  // Fade in near the bottom, fade out near the top
+  float fadeIn  = smoothstep(0.00, 0.08, vProgress);
+  float fadeOut = 1.0 - smoothstep(0.92, 1.0, vProgress);
+
+  // Twinkle near the top before disappearing
+  float nearTop  = smoothstep(0.85, 1.0, vProgress);
+  float twBase   = 0.5 + 0.5 * sin(uTime * 30.0 + vSeed * 12.0);
+  float twinkle  = mix(1.0, twBase, nearTop);
+
+  float alpha = blob * fadeIn * fadeOut * twinkle;
+  gl_FragColor = vec4(uColor, alpha);
 }
 `;
 
-// Vertex: EXACT motion as your reference + uSpeed multiplier
+// Vertex: move each particle upward through the box height; add subtle lateral drift
 const firefliesVertexShader = `
 uniform float uPixelRatio;
 uniform float uSize;
 uniform float uTime;
-uniform float uSpeed;
+uniform float uSpeed;    // global speed multiplier
+uniform float uWidth;    // full width (X/Z footprint)
+uniform float uHeight;   // full height
+uniform float uDrift;    // lateral drift as fraction of half-width
 
-attribute float aScale;
+attribute float aScale;  // per-particle size multiplier
+attribute float aSpeed;  // per-particle speed multiplier
+attribute float aPhase;  // per-particle phase [0..1)
+attribute float aSeed;   // per-particle seed [0..1] for drift/twinkle
+
+varying float vProgress;
+varying float vSeed;
 
 void main() {
+  // position = bottom-start world position (x,z random in box; y is box bottom center)
   vec4 modelPosition = modelMatrix * vec4(position, 1.0);
 
-  // vertical wobble; uSpeed scales time
-  float t = uTime * uSpeed;
-  modelPosition.y += sin(t + modelPosition.x * 100.0) * aScale * 0.2;
+  // Looping progress: 0 at bottom → 1 at top → wrap
+  float t = uTime * uSpeed * aSpeed + aPhase;
+  float p = fract(t);           // 0..1
+  vProgress = p;
+  vSeed = aSeed;
 
+  // Vertical rise
+  modelPosition.y += p * uHeight;
+
+  // Subtle lateral drift (side-to-side) while rising
+  float halfW = uWidth * 0.5;
+  float jitterAmp = halfW * uDrift;          // fraction of half width
+  modelPosition.x += sin(t * 1.7 + aSeed * 6.2831) * jitterAmp;
+  modelPosition.z += cos(t * 1.3 + aSeed * 3.1415) * jitterAmp;
+
+  // Project
   vec4 viewPosition = viewMatrix * modelPosition;
-  vec4 projectionPosition = projectionMatrix * viewPosition;
-
   gl_Position = projectionMatrix * viewPosition;
+
+  // Perspective-correct point size
   gl_PointSize = uSize * aScale * uPixelRatio;
   gl_PointSize *= (1.0 / -viewPosition.z);
 }
@@ -66,7 +101,7 @@ const BAKED = [
 ];
 const COUNT_BOXES = BAKED.length;
 
-// Stable RNG per index (for per-particle aScale)
+// Stable RNG helpers
 const seeded = (i, salt = 1) => {
   const x = Math.sin((i + 1) * 12.9898 * (salt + 1)) * 43758.5453;
   return x - Math.floor(x);
@@ -84,10 +119,11 @@ export default forwardRef(function Fireflies(props, ref) {
     pointSizePx, // base gl_PointSize (px)
     scaleMin, // per-particle size multiplier min
     scaleMax, // per-particle size multiplier max
-    speed, // wobble speed
-    width, // full width (X & Z) of the box (square footprint)
-    height, // full vertical height of the box
-    elevation, // offset from the baked base Y (box floor)
+    speed, // global rise speed multiplier
+    width, // full width (X/Z), square footprint
+    height, // full vertical height
+    elevation, // box floor offset from baked base
+    drift, // lateral drift as fraction of half-width
     color, // global particle color
     showBoxes, // debug wire boxes
     boxColor,
@@ -95,9 +131,9 @@ export default forwardRef(function Fireflies(props, ref) {
   } = useControls("Fireflies (Global)", {
     enabled: { value: true, label: "Enabled" },
 
-    // Your requested starting values:
+    // Keep your debugged defaults small/tidy
     perBoxCount: {
-      value: 30,
+      value: 40,
       min: 0,
       max: 2000,
       step: 1,
@@ -106,7 +142,7 @@ export default forwardRef(function Fireflies(props, ref) {
     pointSizePx: {
       value: 8,
       min: 1,
-      max: 500,
+      max: 200,
       step: 1,
       label: "Point Size (px)",
     },
@@ -126,16 +162,15 @@ export default forwardRef(function Fireflies(props, ref) {
     },
     speed: { value: 0.2, min: 0.0, max: 5.0, step: 0.01, label: "Speed" },
 
-    // Replace halfX/Y/Z with width/height/elevation
     width: {
-      value: 0.12,
+      value: 0.1,
       min: 0.02,
       max: 10.0,
       step: 0.001,
-      label: "Box Width (X/Z, full)",
+      label: "Box Width (full, X=Z)",
     },
     height: {
-      value: 0.12,
+      value: 0.22,
       min: 0.02,
       max: 10.0,
       step: 0.001,
@@ -149,10 +184,15 @@ export default forwardRef(function Fireflies(props, ref) {
       label: "Elevation from Base",
     },
 
-    // Global particle color
-    color: { value: "#f8d2ffff", label: "Particle Color" },
+    drift: {
+      value: 0.08,
+      min: 0.0,
+      max: 0.5,
+      step: 0.001,
+      label: "Lateral Drift (× half-width)",
+    },
 
-    // Debug wire boxes
+    color: { value: "#e79affff", label: "Particle Color" },
     showBoxes: { value: false, label: "Show Wireframe Boxes" },
     boxColor: { value: "#39d6ff", label: "Box Color" },
     boxOpacity: {
@@ -198,36 +238,45 @@ export default forwardRef(function Fireflies(props, ref) {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(totalParticles * 3);
     const aScale = new Float32Array(totalParticles);
+    const aSpeed = new Float32Array(totalParticles);
+    const aPhase = new Float32Array(totalParticles);
+    const aSeed = new Float32Array(totalParticles);
 
     const nPerBox = Math.max(0, Math.floor(perBoxCount));
     const half = Math.max(0.001, width * 0.5);
-    const halfH = Math.max(0.001, height * 0.5);
+    const fullH = Math.max(0.001, height);
 
     let cursor = 0;
 
     for (let i = 0; i < COUNT_BOXES; i++) {
       const baseX = BAKED[i].px;
-      const baseY = BAKED[i].py; // "base"
+      const baseY = BAKED[i].py + elevation; // box floor (bottom)
       const baseZ = BAKED[i].pz;
-
-      // Box vertical center from base + elevation + height/2
-      const centerY = baseY + elevation + halfH;
 
       for (let k = 0; k < nPerBox; k++) {
         const idx = cursor + k;
 
-        // uniformly random within the global box (square footprint)
+        // Random bottom-start position inside the square footprint
         const rx = (Math.random() * 2 - 1) * half;
-        const ry = (Math.random() * 2 - 1) * halfH;
         const rz = (Math.random() * 2 - 1) * half;
 
         positions[idx * 3 + 0] = baseX + rx;
-        positions[idx * 3 + 1] = centerY + ry;
+        positions[idx * 3 + 1] = baseY; // bottom of the box
         positions[idx * 3 + 2] = baseZ + rz;
 
-        // per-particle scale (aScale) in [scaleMin, scaleMax]
-        const r = seeded(idx, 11);
-        aScale[idx] = THREE.MathUtils.lerp(scaleMin, scaleMax, r);
+        // Per-particle visual scale
+        const rS = seeded(idx, 11);
+        aScale[idx] = THREE.MathUtils.lerp(scaleMin, scaleMax, rS);
+
+        // Per-particle speed multiplier (0.75..1.25 for variety)
+        const rV = seeded(idx, 5);
+        aSpeed[idx] = THREE.MathUtils.lerp(0.75, 1.25, rV);
+
+        // Per-particle starting phase (0..1)
+        aPhase[idx] = seeded(idx, 7);
+
+        // Seed for twinkle/drift
+        aSeed[idx] = seeded(idx, 13);
       }
 
       cursor += nPerBox;
@@ -235,6 +284,9 @@ export default forwardRef(function Fireflies(props, ref) {
 
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("aScale", new THREE.BufferAttribute(aScale, 1));
+    geo.setAttribute("aSpeed", new THREE.BufferAttribute(aSpeed, 1));
+    geo.setAttribute("aPhase", new THREE.BufferAttribute(aPhase, 1));
+    geo.setAttribute("aSeed", new THREE.BufferAttribute(aSeed, 1));
     geoRef.current = geo;
   }, [enabled, totalParticles, width, height, elevation, scaleMin, scaleMax, perBoxCount]);
 
@@ -259,12 +311,15 @@ export default forwardRef(function Fireflies(props, ref) {
         uSize: { value: pointSizePx },
         uTime: { value: 0 },
         uSpeed: { value: speed },
+        uWidth: { value: width },
+        uHeight: { value: height },
+        uDrift: { value: drift },
         uColor: { value: new THREE.Color(color) },
       },
     });
 
     matRef.current = mat;
-  }, [enabled, pointSizePx, speed, color]);
+  }, [enabled, pointSizePx, speed, width, height, drift, color]);
 
   // Keep uniforms live
   useEffect(() => {
@@ -275,8 +330,11 @@ export default forwardRef(function Fireflies(props, ref) {
     );
     matRef.current.uniforms.uSize.value = pointSizePx;
     matRef.current.uniforms.uSpeed.value = speed;
+    matRef.current.uniforms.uWidth.value = width;
+    matRef.current.uniforms.uHeight.value = height;
+    matRef.current.uniforms.uDrift.value = drift;
     matRef.current.uniforms.uColor.value.set(color);
-  }, [gl, pointSizePx, speed, color]);
+  }, [gl, pointSizePx, speed, width, height, drift, color]);
 
   // Resize → update pixel ratio
   useEffect(() => {
@@ -380,7 +438,7 @@ export default forwardRef(function Fireflies(props, ref) {
         />
       )}
 
-      {/* Wireframe bounds (global width/height/elevation applied to all) */}
+      {/* Wireframe bounds */}
       {showBoxes &&
         Array.from({ length: COUNT_BOXES }).map((_, i) => (
           <lineSegments

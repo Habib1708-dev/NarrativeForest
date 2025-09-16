@@ -6,10 +6,11 @@ import { useControls, folder } from "leva";
 import { useThree, useFrame } from "@react-three/fiber";
 
 const CRYSTAL2_GLB = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
-const COUNT = 15;
+const COUNT = 25;
 const d2r = (deg) => (deg * Math.PI) / 180;
 
-// ---- 15 baked placements (rotY in degrees) ----
+// ---- 25 baked placements (rotY in degrees) ----
+// NOTE: Indices 15..24 are the new values you provided, rounded to 3 decimals.
 const BAKED = [
   { px: -2.32, py: -4.66, pz: -1.52, ry: 77.4, s: 0.077 },
   { px: -2.48, py: -4.71, pz: -1.97, ry: 30.7, s: 0.041 },
@@ -19,13 +20,34 @@ const BAKED = [
   { px: -0.99, py: -4.28, pz: -0.19, ry: -16.8, s: 0.128 },
   { px: -1.03, py: -4.54, pz: -2.33, ry: 118.2, s: 0.05 },
   { px: -2.51, py: -4.26, pz: -3.5, ry: 54.6, s: 0.097 },
-  { px: -2.54, py: -4.24, pz: -3.39, ry: -180.0, s: 0.077 },
+  { px: -2.54, py: -4.22, pz: -3.39, ry: -180.0, s: 0.077 },
   { px: -2.84, py: -4.59, pz: -2.98, ry: -53.8, s: 0.047 },
   { px: -2.56, py: -4.59, pz: -2.98, ry: -53.8, s: 0.047 },
   { px: -1.02, py: -4.42, pz: -3.14, ry: 11.7, s: 0.072 },
   { px: -2.04, py: -4.47, pz: -3.47, ry: 180.0, s: 0.067 },
   { px: -2.0, py: -4.48, pz: -3.49, ry: 86.6, s: 0.052 },
   { px: -2.45, py: -4.7, pz: -2.28, ry: 134.6, s: 0.052 },
+
+  // 16th (index 15)
+  { px: -1.383, py: -4.841, pz: -1.92, ry: 137.9, s: 0.065 },
+  // 17th (index 16)
+  { px: -2.449, py: -4.542, pz: -1.766, ry: 0.0, s: 0.102 },
+  // 18th (index 17)
+  { px: -1.34, py: -4.72, pz: -1.813, ry: -47.1, s: 0.09 },
+  // 19th (index 18)
+  { px: -1.663, py: -4.76, pz: -1.813, ry: 154.8, s: 0.08 },
+  // 20th (index 19)
+  { px: -1.215, py: -4.767, pz: -1.86, ry: 128.1, s: 0.084 },
+  // 21st (index 20)
+  { px: -2.49, py: -4.73, pz: -2.953, ry: 103.4, s: 0.074 },
+  // 22nd (index 21)
+  { px: -1.046, py: -4.561, pz: -2.467, ry: 118.6, s: 0.084 },
+  // 23rd (index 22)
+  { px: -0.822, py: -4.348, pz: -2.49, ry: -84.1, s: 0.086 },
+  // 24th (index 23)
+  { px: -1.012, py: -4.36, pz: -2.888, ry: -168.2, s: 0.112 },
+  // 25th (index 24) — rotation not provided, defaulted to 0.0
+  { px: -1.047, py: -4.416, pz: -3.0, ry: 0.0, s: 0.107 },
 ];
 
 export default forwardRef(function MagicCrystalClusters2(props, ref) {
@@ -42,22 +64,22 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
         {
           [`B_pX_${i}`]: {
             value: d.px,
-            min: -20,
-            max: 20,
+            min: -3,
+            max: 3,
             step: 0.001,
             label: "x",
           },
           [`B_pY_${i}`]: {
             value: d.py,
-            min: -20,
-            max: 20,
+            min: -6,
+            max: -4,
             step: 0.001,
             label: "y",
           },
           [`B_pZ_${i}`]: {
             value: d.pz,
-            min: -20,
-            max: 20,
+            min: -4,
+            max: 4,
             step: 0.001,
             label: "z",
           },
@@ -71,7 +93,7 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
           [`B_s_${i}`]: {
             value: d.s,
             min: 0.01,
-            max: 5,
+            max: 1,
             step: 0.001,
             label: "scale",
           },
@@ -253,23 +275,23 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
   const material = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
-      thickness: B_thickness,
-      ior: B_ior,
-      roughness: B_roughness,
+      thickness: 0.0,
+      ior: 2.333,
+      roughness: 0.0,
       metalness: 0.0,
       clearcoat: 1.0,
       clearcoatRoughness: 0.02,
       specularIntensity: 1.0,
       color: new THREE.Color("#ffffff"),
       attenuationColor: new THREE.Color("#ffffff"),
-      attenuationDistance: B_attenuationDistance,
+      attenuationDistance: 0.1,
       transparent: false,
       opacity: 1.0,
       toneMapped: true,
       flatShading: true,
       side: THREE.FrontSide,
       emissive: new THREE.Color("#000000"),
-      emissiveIntensity: B_emissiveIntensity,
+      emissiveIntensity: 0.3,
     });
 
     m.onBeforeCompile = (shader) => {
@@ -277,21 +299,21 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
       shader.uniforms.uObjMaxY = { value: 1.0 };
 
       // Gradient/boosts — B namespace
-      shader.uniforms.uB_ColorA = { value: new THREE.Color(B_colorA) };
-      shader.uniforms.uB_ColorB = { value: new THREE.Color(B_colorB) };
-      shader.uniforms.uB_Mid = { value: B_mid };
-      shader.uniforms.uB_Soft = { value: B_softness };
-      shader.uniforms.uB_BottomSatBoost = { value: B_bottomSatBoost };
-      shader.uniforms.uB_BottomEmissiveBoost = { value: B_bottomEmissiveBoost };
-      shader.uniforms.uB_BottomFresnelBoost = { value: B_bottomFresnelBoost };
-      shader.uniforms.uB_BottomFresnelPower = { value: B_bottomFresnelPower };
-      shader.uniforms.uB_EmissiveIntensity = { value: B_emissiveIntensity };
+      shader.uniforms.uB_ColorA = { value: new THREE.Color("#0099d1") };
+      shader.uniforms.uB_ColorB = { value: new THREE.Color("#bc00f5") };
+      shader.uniforms.uB_Mid = { value: 0.38 };
+      shader.uniforms.uB_Soft = { value: 0.44 };
+      shader.uniforms.uB_BottomSatBoost = { value: 0.1 };
+      shader.uniforms.uB_BottomEmissiveBoost = { value: 2.0 };
+      shader.uniforms.uB_BottomFresnelBoost = { value: 3.0 };
+      shader.uniforms.uB_BottomFresnelPower = { value: 0.5 };
+      shader.uniforms.uB_EmissiveIntensity = { value: 0.3 };
 
       // SHINE
-      shader.uniforms.uB_ReflectBoost = { value: B_reflectBoost };
-      shader.uniforms.uB_ReflectPower = { value: B_reflectPower };
-      shader.uniforms.uB_RimBoost = { value: B_rimBoost };
-      shader.uniforms.uB_RimPower = { value: B_rimPower };
+      shader.uniforms.uB_ReflectBoost = { value: 1.2 };
+      shader.uniforms.uB_ReflectPower = { value: 2.0 };
+      shader.uniforms.uB_RimBoost = { value: 1.4 };
+      shader.uniforms.uB_RimPower = { value: 1.5 };
 
       // hover uniformization (fade out instance bias)
       shader.uniforms.uB_UniformFactor = { value: 0.0 }; // 0..1
@@ -515,7 +537,7 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     }
   }, [material, geometry, B_colorA, B_colorB, B_mid, B_softness, B_bottomSatBoost, B_bottomEmissiveBoost, B_bottomFresnelBoost, B_bottomFresnelPower, B_ior, B_thickness, B_attenuationDistance, B_roughness, B_emissiveIntensity, B_reflectBoost, B_reflectPower, B_rimBoost, B_rimPower, B_envIntensity]);
 
-  // ===== Hover logic: soft uniformization + color triplet (no glow)
+  // ===== Hover logic (unchanged) =====
   const baseARef = useRef(new THREE.Color(B_colorA));
   const baseBRef = useRef(new THREE.Color(B_colorB));
   useEffect(() => {
@@ -590,7 +612,7 @@ export default forwardRef(function MagicCrystalClusters2(props, ref) {
     const sdr = material?.userData?.shader;
     if (!mesh || !geometry || !sdr) return;
 
-    // Global hover test (same as A): screen-space circle
+    // Global hover test (screen-space circle)
     camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
     let anyHovered = false;
     const sphereRadius = baseRadius || 1;

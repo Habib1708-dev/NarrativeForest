@@ -1,3 +1,4 @@
+// src/components/Cabin.jsx
 import React, {
   useEffect,
   useMemo,
@@ -46,7 +47,7 @@ export default forwardRef(function Cabin(_, ref) {
     materialsRef.current = Array.from(mats.values());
   }, [clonedScene]);
 
-  // Leva controls (use your provided defaults)
+  // Leva controls (with your provided defaults)
   const {
     positionX,
     positionY,
@@ -55,6 +56,8 @@ export default forwardRef(function Cabin(_, ref) {
     scale,
     tintColor,
     tintIntensity,
+
+    // Bulb 1
     bulbEnabled,
     bulbColor,
     bulbIntensity,
@@ -62,6 +65,15 @@ export default forwardRef(function Cabin(_, ref) {
     bulbX,
     bulbY,
     bulbZ,
+
+    // Bulb 2 (NEW)
+    bulb2Enabled,
+    bulb2Color,
+    bulb2Intensity,
+    bulb2Size,
+    bulb2X,
+    bulb2Y,
+    bulb2Z,
   } = useControls({
     Cabin: folder({
       Transform: folder({
@@ -93,6 +105,8 @@ export default forwardRef(function Cabin(_, ref) {
           label: "Intensity",
         },
       }),
+
+      // Bulb 1
       "Bulb Light": folder({
         bulbEnabled: { value: true, label: "Enabled" },
         bulbColor: { value: "#ffc37b", label: "Color" },
@@ -113,6 +127,30 @@ export default forwardRef(function Cabin(_, ref) {
         bulbX: { value: -1.71, min: -50, max: 50, step: 0.001, label: "X" },
         bulbY: { value: -4.6, min: -50, max: 50, step: 0.01, label: "Y" },
         bulbZ: { value: -2.94, min: -50, max: 50, step: 0.01, label: "Z" },
+      }),
+
+      // Bulb 2 (NEW)
+      "Bulb Light 2": folder({
+        bulb2Enabled: { value: true, label: "Enabled" },
+        bulb2Color: { value: "#ffc37b", label: "Color" },
+        bulb2Intensity: {
+          value: 0.2,
+          min: 0,
+          max: 2,
+          step: 0.01,
+          label: "Intensity",
+        },
+        bulb2Size: {
+          value: 0.01,
+          min: 0.001,
+          max: 0.1,
+          step: 0.001,
+          label: "Size",
+        },
+        // Start at the exact same position as bulb 1 by default
+        bulb2X: { value: -1.742, min: -50, max: 50, step: 0.001, label: "X" },
+        bulb2Y: { value: -4.622, min: -50, max: 50, step: 0.001, label: "Y" },
+        bulb2Z: { value: -2.335, min: -50, max: 50, step: 0.001, label: "Z" },
       }),
     }),
   });
@@ -139,14 +177,17 @@ export default forwardRef(function Cabin(_, ref) {
 
   if (!clonedScene) return null;
 
-  // Bulb position controlled via Leva (defaults near Man): [-1.3, -4.3, -2.9]
+  // Bulb positions controlled via Leva
   const bulbPosition = useMemo(
     () => [bulbX, bulbY, bulbZ],
     [bulbX, bulbY, bulbZ]
   );
+  const bulb2Position = useMemo(
+    () => [bulb2X, bulb2Y, bulb2Z],
+    [bulb2X, bulb2Y, bulb2Z]
+  );
 
-  // -------------------- ADDED: Rocks instanced meshes (baked transforms) --------------------
-  // Switched to the material-less rock model as requested
+  // -------------------- Rock instanced meshes (baked transforms) --------------------
   const ROCK_GLB = "/models/cabin/MateriallessRock.glb";
   const { scene: rockScene } = useGLTF(ROCK_GLB);
 
@@ -166,7 +207,7 @@ export default forwardRef(function Cabin(_, ref) {
       geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     }
 
-    // Material-less → provide a solid MeshStandardMaterial with #444444 @ intensity 1.0
+    // Material-less → provide a solid MeshStandardMaterial with #444444
     const mat = new THREE.MeshStandardMaterial({
       color: "#444444",
       metalness: 0.0,
@@ -182,31 +223,26 @@ export default forwardRef(function Cabin(_, ref) {
 
   const rockTransforms = useMemo(
     () => [
-      // First instance
       {
         position: [-1.944, -4.832, -1.841],
         scale: 0.168,
         rotDeg: [0, -100.9, -67.3],
       },
-      // Second instance
       {
         position: [-1.505, -4.862, -1.664],
         scale: 0.2,
         rotDeg: [3.4, 53.8, -6.7],
       },
-      // Third instance
       {
         position: [-1.411, -5.023, -1.72],
         scale: 0.278,
         rotDeg: [40.3, -10.1, 0],
       },
-      // Fourth instance
       {
         position: [-1.262, -4.841, -1.623],
         scale: 0.294,
         rotDeg: [0, 0, -97.6],
       },
-      // Fifth instance
       { position: [-1.0, -4.855, -1.804], scale: 0.241, rotDeg: [0, 0, 0] },
     ],
     []
@@ -241,7 +277,31 @@ export default forwardRef(function Cabin(_, ref) {
     instRef.current.frustumCulled = false;
     instRef.current.matrixAutoUpdate = false;
   }, []);
-  // ------------------------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------------
+
+  // Helper to render a tiny emissive bulb + point light
+  const Bulb = ({ position, color, size, intensity }) => (
+    <group position={position}>
+      <mesh scale={size} castShadow={false} receiveShadow={false}>
+        <sphereGeometry args={[1, 16, 16]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={1}
+          metalness={0}
+          roughness={0.3}
+          toneMapped={false}
+        />
+      </mesh>
+      <pointLight
+        color={color}
+        intensity={intensity}
+        distance={2.5}
+        decay={2}
+        castShadow={false}
+      />
+    </group>
+  );
 
   return (
     <group ref={rootRef}>
@@ -255,7 +315,7 @@ export default forwardRef(function Cabin(_, ref) {
         <primitive object={clonedScene} />
       </group>
 
-      {/* ADDED: Rock instances (absolute/world space) */}
+      {/* Rock instances (absolute/world space) */}
       {rockGeoMat?.geometry && rockGeoMat?.material && (
         <instancedMesh
           ref={instRef}
@@ -265,33 +325,29 @@ export default forwardRef(function Cabin(_, ref) {
         />
       )}
 
-      {/* Miniature light bulb near the Man (absolute/world position) */}
+      {/* Bulb 1 */}
       {bulbEnabled && (
-        <group position={bulbPosition}>
-          {/* Visible tiny bulb */}
-          <mesh scale={bulbSize} castShadow={false} receiveShadow={false}>
-            <sphereGeometry args={[1, 16, 16]} />
-            <meshStandardMaterial
-              color={bulbColor}
-              emissive={bulbColor}
-              emissiveIntensity={1}
-              metalness={0}
-              roughness={0.3}
-              toneMapped={false}
-            />
-          </mesh>
-          {/* Actual light source */}
-          <pointLight
-            color={bulbColor}
-            intensity={bulbIntensity}
-            distance={2.5}
-            decay={2}
-            castShadow={false}
-          />
-        </group>
+        <Bulb
+          position={bulbPosition}
+          color={bulbColor}
+          size={bulbSize}
+          intensity={bulbIntensity}
+        />
+      )}
+
+      {/* Bulb 2 (NEW) */}
+      {bulb2Enabled && (
+        <Bulb
+          position={bulb2Position}
+          color={bulb2Color}
+          size={bulb2Size}
+          intensity={bulb2Intensity}
+        />
       )}
     </group>
   );
 });
 
-useGLTF.preload("/models/cabin/Cabin.glb");
+// Preload assets used here
+useGLTF.preload("/models/cabin/Cabin2.glb");
+useGLTF.preload("/models/cabin/MateriallessRock.glb");

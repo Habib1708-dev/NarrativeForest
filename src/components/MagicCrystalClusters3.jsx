@@ -79,8 +79,6 @@ function useCrystalMaterialC({
       shader.uniforms.uC_BottomFresnelBoost = { value: bottomFresnelBoost };
       shader.uniforms.uC_BottomFresnelPower = { value: bottomFresnelPower };
       shader.uniforms.uC_EmissiveIntensity = { value: emissiveIntensity };
-
-      // ✅ Seed with the CURRENT control values on first compile
       shader.uniforms.uC_ReflectBoost = { value: reflectBoost };
       shader.uniforms.uC_ReflectPower = { value: reflectPower };
       shader.uniforms.uC_RimBoost = { value: rimBoost };

@@ -52,33 +52,26 @@ function MushroomClickParticles({
   const geom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions.current, 3));
-    // Age & Lifetime are passed via uniforms (per-particle alpha computed CPU → packed in a separate attr if needed).
-    // We'll compute alpha in shader from (worldPos.y - origin.y) and lifetime-based fade via a per-particle age ratio we pass in an attribute.
-    // To keep it simple and fast, we won’t create a separate alpha attribute; we’ll compute lifeRatio in CPU and store in 'lifetimes' & 'ages' arrays,
-    // but shader only knows worldPos & origin; for lifetime fade we’ll pass a global multiplier, then let CPU pre-shrink size over time as needed.
-    // Instead, we will compute alpha in shader using height fade, and use lifetime as a uniform multiplier per-frame by storing an "opacity" per-particle in colors attribute.
-    // However, THREE's default Points shader expects 'color' if useVertexColors; we’ll instead write a tiny custom shader below and bind attributes we need.
-
-    // Add custom attributes for per-particle origin.y (for altitude fade) and life ratio (0..1)
-    // We'll store both origin and a lifeRatio per particle as separate attributes:
-    const lifeRatioArray = new Float32Array(totalParticles); // updated each frame: age/lifetime
-    const originYArray = new Float32Array(totalParticles); // origin Y for altitude fade ref
+    // Custom attributes: per-particle life ratio + origin.y (for altitude fade)
+    const lifeRatioArray = new Float32Array(totalParticles);
+    const originYArray = new Float32Array(totalParticles);
     g.setAttribute("aLife", new THREE.BufferAttribute(lifeRatioArray, 1));
     g.setAttribute("aOriginY", new THREE.BufferAttribute(originYArray, 1));
     return g;
   }, [totalParticles]);
 
-  // Shader material: simple round point sprite with alpha from height & life
+  // Shader material — clamp gl_PointSize + fade near-camera to prevent giant disc
   const material = useMemo(() => {
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
+      depthTest: true,
       blending: THREE.AdditiveBlending,
       uniforms: {
         uColor: { value: new THREE.Color(color) },
-        uSize: { value: sizePx }, // in pixels
-        uFadeHeight: { value: fadeHeight }, // world units
-        uViewport: { value: new THREE.Vector2(1, 1) }, // set in useFrame from renderer size
+        uSize: { value: sizePx },
+        uFadeHeight: { value: fadeHeight },
+        uViewport: { value: new THREE.Vector2(1, 1) },
       },
       vertexShader: `
         uniform float uSize;
@@ -87,19 +80,20 @@ function MushroomClickParticles({
         attribute float aOriginY;   // origin y for altitude fade
         varying float vLife;        // pass to frag
         varying float vHeight;      // delta height from origin
+        varying float vCamZ;        // camera-space depth (>0 in front of camera)
 
         void main() {
           vLife = aLife;
           vHeight = position.y - aOriginY;
 
-          // Standard projection
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vCamZ = -mvPosition.z;
+
           gl_Position = projectionMatrix * mvPosition;
 
-          // Size attenuation in screen space (similar to PointMaterial)
-          // Convert world size to pixels roughly: scale by perspective ( -mvPosition.z )
-          float size = uSize * (300.0 / -mvPosition.z); // tweak constant for taste
-          gl_PointSize = size;
+          // Size attenuation; clamp to avoid huge point sprite
+          float size = uSize * (300.0 / max(0.001, vCamZ));
+          gl_PointSize = clamp(size, 1.0, 128.0);
         }
       `,
       fragmentShader: `
@@ -107,22 +101,24 @@ function MushroomClickParticles({
         uniform float uFadeHeight;
         varying float vLife;     // 0..1 life ratio
         varying float vHeight;   // world-height from origin
+        varying float vCamZ;
 
         void main() {
-          // Circular soft sprite
-          vec2 uv = gl_PointCoord.xy * 2.0 - 1.0;
+          vec2 uv = gl_PointCoord * 2.0 - 1.0;
           float r2 = dot(uv, uv);
           if (r2 > 1.0) discard;
           float disk = smoothstep(1.0, 0.0, r2);
 
-          // Lifetime fade (1 at birth -> 0 at death)
           float lifeFade = 1.0 - clamp(vLife, 0.0, 1.0);
-
-          // Height fade: from 0 height to uFadeHeight -> fade to zero
           float h = clamp(vHeight / max(uFadeHeight, 1e-4), 0.0, 1.0);
           float heightFade = 1.0 - h;
 
-          float alpha = disk * lifeFade * heightFade;
+          // Fade out very-near particles (tweak thresholds to taste)
+          float nearFade = smoothstep(0.3, 1.2, vCamZ);
+
+          float alpha = disk * lifeFade * heightFade * nearFade;
+          if (alpha <= 1e-4) discard;
+
           gl_FragColor = vec4(uColor, alpha);
         }
       `,
@@ -130,7 +126,7 @@ function MushroomClickParticles({
     return mat;
   }, [color, sizePx, fadeHeight]);
 
-  // Keep viewport uniform in sync (for perspective sizing if needed later)
+  // Keep viewport uniform in sync
   useFrame(({ size }) => {
     material.uniforms.uViewport.value.set(size.width, size.height);
   });
@@ -241,7 +237,7 @@ function MushroomClickParticles({
   }, [refHook]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <points ref={pointsRef}>
+    <points ref={pointsRef} frustumCulled={false}>
       <bufferGeometry ref={geometryRef} {...geom} />
       <primitive object={material} attach="material" />
     </points>
@@ -330,7 +326,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   meshRefs.current = [];
 
   // =========================
-  // Dissolve controls (as before)
+  // Dissolve controls
   // =========================
   const progressRef = useRef(-0.2);
   const dissolveCtl = useControls({
@@ -385,7 +381,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   });
 
   // =========================
-  // Global Gradient controls (as before)
+  // Global Gradient controls
   // =========================
   const gradCtl = useControls({
     Gradient: folder(
@@ -398,7 +394,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           max: 1,
           step: 0.001,
           label: "Height (midpoint)",
-        }, // user-provided updated
+        },
         soft: {
           value: 0.2,
           min: 0.001,
@@ -431,7 +427,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           max: 0.8,
           step: 0.01,
           label: "Squeeze Amount",
-        }, // how much to squash Y
+        },
         preserveVolume: { value: true, label: "Preserve Volume (inflate XZ)" },
         squeezeSpeed: {
           value: 4.8,
@@ -551,7 +547,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             varying float vMaxY;
             ` + shader.vertexShader;
 
-          // Pass world position (instancing-safe)
+          // Ensure worldPos varyings exist (proper regex + real newline insertion)
           if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
             shader.vertexShader = shader.vertexShader.replace(
               "#include <common>",
@@ -565,12 +561,13 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             );
           }
 
+          // Compute world position safely with instancing
           shader.vertexShader = shader.vertexShader.replace(
             "#include <worldpos_vertex>",
             `
             #include <worldpos_vertex>
             #ifdef USE_INSTANCING
-              mat4 rtModel = instanceMatrix * modelMatrix;
+              mat4 rtModel = modelMatrix * instanceMatrix;
             #else
               mat4 rtModel = modelMatrix;
             #endif
@@ -582,23 +579,19 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           );
 
           // Uniforms
-          shader.uniforms.uProgress = { value: progressRef.current };
-          shader.uniforms.uEdgeWidth = { value: dissolveCtl.edgeWidth };
-          shader.uniforms.uNoiseScale = { value: dissolveCtl.noiseScale };
-          shader.uniforms.uNoiseAmp = { value: dissolveCtl.noiseAmp };
-          shader.uniforms.uGlowStrength = { value: dissolveCtl.glowStrength };
-          shader.uniforms.uSeed = { value: dissolveCtl.seed };
+          shader.uniforms.uProgress = { value: -0.2 };
+          shader.uniforms.uEdgeWidth = { value: 0.15 };
+          shader.uniforms.uNoiseScale = { value: 4.5 };
+          shader.uniforms.uNoiseAmp = { value: 0.8 };
+          shader.uniforms.uGlowStrength = { value: 10.0 };
+          shader.uniforms.uSeed = { value: 321 };
 
           // Global gradient
-          shader.uniforms.uBottomColor = {
-            value: new THREE.Color(gradCtl.bottomColor),
-          };
-          shader.uniforms.uTopColor = {
-            value: new THREE.Color(gradCtl.topColor),
-          };
-          shader.uniforms.uMid = { value: gradCtl.height }; // 0..1 midpoint
-          shader.uniforms.uSoft = { value: gradCtl.soft }; // 0..0.5 half-width
-          shader.uniforms.uGradIntensity = { value: gradCtl.intensity };
+          shader.uniforms.uBottomColor = { value: new THREE.Color("#da63ff") };
+          shader.uniforms.uTopColor = { value: new THREE.Color("#ffa22b") };
+          shader.uniforms.uMid = { value: 0.51 };
+          shader.uniforms.uSoft = { value: 0.2 };
+          shader.uniforms.uGradIntensity = { value: 1.0 };
 
           const fragPrelude = /* glsl */ `
             uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uSeed, uGlowStrength;
@@ -704,28 +697,22 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   }, [sources]);
 
   // =========================
-  // Live uniform updates (as before)
+  // Live uniform updates
   // =========================
   useEffect(
-    () => updateUniformAll("uEdgeWidth", dissolveCtl.edgeWidth),
+    () => updateUniformAll("uEdgeWidth", 0.15),
     [dissolveCtl.edgeWidth]
   );
   useEffect(
-    () => updateUniformAll("uNoiseScale", dissolveCtl.noiseScale),
+    () => updateUniformAll("uNoiseScale", 4.5),
     [dissolveCtl.noiseScale]
   );
+  useEffect(() => updateUniformAll("uNoiseAmp", 0.8), [dissolveCtl.noiseAmp]);
   useEffect(
-    () => updateUniformAll("uNoiseAmp", dissolveCtl.noiseAmp),
-    [dissolveCtl.noiseAmp]
-  );
-  useEffect(
-    () => updateUniformAll("uGlowStrength", dissolveCtl.glowStrength),
+    () => updateUniformAll("uGlowStrength", 10.0),
     [dissolveCtl.glowStrength]
   );
-  useEffect(
-    () => updateUniformAll("uSeed", dissolveCtl.seed),
-    [dissolveCtl.seed]
-  );
+  useEffect(() => updateUniformAll("uSeed", 321), [dissolveCtl.seed]);
 
   useEffect(
     () =>
