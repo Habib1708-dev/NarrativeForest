@@ -35,6 +35,7 @@ import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
 import MagicCrystalRods from "./components/MagicCrystalRods";
 import MossRockInstances from "./components/MossRockInstances";
 import Fireflies from "./components/Fireflies";
+import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -285,10 +286,11 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         <MagicMushrooms ref={mushroomsRef} />
-        <MagicCrystalClusters />
+        {/* <MagicCrystalClusters />
         <MagicCrystalClusters2 />
-        <MagicCrystalClusters3 />
+        <MagicCrystalClusters3 /> */}
         {/* <Fireflies /> */}
+        <UnifiedCrystalClusters />
       </Suspense>
 
       <DistanceFade
