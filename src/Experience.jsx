@@ -26,14 +26,6 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 import ForestDynamic from "./components/ForestDynamic";
 import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
-import RaycastClickLogger from "./debug/RaycastClickLogger";
-import ClickLogger from "./utils/ClickLogger";
-import TestTree from "./components/TestTree";
-import MagicCrystalClusters from "./components/MagicCrystalClusters";
-import MagicCrystalClusters2 from "./components/MagicCrystalClusters2";
-import MagicCrystalClusters3 from "./components/MagicCrystalClusters3";
-import MagicCrystalRods from "./components/MagicCrystalRods";
-import MossRockInstances from "./components/MossRockInstances";
 import Fireflies from "./components/Fireflies";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 
@@ -252,7 +244,7 @@ export default function Experience() {
         {/* Actors */}
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
-        {/* <Cat ref={catRef} /> */}
+        <Cat ref={catRef} />
         {/* <RadioTower ref={radioTowerRef} /> */}
         <Lake ref={lakeRef} />
 
@@ -286,9 +278,6 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         <MagicMushrooms ref={mushroomsRef} />
-        {/* <MagicCrystalClusters />
-        <MagicCrystalClusters2 />
-        <MagicCrystalClusters3 /> */}
         {/* <Fireflies /> */}
         <UnifiedCrystalClusters />
       </Suspense>

@@ -7,243 +7,6 @@ import { useControls, folder, button } from "leva";
 
 const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 
-// ---------------------------------------------------------------------
-// Particle system used by all mushroom instances
-// ---------------------------------------------------------------------
-function MushroomClickParticles({
-  INSTANCES,
-  getInstanceScale,
-  getInstancePosition,
-  // Tunables
-  maxPerBurst = 60,
-  maxBursts = 16,
-  riseSpeed = 1.2, // base upward velocity
-  lateralJitter = 0.4, // random lateral factor
-  gravity = 0.0, // downward accel if you want (0 by default)
-  lifeSeconds = [0.6, 1.1], // lifespan range per particle
-  boxRatio = { x: 0.6, y: 0.3, z: 0.6 }, // emitter box as fraction of instance scale
-  fadeHeight = 1.2, // altitude fade range
-  color = "#ffd2a0", // warm spores
-  sizePx = 10, // sprite size in px (screen-space)
-  refHook, // parent ref to call emitBurst(id)
-}) {
-  const totalParticles = maxPerBurst * maxBursts;
-
-  // Pool state
-  const positions = useRef(new Float32Array(totalParticles * 3));
-  const ages = useRef(new Float32Array(totalParticles));
-  const lifetimes = useRef(new Float32Array(totalParticles));
-  const alive = useRef(new Uint8Array(totalParticles));
-  const origins = useRef(new Float32Array(totalParticles * 3)); // emitter origin (for altitude fade)
-  const velocities = useRef(new Float32Array(totalParticles * 3)); // simple kinematics
-
-  // Free-list stack of indices
-  const freeList = useRef(Array.from({ length: totalParticles }, (_, i) => i));
-
-  const geometryRef = useRef(null);
-  const pointsRef = useRef(null);
-
-  // Utility
-  const rand = (a, b) => a + Math.random() * (b - a);
-  const popIndex = () => freeList.current.pop();
-  const pushIndex = (i) => freeList.current.push(i);
-
-  // Build geometry & attributes once
-  const geom = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(positions.current, 3));
-    // Custom attributes: per-particle life ratio + origin.y (for altitude fade)
-    const lifeRatioArray = new Float32Array(totalParticles);
-    const originYArray = new Float32Array(totalParticles);
-    g.setAttribute("aLife", new THREE.BufferAttribute(lifeRatioArray, 1));
-    g.setAttribute("aOriginY", new THREE.BufferAttribute(originYArray, 1));
-    return g;
-  }, [totalParticles]);
-
-  // Shader material — clamp gl_PointSize + fade near-camera to prevent giant disc
-  const material = useMemo(() => {
-    const mat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uColor: { value: new THREE.Color(color) },
-        uSize: { value: sizePx },
-        uFadeHeight: { value: fadeHeight },
-        uViewport: { value: new THREE.Vector2(1, 1) },
-      },
-      vertexShader: `
-        uniform float uSize;
-        uniform vec2  uViewport;
-        attribute float aLife;      // 0..1
-        attribute float aOriginY;   // origin y for altitude fade
-        varying float vLife;        // pass to frag
-        varying float vHeight;      // delta height from origin
-        varying float vCamZ;        // camera-space depth (>0 in front of camera)
-
-        void main() {
-          vLife = aLife;
-          vHeight = position.y - aOriginY;
-
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vCamZ = -mvPosition.z;
-
-          gl_Position = projectionMatrix * mvPosition;
-
-          // Size attenuation; clamp to avoid huge point sprite
-          float size = uSize * (300.0 / max(0.001, vCamZ));
-          gl_PointSize = clamp(size, 1.0, 128.0);
-        }
-      `,
-      fragmentShader: `
-        uniform vec3  uColor;
-        uniform float uFadeHeight;
-        varying float vLife;     // 0..1 life ratio
-        varying float vHeight;   // world-height from origin
-        varying float vCamZ;
-
-        void main() {
-          vec2 uv = gl_PointCoord * 2.0 - 1.0;
-          float r2 = dot(uv, uv);
-          if (r2 > 1.0) discard;
-          float disk = smoothstep(1.0, 0.0, r2);
-
-          float lifeFade = 1.0 - clamp(vLife, 0.0, 1.0);
-          float h = clamp(vHeight / max(uFadeHeight, 1e-4), 0.0, 1.0);
-          float heightFade = 1.0 - h;
-
-          // Fade out very-near particles (tweak thresholds to taste)
-          float nearFade = smoothstep(0.3, 1.2, vCamZ);
-
-          float alpha = disk * lifeFade * heightFade * nearFade;
-          if (alpha <= 1e-4) discard;
-
-          gl_FragColor = vec4(uColor, alpha);
-        }
-      `,
-    });
-    return mat;
-  }, [color, sizePx, fadeHeight]);
-
-  // Keep viewport uniform in sync
-  useFrame(({ size }) => {
-    material.uniforms.uViewport.value.set(size.width, size.height);
-  });
-
-  // Update simulation
-  useFrame((_, dt) => {
-    if (!geometryRef.current) return;
-
-    const posAttr = geometryRef.current.getAttribute("position");
-    const lifeAttr = geometryRef.current.getAttribute("aLife");
-    const orgAttr = geometryRef.current.getAttribute("aOriginY");
-
-    let any = false;
-    const N = totalParticles;
-    for (let i = 0; i < N; i++) {
-      if (!alive.current[i]) continue;
-
-      ages.current[i] += dt;
-      const life = lifetimes.current[i];
-      if (ages.current[i] >= life) {
-        // Recycle
-        alive.current[i] = 0;
-        pushIndex(i);
-        continue;
-      }
-
-      const i3 = i * 3;
-
-      // dynamics
-      velocities.current[i3 + 1] += -gravity * dt;
-      positions.current[i3 + 0] += velocities.current[i3 + 0] * dt;
-      positions.current[i3 + 1] += velocities.current[i3 + 1] * dt;
-      positions.current[i3 + 2] += velocities.current[i3 + 2] * dt;
-
-      // write positions
-      posAttr.array[i3 + 0] = positions.current[i3 + 0];
-      posAttr.array[i3 + 1] = positions.current[i3 + 1];
-      posAttr.array[i3 + 2] = positions.current[i3 + 2];
-
-      // write life ratio and originY (for altitude fade)
-      lifeAttr.array[i] = ages.current[i] / life;
-      orgAttr.array[i] = origins.current[i3 + 1];
-
-      any = true;
-    }
-
-    if (any) {
-      posAttr.needsUpdate = true;
-      lifeAttr.needsUpdate = true;
-      orgAttr.needsUpdate = true;
-    }
-  });
-
-  // Expose "emitBurst" to parent
-  const emitBurst = (id, count = maxPerBurst) => {
-    const origin = getInstancePosition(id);
-    if (!origin) return;
-
-    const { sx, sy, sz } = getInstanceScale(id);
-    const halfX = Math.max(0.02, sx * boxRatio.x);
-    const halfY = Math.max(0.01, sy * boxRatio.y);
-    const halfZ = Math.max(0.02, sz * boxRatio.z);
-
-    for (let n = 0; n < count; n++) {
-      const idx = popIndex();
-      if (idx == null) break; // pool full
-
-      const i3 = idx * 3;
-
-      // Seed position within box
-      const px = origin.x + (Math.random() * 2 - 1) * halfX;
-      const py = origin.y + Math.random() * halfY; // slightly above cap
-      const pz = origin.z + (Math.random() * 2 - 1) * halfZ;
-      positions.current[i3 + 0] = px;
-      positions.current[i3 + 1] = py;
-      positions.current[i3 + 2] = pz;
-
-      // Save origin for altitude fade
-      origins.current[i3 + 0] = origin.x;
-      origins.current[i3 + 1] = origin.y;
-      origins.current[i3 + 2] = origin.z;
-
-      // Velocity: upwards + small lateral jitter
-      velocities.current[i3 + 0] =
-        (Math.random() * 2 - 1) * lateralJitter * 0.4;
-      velocities.current[i3 + 1] = riseSpeed * (0.8 + Math.random() * 0.4);
-      velocities.current[i3 + 2] =
-        (Math.random() * 2 - 1) * lateralJitter * 0.4;
-
-      // Life
-      ages.current[idx] = 0;
-      lifetimes.current[idx] = rand(lifeSeconds[0], lifeSeconds[1]);
-      alive.current[idx] = 1;
-    }
-
-    // mark position buffer dirty now
-    if (geometryRef.current) {
-      geometryRef.current.attributes.position.needsUpdate = true;
-    }
-  };
-
-  useEffect(() => {
-    if (!refHook) return;
-    refHook.current = { emitBurst };
-    return () => {
-      if (refHook.current) refHook.current = null;
-    };
-  }, [refHook]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <points ref={pointsRef} frustumCulled={false}>
-      <bufferGeometry ref={geometryRef} {...geom} />
-      <primitive object={material} attach="material" />
-    </points>
-  );
-}
-
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
 
@@ -465,27 +228,10 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     ),
   });
 
-  // Per-instance squeeze state
   const currentSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
   const targetSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
   const holdTimers = useRef(Array(INSTANCES.length).fill(0));
   const matricesDirtyRef = useRef(true);
-
-  // Particles ref + helpers for scale/position
-  const particlesRef = useRef(null);
-
-  const getInstanceScale = (id) => {
-    const sc = INSTANCES[id]?.scale ?? 1;
-    const sx = typeof sc === "number" ? sc : sc[0];
-    const sy = typeof sc === "number" ? sc : sc[1];
-    const sz = typeof sc === "number" ? sc : sc[2];
-    return { sx, sy, sz };
-  };
-  const getInstancePosition = (id) => {
-    const p = INSTANCES[id]?.position;
-    if (!p) return null;
-    return new THREE.Vector3(p[0], p[1], p[2]);
-  };
 
   // Click handler (shared for all instanced submeshes)
   const onClickInstance = (e) => {
@@ -494,7 +240,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     const id = e.instanceId;
     if (id == null) return;
 
-    // Squeeze
+    // Squeeze (no particles)
     if (squeezeCtl.autoRelease) {
       targetSqueeze.current[id] = squeezeCtl.squeezeAmount;
       holdTimers.current[id] = Math.max(
@@ -506,9 +252,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       targetSqueeze.current[id] = near ? squeezeCtl.squeezeAmount : 0.0;
     }
     matricesDirtyRef.current = true;
-
-    // Emit particle burst for this instance
-    particlesRef.current?.emitBurst(id);
   };
 
   // Helper to update a uniform on all patched materials
@@ -523,10 +266,16 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     });
   };
 
+  // Track if shaders have been patched to avoid duplicate updates
+  const shadersPatchedRef = useRef(false);
+
   // =========================
   // Shader patch: dissolve + two-color height gradient (global mid/soft)
   // =========================
   useEffect(() => {
+    if (!sources.length) return;
+
+    let patchedAny = false;
     sources.forEach((src) => {
       const mats = Array.isArray(src.material) ? src.material : [src.material];
       mats.forEach((m) => {
@@ -547,7 +296,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             varying float vMaxY;
             ` + shader.vertexShader;
 
-          // Ensure worldPos varyings exist (proper regex + real newline insertion)
+          // Ensure worldPos varyings exist
           if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
             shader.vertexShader = shader.vertexShader.replace(
               "#include <common>",
@@ -561,7 +310,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             );
           }
 
-          // Compute world position safely with instancing
+          // Compute world position (instancing-safe)
           shader.vertexShader = shader.vertexShader.replace(
             "#include <worldpos_vertex>",
             `
@@ -578,20 +327,24 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             `
           );
 
-          // Uniforms
-          shader.uniforms.uProgress = { value: -0.2 };
-          shader.uniforms.uEdgeWidth = { value: 0.15 };
-          shader.uniforms.uNoiseScale = { value: 4.5 };
-          shader.uniforms.uNoiseAmp = { value: 0.8 };
-          shader.uniforms.uGlowStrength = { value: 10.0 };
-          shader.uniforms.uSeed = { value: 321 };
+          // Uniforms with current control values
+          shader.uniforms.uProgress = { value: progressRef.current };
+          shader.uniforms.uEdgeWidth = { value: dissolveCtl.edgeWidth };
+          shader.uniforms.uNoiseScale = { value: dissolveCtl.noiseScale };
+          shader.uniforms.uNoiseAmp = { value: dissolveCtl.noiseAmp };
+          shader.uniforms.uGlowStrength = { value: dissolveCtl.glowStrength };
+          shader.uniforms.uSeed = { value: dissolveCtl.seed };
 
-          // Global gradient
-          shader.uniforms.uBottomColor = { value: new THREE.Color("#da63ff") };
-          shader.uniforms.uTopColor = { value: new THREE.Color("#ffa22b") };
-          shader.uniforms.uMid = { value: 0.51 };
-          shader.uniforms.uSoft = { value: 0.2 };
-          shader.uniforms.uGradIntensity = { value: 1.0 };
+          // Global gradient with current values
+          shader.uniforms.uBottomColor = {
+            value: new THREE.Color(gradCtl.bottomColor),
+          };
+          shader.uniforms.uTopColor = {
+            value: new THREE.Color(gradCtl.topColor),
+          };
+          shader.uniforms.uMid = { value: gradCtl.height };
+          shader.uniforms.uSoft = { value: gradCtl.soft };
+          shader.uniforms.uGradIntensity = { value: gradCtl.intensity };
 
           const fragPrelude = /* glsl */ `
             uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uSeed, uGlowStrength;
@@ -691,44 +444,67 @@ export default forwardRef(function MagicMushrooms(props, ref) {
 
         m.userData.rtPatched = true;
         m.needsUpdate = true;
+        patchedAny = true;
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sources]);
+
+    if (patchedAny) {
+      shadersPatchedRef.current = true;
+    }
+  }, [sources, dissolveCtl.edgeWidth, dissolveCtl.noiseScale, dissolveCtl.noiseAmp, dissolveCtl.glowStrength, dissolveCtl.seed, gradCtl.bottomColor, gradCtl.topColor, gradCtl.height, gradCtl.soft, gradCtl.intensity]);
 
   // =========================
-  // Live uniform updates
+  // Live uniform updates (FIXED: use actual control values)
   // =========================
-  useEffect(
-    () => updateUniformAll("uEdgeWidth", 0.15),
-    [dissolveCtl.edgeWidth]
-  );
-  useEffect(
-    () => updateUniformAll("uNoiseScale", 4.5),
-    [dissolveCtl.noiseScale]
-  );
-  useEffect(() => updateUniformAll("uNoiseAmp", 0.8), [dissolveCtl.noiseAmp]);
-  useEffect(
-    () => updateUniformAll("uGlowStrength", 10.0),
-    [dissolveCtl.glowStrength]
-  );
-  useEffect(() => updateUniformAll("uSeed", 321), [dissolveCtl.seed]);
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uEdgeWidth", dissolveCtl.edgeWidth);
+  }, [dissolveCtl.edgeWidth]);
 
-  useEffect(
-    () =>
-      updateUniformAll("uBottomColor", new THREE.Color(gradCtl.bottomColor)),
-    [gradCtl.bottomColor]
-  );
-  useEffect(
-    () => updateUniformAll("uTopColor", new THREE.Color(gradCtl.topColor)),
-    [gradCtl.topColor]
-  );
-  useEffect(() => updateUniformAll("uMid", gradCtl.height), [gradCtl.height]);
-  useEffect(() => updateUniformAll("uSoft", gradCtl.soft), [gradCtl.soft]);
-  useEffect(
-    () => updateUniformAll("uGradIntensity", gradCtl.intensity),
-    [gradCtl.intensity]
-  );
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uNoiseScale", dissolveCtl.noiseScale);
+  }, [dissolveCtl.noiseScale]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uNoiseAmp", dissolveCtl.noiseAmp);
+  }, [dissolveCtl.noiseAmp]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uGlowStrength", dissolveCtl.glowStrength);
+  }, [dissolveCtl.glowStrength]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uSeed", dissolveCtl.seed);
+  }, [dissolveCtl.seed]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uBottomColor", new THREE.Color(gradCtl.bottomColor));
+  }, [gradCtl.bottomColor]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uTopColor", new THREE.Color(gradCtl.topColor));
+  }, [gradCtl.topColor]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uMid", gradCtl.height);
+  }, [gradCtl.height]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uSoft", gradCtl.soft);
+  }, [gradCtl.soft]);
+
+  useEffect(() => {
+    if (!shadersPatchedRef.current) return;
+    updateUniformAll("uGradIntensity", gradCtl.intensity);
+  }, [gradCtl.intensity]);
 
   // =========================
   // Dissolve animation
@@ -797,7 +573,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
 
   useEffect(() => {
     assignInstances();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, INSTANCES]);
 
   // =========================
@@ -845,9 +620,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
         const pos = cfg.position;
 
         const amount = currentSqueeze.current[i]; // 0..squeezeAmount
-        // Build squeezed scale:
-        // - Y compressed by (1 - amount)
-        // - X/Z inflated by (1 + k*amount) if preserveVolume
         const baseS = cfg.scale ?? 1;
         const baseSX = typeof baseS === "number" ? baseS : baseS[0];
         const baseSY = typeof baseS === "number" ? baseS : baseS[1];
@@ -885,25 +657,6 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       name="MagicMushrooms"
       {...props}
     >
-      {/* Particle pool (single) */}
-      <MushroomClickParticles
-        refHook={particlesRef}
-        INSTANCES={INSTANCES}
-        getInstanceScale={getInstanceScale}
-        getInstancePosition={getInstancePosition}
-        // Optional tunables:
-        maxPerBurst={60}
-        maxBursts={16}
-        riseSpeed={1.25}
-        lateralJitter={0.45}
-        gravity={0.0}
-        lifeSeconds={[0.6, 1.1]}
-        boxRatio={{ x: 0.6, y: 0.3, z: 0.6 }}
-        fadeHeight={1.25}
-        color={"#ffd2a0"}
-        sizePx={11}
-      />
-
       {/* Instanced mushrooms (all submeshes) */}
       {sources.map((src, idx) => (
         <instancedMesh
