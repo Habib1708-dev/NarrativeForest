@@ -2,13 +2,77 @@
 import React, { useEffect, useMemo, useRef, forwardRef } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useControls, folder, button } from "leva";
 
 const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 
+// === Optimized Firefly Shaders ===
+const firefliesFragmentShader = `
+uniform vec3 uColor;
+varying float vAlpha;
+
+void main() {
+  vec2 uv = gl_PointCoord - vec2(0.5);
+  float r = length(uv);
+  if (r > 0.5) discard;
+
+  // Simple soft circle
+  float alpha = (1.0 - r * 2.0) * vAlpha;
+  if (alpha <= 0.01) discard;
+  
+  gl_FragColor = vec4(uColor, alpha);
+}
+`;
+
+const firefliesVertexShader = `
+uniform float uPixelRatio;
+uniform float uSize;
+uniform float uTime;
+
+attribute vec3 aVelocity;
+attribute float aLifetime;
+attribute float aBirthTime;
+attribute float aSize;
+
+varying float vAlpha;
+
+void main() {
+  float age = uTime - aBirthTime;
+  
+  // Skip dead particles
+  if (age < 0.0 || age > aLifetime) {
+    gl_Position = vec4(0.0, 0.0, 0.0, -1.0); // Clip
+    vAlpha = 0.0;
+    return;
+  }
+  
+  // Simple physics: position + velocity * time + gravity
+  vec3 pos = position + aVelocity * age;
+  pos.y += -0.5 * age * age; // Simple gravity
+  
+  vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  
+  // Fade based on lifetime
+  float lifeRatio = age / aLifetime;
+  vAlpha = 1.0 - lifeRatio;
+  
+  // Size
+  gl_PointSize = aSize * uPixelRatio;
+  gl_PointSize *= (1.0 / -mvPosition.z);
+}
+`;
+
+// Stable RNG helpers
+const seeded = (i, salt = 1) => {
+  const x = Math.sin((i + 1) * 12.9898 * (salt + 1)) * 43758.5453;
+  return x - Math.floor(x);
+};
+
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
+  const { gl, clock } = useThree();
 
   // ----- Instance placements (7th mushroom Y adjusted to -4.82) -----
   const INSTANCES = useMemo(
@@ -149,7 +213,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const gradCtl = useControls({
     Gradient: folder(
       {
-        bottomColor: { value: "#da63ff", label: "Bottom" },
+        bottomColor: { value: "#ffa22b", label: "Bottom" },
         topColor: { value: "#ffa22b", label: "Top" },
         height: {
           value: 0.51,
@@ -178,7 +242,55 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   });
 
   // =========================
-  // Interaction (Click → Squeeze)
+  // Fireflies controls
+  // =========================
+  const fireflyCtl = useControls({
+    Fireflies: folder(
+      {
+        enabled: { value: true, label: "Enabled" },
+        burstCount: {
+          value: 30,
+          min: 10,
+          max: 100,
+          step: 1,
+          label: "Particles per Burst",
+        },
+        pointSize: {
+          value: 6,
+          min: 1,
+          max: 8,
+          step: 0.5,
+          label: "Point Size (px)",
+        },
+        lifetime: {
+          value: 1.0,
+          min: 1.0,
+          max: 8.0,
+          step: 0.1,
+          label: "Lifetime (seconds)",
+        },
+        upwardSpeed: {
+          value: 0.5,
+          min: 0.05,
+          max: 0.5,
+          step: 0.01,
+          label: "Upward Speed",
+        },
+        lateralSpread: {
+          value: 0.3,
+          min: 0.01,
+          max: 0.3,
+          step: 0.005,
+          label: "Lateral Spread",
+        },
+        color: { value: "#ffc353ff", label: "Color" },
+      },
+      { collapsed: false }
+    ),
+  });
+
+  // =========================
+  // Interaction (Click → Squeeze + Fireflies)
   // =========================
   const squeezeCtl = useControls({
     Interaction: folder(
@@ -221,6 +333,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             currentSqueeze.current[i] = 0;
             holdTimers.current[i] = 0;
           }
+          // Clear all fireflies
+          activeParticles.current = [];
+          if (fireflyGeometry.current) {
+            updateFireflyGeometry();
+          }
           matricesDirtyRef.current = true;
         }),
       },
@@ -233,14 +350,22 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const holdTimers = useRef(Array(INSTANCES.length).fill(0));
   const matricesDirtyRef = useRef(true);
 
-  // Click handler (shared for all instanced submeshes)
+  // =========================
+  // Firefly burst system
+  // =========================
+  const activeParticles = useRef([]);
+  const fireflyGeometry = useRef(null);
+  const fireflyMaterial = useRef(null);
+  const maxParticles = 500; // Pool size
+
+  // Click handler
   const onClickInstance = (e) => {
     if (!squeezeCtl.enabled) return;
     e.stopPropagation();
     const id = e.instanceId;
     if (id == null) return;
 
-    // Squeeze (no particles)
+    // Squeeze
     if (squeezeCtl.autoRelease) {
       targetSqueeze.current[id] = squeezeCtl.squeezeAmount;
       holdTimers.current[id] = Math.max(
@@ -251,7 +376,147 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       const near = Math.abs(targetSqueeze.current[id]) < 1e-3;
       targetSqueeze.current[id] = near ? squeezeCtl.squeezeAmount : 0.0;
     }
+
+    // Emit fireflies
+    if (fireflyCtl.enabled) {
+      emitFireflies(INSTANCES[id].position);
+    }
+
     matricesDirtyRef.current = true;
+  };
+
+  // Emit fireflies from a position
+  const emitFireflies = (position) => {
+    const currentTime = clock.getElapsedTime();
+    const burstCount = fireflyCtl.burstCount;
+
+    for (let i = 0; i < burstCount; i++) {
+      // Start at mushroom center with tiny random offset
+      const x = position[0] + (Math.random() - 0.5) * 0.02;
+      const z = position[2] + (Math.random() - 0.5) * 0.02;
+      const y = position[1] + 0.05; // Slightly above mushroom
+
+      // Velocities: ONLY positive Y (upward), small lateral drift
+      const vx = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
+      const vz = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
+      const vy = fireflyCtl.upwardSpeed + Math.random() * 0.05; // GUARANTEED positive upward
+
+      // Random lifetime and fade timing
+      const lifetime = fireflyCtl.lifetime * (0.7 + Math.random() * 0.6);
+      const fadeStart = lifetime * (0.4 + Math.random() * 0.3);
+
+      // Tiny size
+      const size = fireflyCtl.pointSize * (0.8 + Math.random() * 0.4);
+
+      activeParticles.current.push({
+        position: [x, y, z],
+        velocity: [vx, vy, vz], // vy is ALWAYS positive
+        birthTime: currentTime,
+        lifetime: lifetime,
+        fadeStart: fadeStart,
+        size: size,
+      });
+    }
+
+    // Limit total particles
+    if (activeParticles.current.length > maxParticles) {
+      activeParticles.current = activeParticles.current.slice(-maxParticles);
+    }
+
+    updateFireflyGeometry();
+  };
+
+  // Update geometry with active particles
+  const updateFireflyGeometry = () => {
+    if (!fireflyGeometry.current || !fireflyMaterial.current) return;
+
+    const count = activeParticles.current.length;
+    if (count === 0) {
+      // Hide all particles
+      const positions = new Float32Array(maxParticles * 3);
+      const velocities = new Float32Array(maxParticles * 3);
+      const birthTimes = new Float32Array(maxParticles);
+      const lifetimes = new Float32Array(maxParticles);
+      const fadeStarts = new Float32Array(maxParticles);
+      const sizes = new Float32Array(maxParticles);
+
+      fireflyGeometry.current.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+      fireflyGeometry.current.setAttribute(
+        "aVelocity",
+        new THREE.BufferAttribute(velocities, 3)
+      );
+      fireflyGeometry.current.setAttribute(
+        "aBirthTime",
+        new THREE.BufferAttribute(birthTimes, 1)
+      );
+      fireflyGeometry.current.setAttribute(
+        "aLifetime",
+        new THREE.BufferAttribute(lifetimes, 1)
+      );
+      fireflyGeometry.current.setAttribute(
+        "aFadeStart",
+        new THREE.BufferAttribute(fadeStarts, 1)
+      );
+      fireflyGeometry.current.setAttribute(
+        "aSize",
+        new THREE.BufferAttribute(sizes, 1)
+      );
+      fireflyGeometry.current.setDrawRange(0, 0);
+      return;
+    }
+
+    const positions = new Float32Array(maxParticles * 3);
+    const velocities = new Float32Array(maxParticles * 3);
+    const birthTimes = new Float32Array(maxParticles);
+    const lifetimes = new Float32Array(maxParticles);
+    const fadeStarts = new Float32Array(maxParticles);
+    const sizes = new Float32Array(maxParticles);
+
+    for (let i = 0; i < count && i < maxParticles; i++) {
+      const p = activeParticles.current[i];
+
+      positions[i * 3] = p.position[0];
+      positions[i * 3 + 1] = p.position[1];
+      positions[i * 3 + 2] = p.position[2];
+
+      velocities[i * 3] = p.velocity[0];
+      velocities[i * 3 + 1] = p.velocity[1];
+      velocities[i * 3 + 2] = p.velocity[2];
+
+      birthTimes[i] = p.birthTime;
+      lifetimes[i] = p.lifetime;
+      fadeStarts[i] = p.fadeStart;
+      sizes[i] = p.size;
+    }
+
+    fireflyGeometry.current.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3)
+    );
+    fireflyGeometry.current.setAttribute(
+      "aVelocity",
+      new THREE.BufferAttribute(velocities, 3)
+    );
+    fireflyGeometry.current.setAttribute(
+      "aBirthTime",
+      new THREE.BufferAttribute(birthTimes, 1)
+    );
+    fireflyGeometry.current.setAttribute(
+      "aLifetime",
+      new THREE.BufferAttribute(lifetimes, 1)
+    );
+    fireflyGeometry.current.setAttribute(
+      "aFadeStart",
+      new THREE.BufferAttribute(fadeStarts, 1)
+    );
+    fireflyGeometry.current.setAttribute(
+      "aSize",
+      new THREE.BufferAttribute(sizes, 1)
+    );
+    fireflyGeometry.current.setDrawRange(0, Math.min(count, maxParticles));
   };
 
   // Helper to update a uniform on all patched materials
@@ -268,6 +533,64 @@ export default forwardRef(function MagicMushrooms(props, ref) {
 
   // Track if shaders have been patched to avoid duplicate updates
   const shadersPatchedRef = useRef(false);
+
+  // =========================
+  // Initialize firefly system
+  // =========================
+  useEffect(() => {
+    if (!fireflyCtl.enabled) return;
+
+    // Clean up old resources
+    if (fireflyGeometry.current) {
+      fireflyGeometry.current.dispose();
+    }
+    if (fireflyMaterial.current) {
+      fireflyMaterial.current.dispose();
+    }
+
+    // Create geometry
+    fireflyGeometry.current = new THREE.BufferGeometry();
+
+    // Create material
+    const pixelRatio = Math.min(gl.getPixelRatio ? gl.getPixelRatio() : 1, 2);
+    fireflyMaterial.current = new THREE.ShaderMaterial({
+      vertexShader: firefliesVertexShader,
+      fragmentShader: firefliesFragmentShader,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      uniforms: {
+        uPixelRatio: { value: pixelRatio },
+        uSize: { value: fireflyCtl.pointSize },
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(fireflyCtl.color) },
+      },
+    });
+
+    // Initialize with empty geometry
+    updateFireflyGeometry();
+
+    return () => {
+      if (fireflyGeometry.current) {
+        fireflyGeometry.current.dispose();
+        fireflyGeometry.current = null;
+      }
+      if (fireflyMaterial.current) {
+        fireflyMaterial.current.dispose();
+        fireflyMaterial.current = null;
+      }
+    };
+  }, [fireflyCtl.enabled, gl]);
+
+  // Update firefly material uniforms
+  useEffect(() => {
+    if (!fireflyMaterial.current) return;
+    const pixelRatio = Math.min(gl.getPixelRatio ? gl.getPixelRatio() : 1, 2);
+    fireflyMaterial.current.uniforms.uPixelRatio.value = pixelRatio;
+    fireflyMaterial.current.uniforms.uSize.value = fireflyCtl.pointSize;
+    fireflyMaterial.current.uniforms.uColor.value.set(fireflyCtl.color);
+  }, [gl, fireflyCtl.pointSize, fireflyCtl.color]);
 
   // =========================
   // Shader patch: dissolve + two-color height gradient (global mid/soft)
@@ -454,7 +777,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   }, [sources, dissolveCtl.edgeWidth, dissolveCtl.noiseScale, dissolveCtl.noiseAmp, dissolveCtl.glowStrength, dissolveCtl.seed, gradCtl.bottomColor, gradCtl.topColor, gradCtl.height, gradCtl.soft, gradCtl.intensity]);
 
   // =========================
-  // Live uniform updates (FIXED: use actual control values)
+  // Live uniform updates
   // =========================
   useEffect(() => {
     if (!shadersPatchedRef.current) return;
@@ -576,12 +899,13 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   }, [sources, INSTANCES]);
 
   // =========================
-  // Animate squeeze + update matrices
+  // Animate squeeze + update matrices + cull dead fireflies
   // =========================
   const tmpObj = useRef(new THREE.Object3D());
   useFrame((_, dt) => {
     const N = INSTANCES.length;
     let anyChanged = false;
+    const currentTime = clock.getElapsedTime();
 
     // timers + targets
     for (let i = 0; i < N; i++) {
@@ -592,6 +916,20 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           targetSqueeze.current[i] = 0; // release
           matricesDirtyRef.current = true;
         }
+      }
+    }
+
+    // Cull dead fireflies (performance optimization)
+    const initialCount = activeParticles.current.length;
+    if (initialCount > 0) {
+      activeParticles.current = activeParticles.current.filter((p) => {
+        const age = currentTime - p.birthTime;
+        return age >= 0 && age <= p.lifetime;
+      });
+
+      // Update geometry if particles were removed
+      if (activeParticles.current.length !== initialCount) {
+        updateFireflyGeometry();
       }
     }
 
@@ -643,6 +981,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       }
       imesh.instanceMatrix.needsUpdate = true;
     });
+
+    // Update firefly time uniform
+    if (fireflyMaterial.current) {
+      fireflyMaterial.current.uniforms.uTime.value = currentTime;
+    }
   });
 
   if (!scene || sources.length === 0) return null;
@@ -670,6 +1013,17 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           onPointerDown={onClickInstance}
         />
       ))}
+
+      {/* Single firefly points system */}
+      {fireflyCtl.enabled &&
+        fireflyGeometry.current &&
+        fireflyMaterial.current && (
+          <points
+            geometry={fireflyGeometry.current}
+            material={fireflyMaterial.current}
+            frustumCulled={false}
+          />
+        )}
     </group>
   );
 });

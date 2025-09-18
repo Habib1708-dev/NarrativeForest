@@ -279,7 +279,7 @@ export default function Experience() {
         />
         <MagicMushrooms ref={mushroomsRef} />
         {/* <Fireflies /> */}
-        <UnifiedCrystalClusters />
+        {/* <UnifiedCrystalClusters /> */}
       </Suspense>
 
       <DistanceFade
