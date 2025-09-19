@@ -22,6 +22,8 @@ export default forwardRef(function RadioTower(_, ref) {
   useImperativeHandle(ref, () => rootRef.current, []);
 
   const materialsRef = useRef([]);
+
+  // Gather unique materials, cache original flags/colors
   useEffect(() => {
     if (!cloned) return;
     const mats = new Map();
@@ -31,12 +33,18 @@ export default forwardRef(function RadioTower(_, ref) {
       o.receiveShadow = true;
       const arr = Array.isArray(o.material) ? o.material : [o.material];
       arr.forEach((m) => {
-        if (!m) return;
-        if (m.color && !m.userData._origColor) {
+        if (!m || !m.isMaterial) return;
+        if (!m.userData._origColor && m.color) {
           m.userData._origColor = m.color.clone();
         }
-        // Important for Bloom Option B: allow HDR to pass through
-        m.toneMapped = false;
+        if (m.userData._origTransparent === undefined) {
+          m.userData._origTransparent = !!m.transparent;
+        }
+        if (m.userData._origToneMapped === undefined) {
+          // default for most three mats is true, but read current flag if present
+          m.userData._origToneMapped =
+            m.toneMapped !== undefined ? m.toneMapped : true;
+        }
         mats.set(m.uuid, m);
       });
     });
@@ -142,6 +150,7 @@ export default forwardRef(function RadioTower(_, ref) {
     tintIntensity,
   } = params;
 
+  // live tint (preserve original color as base)
   useEffect(() => {
     const target = new THREE.Color(tintColor);
     materialsRef.current.forEach((m) => {
@@ -165,31 +174,43 @@ export default forwardRef(function RadioTower(_, ref) {
     [scale, heightScale]
   );
 
-  // -------- Dissolve (robust, chainable) --------
+  // -------- Dissolve state --------
   const progressRef = useRef(-0.2);
   const worldYRangeRef = useRef({ min: 0, max: 1 });
 
   const updateUniformAll = (name, val) => {
     materialsRef.current.forEach((m) => {
       const sh = m?.userData?.rtShader;
-      if (sh && sh.uniforms && name in sh.uniforms)
+      if (sh?.uniforms && name in sh.uniforms) {
         sh.uniforms[name].value = val;
+      }
     });
   };
 
+  // Patch materials once; preserve transparency & tone mapping intent
   useEffect(() => {
     materialsRef.current.forEach((m) => {
       if (!m || m.userData.rtPatched) return;
-      // Skip lines/points/custom shader mats
-      if (m.isShaderMaterial || m.isPointsMaterial || m.isLineBasicMaterial)
-        return;
+
+      // Skip shader, points, and ALL line materials
+      if (m.isShaderMaterial || m.isPointsMaterial || m.isLineMaterial) return;
+
+      // Respect original transparency; configure for stable dissolve
+      const wasTransparent = !!m.userData._origTransparent;
+      if (wasTransparent) {
+        m.transparent = true;
+        m.alphaTest = Math.max(m.alphaTest || 0, 0.001);
+        m.depthWrite = false; // avoid depth artifacts with transparency
+      } else {
+        m.transparent = false;
+        m.depthWrite = true;
+      }
 
       const prevOnBeforeCompile = m.onBeforeCompile;
-
       m.onBeforeCompile = (shader) => {
         prevOnBeforeCompile?.(shader);
 
-        // add varying worldPos once
+        // Add varying only once
         if (!/varying\s+vec3\s+worldPos\s*;/.test(shader.vertexShader)) {
           shader.vertexShader = shader.vertexShader.replace(
             "#include <common>",
@@ -203,13 +224,13 @@ export default forwardRef(function RadioTower(_, ref) {
           );
         }
 
-        // instancing-safe world position
+        // Correct matrix order: modelMatrix * instanceMatrix
         shader.vertexShader = shader.vertexShader.replace(
           "#include <worldpos_vertex>",
           `
           #include <worldpos_vertex>
           #ifdef USE_INSTANCING
-            mat4 rtModel = instanceMatrix * modelMatrix;
+            mat4 rtModel = modelMatrix * instanceMatrix;
           #else
             mat4 rtModel = modelMatrix;
           #endif
@@ -265,7 +286,7 @@ export default forwardRef(function RadioTower(_, ref) {
           `#include <common>\n${fragPrelude}`
         );
 
-        // insert dissolve gate at start of main
+        // Gate
         shader.fragmentShader = shader.fragmentShader.replace(
           "void main() {",
           `void main() {
@@ -277,7 +298,7 @@ export default forwardRef(function RadioTower(_, ref) {
           `
         );
 
-        // add glow to the final color **just before** tonemapping (works for Phong/Lambert/Basic/Standard)
+        // Edge glow injection (before tonemapping/colorspace)
         if (shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
           shader.fragmentShader = shader.fragmentShader.replace(
             "#include <tonemapping_fragment>",
@@ -289,7 +310,6 @@ export default forwardRef(function RadioTower(_, ref) {
         } else if (
           shader.fragmentShader.includes("#include <colorspace_fragment>")
         ) {
-          // Fallback for materials without tonemapping chunk
           shader.fragmentShader = shader.fragmentShader.replace(
             "#include <colorspace_fragment>",
             `
@@ -298,7 +318,6 @@ export default forwardRef(function RadioTower(_, ref) {
             `
           );
         } else {
-          // Last resort: append before closing brace
           shader.fragmentShader = shader.fragmentShader.replace(
             /}\s*$/,
             `
@@ -312,12 +331,25 @@ export default forwardRef(function RadioTower(_, ref) {
       };
 
       m.userData.rtPatched = true;
-      m.transparent = false; // keep depth writes; we use discard for the cut
+      // toneMapped policy: only disable when we actually want strong HDR edge
+      m.toneMapped =
+        params.glowStrength > 0 ? false : m.userData._origToneMapped;
       m.needsUpdate = true;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.edgeWidth, params.noiseScale, params.noiseAmp, params.glowStrength, params.glowColor, params.seed]);
 
-  // live uniform updates
+  // Update toneMapped dynamically if glowStrength changes
+  useEffect(() => {
+    const wantHDR = params.glowStrength > 0;
+    materialsRef.current.forEach((m) => {
+      if (!m || !m.userData) return;
+      m.toneMapped = wantHDR ? false : m.userData._origToneMapped;
+      m.needsUpdate = true;
+    });
+  }, [params.glowStrength]);
+
+  // Live uniform updates
   useEffect(
     () => updateUniformAll("uEdgeWidth", params.edgeWidth),
     [params.edgeWidth]
@@ -350,10 +382,21 @@ export default forwardRef(function RadioTower(_, ref) {
     updateUniformAll("uMaxY", worldYRangeRef.current.max);
   };
 
+  // Update bbox on placement edits
   useEffect(() => {
     updateWorldYRange();
   }, [cloned, positionX, positionY, positionZ, rotationYDeg, scale, heightScale]);
 
+  // Small stabilization window to avoid stale bbox after mount/hot-reload
+  const initUpdateRef = useRef(2);
+  useFrame(() => {
+    if (initUpdateRef.current > 0) {
+      updateWorldYRange();
+      initUpdateRef.current--;
+    }
+  });
+
+  // Animate dissolve
   useFrame((_, dt) => {
     const target = params.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);

@@ -245,7 +245,7 @@ export default function Experience() {
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
         <Cat ref={catRef} />
-        {/* <RadioTower ref={radioTowerRef} /> */}
+        <RadioTower ref={radioTowerRef} />
         <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
