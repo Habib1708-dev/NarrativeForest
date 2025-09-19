@@ -277,9 +277,9 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
-        <MagicMushrooms ref={mushroomsRef} />
+        {/* <MagicMushrooms ref={mushroomsRef} /> */}
         {/* <Fireflies /> */}
-        {/* <UnifiedCrystalClusters /> */}
+        <UnifiedCrystalClusters />
       </Suspense>
 
       <DistanceFade

@@ -2,12 +2,12 @@
 import React, { forwardRef, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
-import { useControls, folder } from "leva";
+import { useControls, folder, button } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
 
-const GLB_A = "/models/magicPlantsAndCrystal/CrystalCluster.glb"; // A
-const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb"; // B
-const GLB_C = "/models/magicPlantsAndCrystal/CrystalCluster4.glb"; // C
+const GLB_A = "/models/magicPlantsAndCrystal/CrystalCluster.glb";
+const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
+const GLB_C = "/models/magicPlantsAndCrystal/CrystalCluster4.glb";
 
 const COUNT_A = 15;
 const COUNT_B = 34;
@@ -18,8 +18,6 @@ const d2r = (deg) => (deg * Math.PI) / 180;
 // -----------------------------
 // BAKED TRANSFORMS (from files)
 // -----------------------------
-
-// A
 const BAKED_A = [
   {
     px: -2.6,
@@ -173,7 +171,6 @@ const BAKED_A = [
   },
 ];
 
-// B
 const BAKED_B = [
   { px: -2.32, py: -4.66, pz: -1.52, ry: 77.4, s: 0.077 },
   { px: -2.48, py: -4.71, pz: -1.97, ry: 30.7, s: 0.041 },
@@ -203,7 +200,6 @@ const BAKED_B = [
   { px: -1.944, py: -4.7, pz: -1.92, ry: -32.9, s: 0.07 },
   { px: -2.48, py: -4.62, pz: -2.18, ry: -63.9, s: 0.067 },
   { px: -0.991, py: -4.72, pz: -2.075, ry: 0.0, s: 0.086 },
-  /* 28 missing in source: will fallback */
   { px: -0.986, py: -4.35, pz: -3.058, ry: -155.2, s: 0.105 },
   { px: -1.014, py: -4.336, pz: -2.972, ry: -107.6, s: 0.099 },
   { px: -0.991, py: -4.353, pz: -3.271, ry: -87.1, s: 0.105 },
@@ -212,7 +208,6 @@ const BAKED_B = [
   { px: -1.048, py: -4.579, pz: -2.374, s: 0.079 },
 ];
 
-// C
 const FALLBACK_C = { px: -2.0, py: -4.0, pz: -2.0, ry: 0.0, s: 0.15 };
 const BAKED_C = [
   { px: -2.47, py: -4.56, pz: -1.5, ry: -30.4, s: 0.18 },
@@ -234,9 +229,9 @@ const BAKED_C = [
 ];
 
 // ---------------------------------------------
-// Unified material (same controls/shader for A/B/C)
+// Unified material with gradient/shine/hover + dissolve + cooldown
 // ---------------------------------------------
-function useUnifiedCrystalMaterial(unified) {
+function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
   const mat = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
       transmission: 1.0,
@@ -252,19 +247,57 @@ function useUnifiedCrystalMaterial(unified) {
       attenuationDistance: unified.U_attenuationDistance,
       transparent: false,
       opacity: 1.0,
-      toneMapped: true,
+      toneMapped: false, // keep HDR for Bloom
       flatShading: true,
       side: THREE.FrontSide,
       emissive: new THREE.Color("#000000"),
       emissiveIntensity: unified.U_emissiveIntensity,
     });
 
+    const prevOBC = m.onBeforeCompile;
     m.onBeforeCompile = (shader) => {
-      // object-space Y range for local gradient
+      prevOBC?.(shader);
+
+      // Vertex prep
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        `
+        #include <common>
+        uniform float uObjMinY, uObjMaxY;
+        varying float vH;
+        attribute float aInstY01;
+        varying float vInstY01;
+        varying vec3 rtWorldPos;
+        `
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `
+        #include <begin_vertex>
+        vec3 pos = transformed;
+        #ifdef USE_INSTANCING
+          mat4 MI = modelMatrix * instanceMatrix;
+        #else
+          mat4 MI = modelMatrix;
+        #endif
+        vec4 wp = MI * vec4(pos, 1.0);
+
+        float ty = MI[3].y;
+        float sy = length(vec3(MI[1].x, MI[1].y, MI[1].z));
+        float yMin = ty + sy * uObjMinY;
+        float yMax = ty + sy * uObjMaxY;
+        vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
+
+        vInstY01 = aInstY01;
+        rtWorldPos = wp.xyz;
+        `
+      );
+
+      // Per-object bbox
       shader.uniforms.uObjMinY = { value: 0.0 };
       shader.uniforms.uObjMaxY = { value: 1.0 };
 
-      // unified gradient + boosts
+      // Gradient / shine
       shader.uniforms.uU_ColorA = { value: new THREE.Color(unified.U_colorA) };
       shader.uniforms.uU_ColorB = { value: new THREE.Color(unified.U_colorB) };
       shader.uniforms.uU_Mid = { value: unified.U_mid };
@@ -282,59 +315,30 @@ function useUnifiedCrystalMaterial(unified) {
       shader.uniforms.uU_EmissiveIntensity = {
         value: unified.U_emissiveIntensity,
       };
-
-      // Shine
       shader.uniforms.uU_ReflectBoost = { value: unified.U_reflectBoost };
       shader.uniforms.uU_ReflectPower = { value: unified.U_reflectPower };
       shader.uniforms.uU_RimBoost = { value: unified.U_rimBoost };
       shader.uniforms.uU_RimPower = { value: unified.U_rimPower };
-
-      // Uniformization (fade out global instance-height bias on hover)
       shader.uniforms.uU_UniformFactor = { value: 0.0 };
       shader.uniforms.uU_InstBiasAmp = { value: 0.6 };
 
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <common>",
-        `
-        #include <common>
-        uniform float uObjMinY, uObjMaxY;
-        varying float vH;           // local per-vertex 0..1
-        attribute float aInstY01;   // GLOBAL instance Y 0..1 (instanced attribute)
-        varying float vInstY01;
-        `
-      );
-
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <begin_vertex>",
-        `
-        #include <begin_vertex>
-        vec3 pos = transformed;
-
-        #ifdef USE_INSTANCING
-          mat4 MI = modelMatrix * instanceMatrix;
-          vec4 wp = MI * vec4(pos, 1.0);
-          float ty = MI[3].y;
-          float sy = length(vec3(MI[1].x, MI[1].y, MI[1].z));
-          float yMin = ty + sy * uObjMinY;
-          float yMax = ty + sy * uObjMaxY;
-        #else
-          mat4 MI = modelMatrix;
-          vec4 wp = MI * vec4(pos, 1.0);
-          float ty = MI[3].y;
-          float sy = length(vec3(MI[1].x, MI[1].y, MI[1].z));
-          float yMin = ty + sy * uObjMinY;
-          float yMax = ty + sy * uObjMaxY;
-        #endif
-
-        vH = clamp((wp.y - yMin) / max(1e-5, (yMax - yMin)), 0.0, 1.0);
-        vInstY01 = aInstY01;
-        `
-      );
+      // Dissolve + cooldown
+      shader.uniforms.uProgress = { value: progressRef.current };
+      shader.uniforms.uEdgeWidth = { value: dissolveParams.edgeWidth };
+      shader.uniforms.uNoiseScale = { value: dissolveParams.noiseScale };
+      shader.uniforms.uNoiseAmp = { value: dissolveParams.noiseAmp };
+      shader.uniforms.uGlowStrength = { value: dissolveParams.glowStrength };
+      shader.uniforms.uGlowColor = {
+        value: new THREE.Color(dissolveParams.glowColor),
+      };
+      shader.uniforms.uSeed = { value: dissolveParams.seed };
+      shader.uniforms.uCoolMix = { value: 0.0 }; // 0..1 heat/glow multiplier
 
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
         `
         #include <common>
+        // Gradient
         uniform vec3  uU_ColorA;
         uniform vec3  uU_ColorB;
         uniform float uU_Mid, uU_Soft;
@@ -349,7 +353,7 @@ function useUnifiedCrystalMaterial(unified) {
         uniform float uU_RimBoost;
         uniform float uU_RimPower;
 
-        uniform float uU_UniformFactor; // 0..1
+        uniform float uU_UniformFactor;
         uniform float uU_InstBiasAmp;
 
         varying float vH;
@@ -360,6 +364,51 @@ function useUnifiedCrystalMaterial(unified) {
           float f = clamp(1.0 + amount, 0.0, 2.5);
           return mix(vec3(l), c, f);
         }
+
+        // Dissolve
+        varying vec3 rtWorldPos;
+        uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uSeed, uGlowStrength, uCoolMix;
+        uniform vec3  uGlowColor;
+
+        float rt_hash(vec3 p){
+          p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+        float rt_vnoise(vec3 x){
+          vec3 i = floor(x);
+          vec3 f = fract(x);
+          vec3 u = f*f*(3.0-2.0*f);
+          float n000 = rt_hash(i + vec3(0,0,0));
+          float n100 = rt_hash(i + vec3(1,0,0));
+          float n010 = rt_hash(i + vec3(0,1,0));
+          float n110 = rt_hash(i + vec3(1,1,0));
+          float n001 = rt_hash(i + vec3(0,0,1));
+          float n101 = rt_hash(i + vec3(1,0,1));
+          float n011 = rt_hash(i + vec3(0,1,1));
+          float n111 = rt_hash(i + vec3(1,1,1));
+          float nx00 = mix(n000, n100, u.x);
+          float nx10 = mix(n010, n110, u.x);
+          float nx01 = mix(n001, n101, u.x);
+          float nx11 = mix(n011, n111, u.x);
+          float nxy0 = mix(nx00, nx10, u.y);
+          float nxy1 = mix(nx01, nx11, u.y);
+          return mix(nxy0, nxy1, u.z);
+        }
+        `
+      );
+
+      // Dissolve gate by local height (vH), with safe jitter
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        `
+        void main() {
+          float noiseVal = rt_vnoise(rtWorldPos * uNoiseScale + vec3(uSeed));
+          float jitter = (noiseVal - 0.5) * uNoiseAmp * max(0.0, uProgress);
+          float cutoff = uProgress + jitter;
+          float y01 = vH;
+          if (y01 > cutoff) { discard; }
+          float edge = smoothstep(0.0, uEdgeWidth, cutoff - y01);
         `
       );
 
@@ -372,34 +421,26 @@ function useUnifiedCrystalMaterial(unified) {
       shader.fragmentShader = shader.fragmentShader.replace(
         hook,
         `
-        // Local split always on
+        // === Gradient / shine ===
         float tLocal = smoothstep(uU_Mid - uU_Soft, uU_Mid + uU_Soft, vH);
-
-        // Global instance-height bias (fades out as uU_UniformFactor→1)
         float bias = (vInstY01 - 0.5) * uU_InstBiasAmp * (1.0 - clamp(uU_UniformFactor, 0.0, 1.0));
-
         float tMix = clamp(tLocal + bias, 0.0, 1.0);
         vec3 grad = mix(uU_ColorA, uU_ColorB, tMix);
 
-        // Local bottom emphasis
         float bottom = 1.0 - vH;
         grad = boostSaturation(grad, uU_BottomSatBoost * bottom);
 
-        // Base tint
         gl_FragColor.rgb *= grad;
 
-        // Fresnel + bottom boost
         vec3 N = normalize(normal);
         vec3 V = normalize(-vViewPosition);
         float fres = pow(1.0 - abs(dot(N, V)), 1.3);
         float fresBoost = 1.0 + uU_BottomFresnelBoost * pow(bottom, uU_BottomFresnelPower);
         gl_FragColor.rgb += grad * fres * fresBoost;
 
-        // Subtle emissive near bottom
         float eBoost = 1.0 + uU_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uU_EmissiveIntensity * eBoost;
 
-        // === SHINE ===
         float fresRef = pow(1.0 - abs(dot(N, V)), max(0.0001, uU_ReflectPower));
         #ifdef USE_ENVMAP
           vec3 R = reflect(-V, N);
@@ -412,19 +453,24 @@ function useUnifiedCrystalMaterial(unified) {
         float rim = pow(1.0 - abs(dot(N, V)), max(0.0001, uU_RimPower));
         gl_FragColor.rgb += rim * uU_RimBoost;
 
+        // Dissolve edge glow — multiplied by uCoolMix so it can heat/cool both directions
+        gl_FragColor.rgb += edge * uGlowColor * uGlowStrength * clamp(uCoolMix, 0.0, 1.0);
+
         ${hook}
         `
       );
 
       m.userData.shader = shader;
+      m.userData.rtShader = shader;
     };
 
-    m.customProgramCacheKey = () => "UnifiedCrystal_uU_v1";
+    m.customProgramCacheKey = () => "UnifiedCrystal_uU_v5_reverseCooldown";
+    m.transparent = false;
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live updates from unified controls
+  // Live updates
   useEffect(() => {
     if (!mat) return;
     mat.ior = unified.U_ior;
@@ -460,19 +506,16 @@ function useUnifiedCrystalMaterial(unified) {
 // Component
 // ---------------------------------------------
 export default forwardRef(function UnifiedCrystalClusters(props, ref) {
-  // Load models
   const { scene: sceneA } = useGLTF(GLB_A);
   const { scene: sceneB } = useGLTF(GLB_B);
   const { scene: sceneC } = useGLTF(GLB_C);
 
-  // Refs for each instanced mesh
+  const rootRef = useRef(null);
   const meshARef = useRef();
   const meshBRef = useRef();
   const meshCRef = useRef();
 
-  // -------------------------
-  // Unified Leva controls
-  // -------------------------
+  // Unified controls
   const unifiedGradient = useControls("Crystals / Gradient", {
     U_colorA: { value: "#0099d1ff", label: "Bottom Color (A)" },
     U_colorB: { value: "#bc00f5ff", label: "Top Color (B)" },
@@ -577,7 +620,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       step: 0.05,
       label: "Cool Back (s)",
     },
-
     Pair_A_Bottom: { value: "#2ec5ff", label: "A Bottom" },
     Pair_A_Top: { value: "#b000ff", label: "A Top" },
     Pair_B_Bottom: { value: "#00ffc8", label: "B Bottom" },
@@ -586,7 +628,60 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     Pair_C_Top: { value: "#ff3a7c", label: "C Top" },
   });
 
-  // Bundle to pass to material hook
+  const dissolve = useControls("Crystals Dissolve", {
+    build: { value: false, label: "Build Crystals" },
+    speed: {
+      value: 0.24,
+      min: 0.05,
+      max: 3,
+      step: 0.01,
+      label: "Speed (units/sec)",
+    },
+    noiseScale: {
+      value: 4.72,
+      min: 0.1,
+      max: 6,
+      step: 0.01,
+      label: "Noise Scale",
+    },
+    noiseAmp: {
+      value: 0.8,
+      min: 0,
+      max: 1.5,
+      step: 0.01,
+      label: "Noise Amplitude",
+    },
+    edgeWidth: {
+      value: 0.15,
+      min: 0.0,
+      max: 0.4,
+      step: 0.005,
+      label: "Edge Width",
+    },
+    glowStrength: {
+      value: 2.0,
+      min: 0.0,
+      max: 50,
+      step: 0.1,
+      label: "Glow Strength",
+    },
+    glowColor: { value: "#ffffff", label: "Glow Color" },
+    seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
+    coolTimeAfterBuild: {
+      value: 4.5,
+      min: 0.1,
+      max: 30,
+      step: 0.05,
+      label: "Glow Cooldown (s)",
+    },
+    Replay: button(() => {
+      progressRef.current = -0.2;
+      coolMixRef.current = 0.0;
+      updateUniformAll("uProgress", progressRef.current);
+      updateUniformAll("uCoolMix", coolMixRef.current);
+    }),
+  });
+
   const unified = {
     ...unifiedGradient,
     ...unifiedGlass,
@@ -595,15 +690,45 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     U_envIntensity: unifiedShine.U_envIntensity,
   };
 
-  // Three materials (same shader/controls, separate instances so each can have its own bbox uniforms)
-  const materialA = useUnifiedCrystalMaterial(unified);
-  const materialB = useUnifiedCrystalMaterial(unified);
-  const materialC = useUnifiedCrystalMaterial(unified);
+  // Materials & state
+  const progressRef = useRef(-0.2); // dissolve gate (-0.2..1.1)
+  const coolMixRef = useRef(0.0); // 0..1 glow/heat
 
-  // -------------------------
-  // Per-model instance controls (kept separate)
-  // -------------------------
-  // A: has rx/ry/rz + s + sy
+  const materialA = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
+  const materialB = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
+  const materialC = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
+
+  const updateUniformAll = (name, val) => {
+    [materialA, materialB, materialC].forEach((m) => {
+      const sh = m?.userData?.rtShader;
+      if (sh && sh.uniforms && name in sh.uniforms)
+        sh.uniforms[name].value = val;
+    });
+  };
+
+  useEffect(
+    () => updateUniformAll("uEdgeWidth", dissolve.edgeWidth),
+    [dissolve.edgeWidth]
+  );
+  useEffect(
+    () => updateUniformAll("uNoiseScale", dissolve.noiseScale),
+    [dissolve.noiseScale]
+  );
+  useEffect(
+    () => updateUniformAll("uNoiseAmp", dissolve.noiseAmp),
+    [dissolve.noiseAmp]
+  );
+  useEffect(
+    () => updateUniformAll("uGlowStrength", dissolve.glowStrength),
+    [dissolve.glowStrength]
+  );
+  useEffect(
+    () => updateUniformAll("uGlowColor", new THREE.Color(dissolve.glowColor)),
+    [dissolve.glowColor]
+  );
+  useEffect(() => updateUniformAll("uSeed", dissolve.seed), [dissolve.seed]);
+
+  // ---------- Instance controls (unchanged) ----------
   const instanceA = useControls(
     "Crystal A / Instances",
     useMemo(() => {
@@ -685,7 +810,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }, [])
   );
 
-  // B: has ry + s
   const instanceB = useControls(
     "Crystal B / Instances",
     useMemo(() => {
@@ -737,7 +861,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }, [])
   );
 
-  // C: has ry + s
   const instanceC = useControls(
     "Crystal C / Instances",
     useMemo(() => {
@@ -789,9 +912,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }, [])
   );
 
-  // -------------------------
-  // Extract geometries (Y-up)
-  // -------------------------
+  // ---------- Extract geometries (Y-up) ----------
   const geoA = useMemo(() => {
     if (!sceneA) return null;
     let g = null;
@@ -837,11 +958,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     return g;
   }, [sceneC]);
 
-  const baseRadiusA = geoA?.boundingSphere?.radius || 1;
-  const baseRadiusB = geoB?.boundingSphere?.radius || 1;
-  const baseRadiusC = geoC?.boundingSphere?.radius || 1;
-
-  // Seed object Y bounds to each material (separate instances avoids conflicts)
+  // Seed bbox into materials
   useEffect(() => {
     if (geoA && materialA?.userData?.shader) {
       materialA.userData.shader.uniforms.uObjMinY.value =
@@ -863,21 +980,16 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
   }, [geoA, geoB, geoC, materialA, materialB, materialC]);
 
-  // -------------------------
-  // Write instance matrices + aInstY01 (per mesh)
-  // -------------------------
+  // ---------- Instance matrices + aInstY01 ----------
   useEffect(() => {
     const mesh = meshARef.current;
     if (!mesh || !geoA) return;
-
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-    const m4 = new THREE.Matrix4();
-    const p = new THREE.Vector3();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
+    const m4 = new THREE.Matrix4(),
+      p = new THREE.Vector3(),
+      q = new THREE.Quaternion(),
+      s = new THREE.Vector3();
     const e = new THREE.Euler(0, 0, 0, "XYZ");
-
     const worldY = new Float32Array(COUNT_A);
     for (let i = 0; i < COUNT_A; i++) {
       const px = instanceA[`A_pX_${i}`],
@@ -886,9 +998,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       const rx = d2r(instanceA[`A_rX_${i}`]),
         ry = d2r(instanceA[`A_rY_${i}`]),
         rz = d2r(instanceA[`A_rZ_${i}`]);
-      const uni = instanceA[`A_s_${i}`];
-      const sy = instanceA[`A_sy_${i}`];
-
+      const uni = instanceA[`A_s_${i}`],
+        sy = instanceA[`A_sy_${i}`];
       p.set(px, py, pz);
       e.set(rx, ry, rz);
       q.setFromEuler(e);
@@ -899,7 +1010,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     mesh.count = COUNT_A;
     mesh.instanceMatrix.needsUpdate = true;
-
     let minY = Infinity,
       maxY = -Infinity;
     for (let i = 0; i < COUNT_A; i++) {
@@ -907,10 +1017,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       if (worldY[i] > maxY) maxY = worldY[i];
     }
     const invSpan = 1.0 / Math.max(1e-6, maxY - minY);
-
     const instY01 = new Float32Array(COUNT_A);
     for (let i = 0; i < COUNT_A; i++) instY01[i] = (worldY[i] - minY) * invSpan;
-
     mesh.geometry.setAttribute(
       "aInstY01",
       new THREE.InstancedBufferAttribute(instY01, 1)
@@ -921,15 +1029,12 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   useEffect(() => {
     const mesh = meshBRef.current;
     if (!mesh || !geoB) return;
-
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-    const m4 = new THREE.Matrix4();
-    const p = new THREE.Vector3();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
+    const m4 = new THREE.Matrix4(),
+      p = new THREE.Vector3(),
+      q = new THREE.Quaternion(),
+      s = new THREE.Vector3();
     const e = new THREE.Euler(0, 0, 0, "XYZ");
-
     const worldY = new Float32Array(COUNT_B);
     for (let i = 0; i < COUNT_B; i++) {
       const px = instanceB[`B_pX_${i}`],
@@ -937,7 +1042,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
         pz = instanceB[`B_pZ_${i}`];
       const ry = d2r(instanceB[`B_rY_${i}`] ?? 0);
       const uni = instanceB[`B_s_${i}`];
-
       p.set(px, py, pz);
       e.set(0, ry, 0);
       q.setFromEuler(e);
@@ -948,7 +1052,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     mesh.count = COUNT_B;
     mesh.instanceMatrix.needsUpdate = true;
-
     let minY = Infinity,
       maxY = -Infinity;
     for (let i = 0; i < COUNT_B; i++) {
@@ -956,10 +1059,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       if (worldY[i] > maxY) maxY = worldY[i];
     }
     const invSpan = 1.0 / Math.max(1e-6, maxY - minY);
-
     const instY01 = new Float32Array(COUNT_B);
     for (let i = 0; i < COUNT_B; i++) instY01[i] = (worldY[i] - minY) * invSpan;
-
     mesh.geometry.setAttribute(
       "aInstY01",
       new THREE.InstancedBufferAttribute(instY01, 1)
@@ -970,15 +1071,12 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   useEffect(() => {
     const mesh = meshCRef.current;
     if (!mesh || !geoC) return;
-
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-    const m4 = new THREE.Matrix4();
-    const p = new THREE.Vector3();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
+    const m4 = new THREE.Matrix4(),
+      p = new THREE.Vector3(),
+      q = new THREE.Quaternion(),
+      s = new THREE.Vector3();
     const e = new THREE.Euler(0, 0, 0, "XYZ");
-
     const worldY = new Float32Array(COUNT_C);
     for (let i = 0; i < COUNT_C; i++) {
       const d = BAKED_C[i] ?? FALLBACK_C;
@@ -987,7 +1085,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       const pz = instanceC[`C_pZ_${i}`] ?? d.pz;
       const ry = d2r(instanceC[`C_rY_${i}`] ?? d.ry);
       const uni = instanceC[`C_s_${i}`] ?? d.s;
-
       p.set(px, py, pz);
       e.set(0, ry, 0);
       q.setFromEuler(e);
@@ -998,7 +1095,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     mesh.count = COUNT_C;
     mesh.instanceMatrix.needsUpdate = true;
-
     let minY = Infinity,
       maxY = -Infinity;
     for (let i = 0; i < COUNT_C; i++) {
@@ -1006,10 +1102,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       if (worldY[i] > maxY) maxY = worldY[i];
     }
     const invSpan = 1.0 / Math.max(1e-6, maxY - minY);
-
     const instY01 = new Float32Array(COUNT_C);
     for (let i = 0; i < COUNT_C; i++) instY01[i] = (worldY[i] - minY) * invSpan;
-
     mesh.geometry.setAttribute(
       "aInstY01",
       new THREE.InstancedBufferAttribute(instY01, 1)
@@ -1017,9 +1111,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     mesh.geometry.attributes.aInstY01.needsUpdate = true;
   }, [instanceC, geoC]);
 
-  // -------------------------
-  // Global hover logic (applies to all three simultaneously)
-  // -------------------------
+  // ---------- Hover + heat (bi-directional) ----------
   const baseA = useRef(new THREE.Color(unifiedGradient.U_colorA));
   const baseB = useRef(new THREE.Color(unifiedGradient.U_colorB));
   useEffect(() => {
@@ -1089,7 +1181,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
   }
 
-  // Helper to test hover on a mesh
   function anyHoveredFor(instMesh, sphereR) {
     if (!instMesh) return false;
     const count = instMesh.count ?? 0;
@@ -1112,21 +1203,53 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   }
 
   useFrame((_, dt) => {
+    // Dissolve anim
+    const target = dissolve.build ? 1.1 : -0.2;
+    const dir = Math.sign(target - progressRef.current);
+    if (dir !== 0) {
+      const step = dissolve.speed * dt * dir;
+      const next = progressRef.current + step;
+      progressRef.current = (dir > 0 ? Math.min : Math.max)(next, target);
+      updateUniformAll("uProgress", progressRef.current);
+    }
+
+    // Bi-directional heat/glow:
+    // - ramp up while building in
+    // - ramp up again while dissolving out
+    // - cool after fully built
+    // - snap to 0 when fully gone
+    const building = dissolve.build && dir >= 0 && progressRef.current < 1.0;
+    const dissolving =
+      !dissolve.build && dir <= 0 && progressRef.current > -0.2;
+
+    if (building || dissolving) {
+      const riseK = 1 - Math.exp(-6.0 * dt); // quick heat
+      coolMixRef.current += (1 - coolMixRef.current) * riseK;
+    } else if (progressRef.current >= 1.0 - 1e-4) {
+      const coolT = Math.max(0.05, dissolve.coolTimeAfterBuild);
+      coolMixRef.current = Math.max(0, coolMixRef.current - dt / coolT); // gentle cool after build
+    } else if (progressRef.current <= -0.19) {
+      coolMixRef.current = 0.0; // fully gone → no residual glow
+    } else {
+      // idle (shouldn't really happen long), bleed off
+      coolMixRef.current = Math.max(0, coolMixRef.current - dt * 2.0);
+    }
+    updateUniformAll("uCoolMix", coolMixRef.current);
+
+    // Hover colors (scaled by heat)
     const sA = materialA?.userData?.shader;
     const sB = materialB?.userData?.shader;
     const sC = materialC?.userData?.shader;
     if (!sA || !sB || !sC) return;
 
-    // Global hover across all three meshes
     const hovered =
-      anyHoveredFor(meshARef.current, baseRadiusA) ||
-      anyHoveredFor(meshBRef.current, baseRadiusB) ||
-      anyHoveredFor(meshCRef.current, baseRadiusC);
+      anyHoveredFor(meshARef.current, geoA?.boundingSphere?.radius || 1) ||
+      anyHoveredFor(meshBRef.current, geoB?.boundingSphere?.radius || 1) ||
+      anyHoveredFor(meshCRef.current, geoC?.boundingSphere?.radius || 1);
 
     const wasHovered = prevHoveredRef.current;
     prevHoveredRef.current = hovered;
 
-    // Ease in / cool down
     const easeK = 1 - Math.exp(-unifiedHover.U_hoverEase * dt);
     if (unifiedHover.U_hoverEnabled && hovered) {
       hoverMixRef.current += (1 - hoverMixRef.current) * easeK;
@@ -1138,18 +1261,16 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       hoverMixRef.current = Math.max(0, hoverMixRef.current - coolRate);
     }
 
-    // Drive uniformization factor on all three materials
-    const mixClamped = Math.min(1, Math.max(0, hoverMixRef.current));
-    sA.uniforms.uU_UniformFactor.value = mixClamped;
-    sB.uniforms.uU_UniformFactor.value = mixClamped;
-    sC.uniforms.uU_UniformFactor.value = mixClamped;
+    const effectiveMix = Math.min(
+      1,
+      Math.max(0, hoverMixRef.current * coolMixRef.current)
+    );
+    sA.uniforms.uU_UniformFactor.value = effectiveMix;
+    sB.uniforms.uU_UniformFactor.value = effectiveMix;
+    sC.uniforms.uU_UniformFactor.value = effectiveMix;
 
-    // Fully cooled → snap base palette and exit
-    if (
-      (!unifiedHover.U_hoverEnabled || !hovered) &&
-      hoverMixRef.current <= 1e-4
-    ) {
-      hoverMixRef.current = 0;
+    // If cooled and not hovering, snap back to base palette
+    if ((!unifiedHover.U_hoverEnabled || !hovered) && effectiveMix <= 1e-4) {
       sA.uniforms.uU_ColorA.value.copy(baseA.current);
       sA.uniforms.uU_ColorB.value.copy(baseB.current);
       sB.uniforms.uU_ColorA.value.copy(baseA.current);
@@ -1159,7 +1280,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       return;
     }
 
-    // Color cycle during hover
+    // Hover palette cycling
     if (unifiedHover.U_hoverEnabled && hovered && !wasHovered)
       segTRef.current = 0;
     if (unifiedHover.U_hoverEnabled && hovered) {
@@ -1187,10 +1308,9 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     curHoverBot.copy(lerpFromBot).lerp(targetBot, tSmooth);
     curHoverTop.copy(lerpFromTop).lerp(targetTop, tSmooth);
 
-    outA.copy(baseA.current).lerp(curHoverBot, hoverMixRef.current);
-    outB.copy(baseB.current).lerp(curHoverTop, hoverMixRef.current);
+    outA.copy(baseA.current).lerp(curHoverBot, effectiveMix);
+    outB.copy(baseB.current).lerp(curHoverTop, effectiveMix);
 
-    // Apply the same hovering colors to all three
     sA.uniforms.uU_ColorA.value.copy(outA);
     sA.uniforms.uU_ColorB.value.copy(outB);
     sB.uniforms.uU_ColorA.value.copy(outA);
@@ -1199,12 +1319,10 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     sC.uniforms.uU_ColorB.value.copy(outB);
   });
 
-  // Early out if any geometry not ready
   if (!geoA || !geoB || !geoC) return null;
 
   return (
-    <group ref={ref} name="UnifiedCrystalClusters" {...props}>
-      {/* Clear separation of each model */}
+    <group ref={rootRef} name="UnifiedCrystalClusters" {...props}>
       <group name="CrystalA">
         <instancedMesh
           ref={meshARef}
@@ -1214,7 +1332,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
           frustumCulled={false}
         />
       </group>
-
       <group name="CrystalB">
         <instancedMesh
           ref={meshBRef}
@@ -1224,7 +1341,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
           frustumCulled={false}
         />
       </group>
-
       <group name="CrystalC">
         <instancedMesh
           ref={meshCRef}
