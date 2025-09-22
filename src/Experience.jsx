@@ -278,7 +278,7 @@ export default function Experience() {
           onOccludersChange={setForestOccluders}
         />
         {/* <MagicMushrooms ref={mushroomsRef} /> */}
-        <Fireflies />
+        {/* <Fireflies /> */}
         <UnifiedCrystalClusters />
       </Suspense>
 

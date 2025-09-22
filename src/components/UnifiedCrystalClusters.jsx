@@ -600,7 +600,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   const unifiedHover = useControls("Crystals / Hover Colors", {
     U_hoverEnabled: { value: true, label: "Enabled" },
     U_hoverEase: {
-      value: 0.2,
+      value: 2.0,
       min: 0.1,
       max: 20,
       step: 0.1,
@@ -1261,10 +1261,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       hoverMixRef.current = Math.max(0, hoverMixRef.current - coolRate);
     }
 
-    const effectiveMix = Math.min(
-      1,
-      Math.max(0, hoverMixRef.current * coolMixRef.current)
-    );
+    // Hover should not depend on heat/cool; keep uCoolMix only for edge glow.
+    const effectiveMix = Math.min(1, Math.max(0, hoverMixRef.current));
     sA.uniforms.uU_UniformFactor.value = effectiveMix;
     sB.uniforms.uU_UniformFactor.value = effectiveMix;
     sC.uniforms.uU_UniformFactor.value = effectiveMix;
