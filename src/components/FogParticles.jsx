@@ -27,7 +27,7 @@ export default function FogParticles({
   } = useControls(
     "Fog Particles",
     {
-      size: { value: 2, min: 0.1, max: 20, step: 0.1 },
+      size: { value: 3, min: 0.1, max: 20, step: 0.1 },
       opacity: { value: 1, min: 0, max: 1, step: 0.01 },
       falloff: { value: 0.8, min: 0.01, max: 5, step: 0.01 },
       scaleFalloffWithSize: { value: true },

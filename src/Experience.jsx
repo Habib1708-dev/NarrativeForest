@@ -62,8 +62,8 @@ export default function Experience() {
     mieCoefficient,
     mieDirectionalG,
     skyDarken,
-
-    exposure,
+    lightningEnabled,
+    flashPeakGain,
 
     dirLightIntensity,
 
@@ -122,6 +122,14 @@ export default function Experience() {
         max: 1.0,
         step: 0.01,
         label: "Darken",
+      },
+      lightningEnabled: { value: false, label: "Lightning" },
+      flashPeakGain: {
+        value: 1.6,
+        min: 1.0,
+        max: 2.5,
+        step: 0.01,
+        label: "Flash Peak",
       },
     }),
   });
@@ -189,6 +197,8 @@ export default function Experience() {
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
         darken={skyDarken}
+        lightningEnabled={lightningEnabled}
+        flashPeakGain={flashPeakGain}
       />
       <Stars
         radius={360}
