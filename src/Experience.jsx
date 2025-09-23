@@ -28,6 +28,7 @@ import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
 import Fireflies from "./components/Fireflies";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
+import CustomSky from "./components/CustomSky";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -60,6 +61,7 @@ export default function Experience() {
     turbidity,
     mieCoefficient,
     mieDirectionalG,
+    skyDarken,
 
     exposure,
 
@@ -88,16 +90,6 @@ export default function Experience() {
       fogFar: { value: 10, min: 3, max: 30, step: 3 },
       fogDensity: { value: 0.3, min: 0.0, max: 0.8, step: 0.001 },
     }),
-    Sky: folder({
-      sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
-      rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
-      turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
-      mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
-      mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
-    }),
-    Render: folder({
-      exposure: { value: 0.6, min: 0.1, max: 1.5, step: 0.01 },
-    }),
     Lights: folder({
       dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
     }),
@@ -118,14 +110,21 @@ export default function Experience() {
       fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
       fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
     }),
+    Sky: folder({
+      sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
+      rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
+      turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
+      mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
+      mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
+      skyDarken: {
+        value: 0.0,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        label: "Darken",
+      },
+    }),
   });
-
-  useEffect(() => {
-    gl.toneMappingExposure = exposure;
-    gl.toneMapping = THREE.ACESFilmicToneMapping;
-    gl.outputColorSpace = THREE.SRGBColorSpace;
-    gl.autoClear = true;
-  }, [gl, exposure]);
 
   // Build occluders list (don’t include the lake)
   const occluders = useMemo(
@@ -183,12 +182,13 @@ export default function Experience() {
         <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
       )}
 
-      <Sky
+      <CustomSky
         sunPosition={sunPosition}
         rayleigh={rayleigh}
         turbidity={turbidity}
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
+        darken={skyDarken}
       />
       <Stars
         radius={360}

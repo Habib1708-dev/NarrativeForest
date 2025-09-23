@@ -499,7 +499,7 @@ export default forwardRef(function Fireflies(props, ref) {
           uStartTime: { value: clock.getElapsedTime() + 1e6 },
           uVisible: { value: 0.0 },
 
-          uRamp: { value: 0.0 }, // density ramp
+          uRamp: { value: 0.0 },
         },
       });
       matRefs.current[i] = mat;
