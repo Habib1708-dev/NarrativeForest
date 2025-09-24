@@ -6,7 +6,11 @@ import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { EffectComposer, Bloom } from "@react-three/postprocessing";
+import {
+  EffectComposer,
+  Bloom,
+  BrightnessContrast,
+} from "@react-three/postprocessing";
 import { KernelSize } from "postprocessing";
 
 // Scene pieces
@@ -81,7 +85,17 @@ export default function Experience() {
     fLightIntensity,
     fAnisotropy,
     fSkyRadius,
+    globalDarken,
   } = useControls({
+    Scene: folder({
+      globalDarken: {
+        value: 0.0,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        label: "Global Darken",
+      },
+    }),
     Atmosphere: folder({
       fogColor: { value: "#585858" },
       fogMode: { value: "exp2", options: ["linear", "exp2"] },
@@ -293,6 +307,8 @@ export default function Experience() {
           kernelSize={KernelSize.LARGE}
           mipmapBlur
         />
+        {/* Apply a global darkening pass; brightness expects [-1, 1], so use negative values to darken */}
+        <BrightnessContrast brightness={-globalDarken} contrast={0} />
       </EffectComposer>
     </>
   );
