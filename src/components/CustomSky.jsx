@@ -19,15 +19,31 @@ export default function CustomSky({
 
   // --- ⚡ Lightning: behavior controls (all optional) ---
   lightningEnabled = false, // master toggle
-  flashMinDelay = 3.0, // seconds between pulses (min)
-  flashMaxDelay = 12.0, // seconds between pulses (max)
-  flashPeakGain = 1.6, // peak multiplier on sky (1.0 = none)
-  preFlashMs = 40, // small ramp before main flash
-  mainFlashMs = 140, // bright punch
-  tailMs = 240, // decay window
+  flashMinDelay = 2.0, // seconds between pulses (min)
+  flashMaxDelay = 2.4, // seconds between pulses (max)
+  flashPeakGain = 4.5, // peak multiplier on sky (1.0 = none)
+  preFlashMs = 60, // small ramp before main flash
+  mainFlashMs = 200, // bright punch (longer)
+  tailMs = 420, // decay window (longer)
   flickers = 2, // little spikes in the tail
   flickerDepth = 0.45, // amplitude of the first tail spike (0..1)
   doubleFlashChance = 0.25, // chance of a second pulse ~120ms later
+
+  // --- New realism controls (optional) ---
+  flashSpreadBias = 1.2, // >1 biases towards longer delays (slightly more spread)
+  preFlashJitter = 0.6, // 0..1: +/-% jitter on pre-flash duration
+  mainFlashJitter = 0.5, // 0..1: +/-% jitter on main flash duration
+  tailJitter = 0.7, // 0..1: +/-% jitter on tail duration
+  flickersMin = null, // if set w/ flickersMax, randomize count in [min,max]
+  flickersMax = null,
+  flickerDepthMin = null, // if set w/ flickerDepthMax, randomize amplitude
+  flickerDepthMax = null,
+  flashPeakGainMin = null, // if set w/ flashPeakGainMax, randomize peak
+  flashPeakGainMax = null,
+  doubleFlashGapMinMs = 80, // variable gap for double-flash echo
+  doubleFlashGapMaxMs = 220,
+  doubleFlashScaleMin = 0.5, // amplitude scale of echo pulse
+  doubleFlashScaleMax = 0.85,
 
   // --- Preserve your current Sky defaults from Experience.jsx ---
   sunPosition = [5.0, -1.0, 30.0],
@@ -78,6 +94,30 @@ export default function CustomSky({
     hazeTopY: { value: hazeTopY, min: -200, max: 200, step: 0.1 },
     hazeFeather: { value: hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
     hazePower: { value: hazePower, min: 0.25, max: 4.0, step: 0.05 },
+  });
+
+  // Leva controls for Lightning frequency/durations
+  const {
+    lightningEnabled: ctrlLightningEnabled,
+    flashMinDelay: ctrlFlashMinDelay,
+    flashMaxDelay: ctrlFlashMaxDelay,
+    flashSpreadBias: ctrlFlashSpreadBias,
+    preFlashMs: ctrlPreFlashMs,
+    mainFlashMs: ctrlMainFlashMs,
+    tailMs: ctrlTailMs,
+    doubleFlashChance: ctrlDoubleFlashChance,
+    flashPeakGain: ctrlFlashPeakGain,
+  } = useControls("Sky / Lightning", {
+    lightningEnabled: { value: lightningEnabled, label: "Enable Lightning" },
+    flashMinDelay: { value: flashMinDelay, min: 0.2, max: 20, step: 0.1 },
+    flashMaxDelay: { value: flashMaxDelay, min: 0.2, max: 30, step: 0.1 },
+    flashSpreadBias: { value: flashSpreadBias, min: 0.2, max: 3.0, step: 0.05 },
+    preFlashMs: { value: preFlashMs, min: 0, max: 600, step: 5 },
+    mainFlashMs: { value: mainFlashMs, min: 40, max: 600, step: 10 },
+    tailMs: { value: tailMs, min: 40, max: 2000, step: 10 },
+    doubleFlashChance: { value: doubleFlashChance, min: 0, max: 1, step: 0.01 },
+    // Flash peak is now the MAX value; min assumed ~1.0
+    flashPeakGain: { value: flashPeakGain, min: 1.0, max: 10.0, step: 0.05 },
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -266,10 +306,22 @@ export default function CustomSky({
   const activeRef = useRef(null); // holds current envelope timeline or null
 
   // Helper to schedule the next lightning start time
+  const randRange = (a, b) => a + Math.random() * (b - a);
+  const randInt = (a, b) => Math.floor(randRange(a, b + 1));
+  const jitter = (base, pct) => {
+    const p = Math.max(0, pct);
+    const f = randRange(1 - p, 1 + p);
+    return base * f;
+  };
+
   const scheduleNext = (now) => {
-    const min = Math.max(0.2, flashMinDelay);
-    const max = Math.max(min + 0.1, flashMaxDelay);
-    const delay = min + Math.random() * (max - min);
+    const min = Math.max(0.2, ctrlFlashMinDelay);
+    const max = Math.max(min + 0.1, ctrlFlashMaxDelay);
+    const bias = Math.max(0.01, ctrlFlashSpreadBias);
+    const u = Math.random();
+    // Skew towards longer delays when bias>1
+    const skewed = 1 - Math.pow(1 - u, bias);
+    const delay = min + (max - min) * skewed;
     nextFireAtRef.current = now + delay;
   };
 
@@ -279,31 +331,77 @@ export default function CustomSky({
     const env = [];
     const toSec = (ms) => Math.max(0, ms) / 1000;
 
-    // Pre-flash (soft rise)
-    if (preFlashMs > 0) env.push({ dur: toSec(preFlashMs), amp: 0.4 });
+    // Randomize peak per event if a range is provided
+    // Max peak comes from Leva control; min defaults to 1.0 unless props specify a range
+    const peakMax = Number.isFinite(ctrlFlashPeakGain)
+      ? ctrlFlashPeakGain
+      : Number.isFinite(flashPeakGainMax)
+      ? flashPeakGainMax
+      : flashPeakGain;
+    const peakMin = Number.isFinite(flashPeakGainMin) ? flashPeakGainMin : 1.0;
+    const peakLocal = randRange(
+      Math.min(peakMin, peakMax),
+      Math.max(peakMin, peakMax)
+    );
 
-    // Main flash (full punch)
-    env.push({ dur: toSec(mainFlashMs), amp: 1.0 });
+    // Helper to append a pulse with optional amplitude scaling
+    const addPulse = (ampScale = 1.0) => {
+      const pf = Math.max(0, jitter(ctrlPreFlashMs, preFlashJitter));
+      const mf = Math.max(0, jitter(ctrlMainFlashMs, mainFlashJitter));
+      const tf = Math.max(0, jitter(ctrlTailMs, tailJitter));
 
-    // Tail flickers (decaying spikes)
-    const n = Math.max(0, Math.floor(flickers));
-    let amp = Math.max(0, Math.min(1, flickerDepth));
-    const tail = Math.max(0, toSec(tailMs));
-    for (let i = 0; i < n; i++) {
-      const slice = tail / Math.max(1, n);
-      env.push({ dur: slice, amp });
-      amp *= 0.45; // decay each flicker
+      // Pre-flash (soft rise)
+      if (pf > 0) env.push({ dur: toSec(pf), amp: 0.4 * ampScale });
+      // Main flash
+      if (mf > 0) env.push({ dur: toSec(mf), amp: 1.0 * ampScale });
+
+      // Tail flickers (decaying spikes)
+      const hasRange =
+        Number.isFinite(flickersMin) && Number.isFinite(flickersMax);
+      const n = Math.max(
+        0,
+        hasRange
+          ? randInt(
+              Math.min(flickersMin, flickersMax),
+              Math.max(flickersMin, flickersMax)
+            )
+          : Math.floor(flickers)
+      );
+      const tail = Math.max(0, toSec(tf));
+      let amp0 =
+        Number.isFinite(flickerDepthMin) && Number.isFinite(flickerDepthMax)
+          ? randRange(
+              Math.min(flickerDepthMin, flickerDepthMax),
+              Math.max(flickerDepthMin, flickerDepthMax)
+            )
+          : Math.max(0, Math.min(1, flickerDepth));
+      let amp = Math.max(0, Math.min(1, amp0)) * ampScale;
+      for (let i = 0; i < n; i++) {
+        const slice = tail / Math.max(1, n);
+        env.push({ dur: slice, amp });
+        amp *= 0.45; // decay each flicker
+      }
+    };
+
+    // First pulse
+    addPulse(1.0);
+
+    // Optional echo pulse with variable gap and scale
+    if (Math.random() < ctrlDoubleFlashChance) {
+      const gap = randRange(doubleFlashGapMinMs, doubleFlashGapMaxMs);
+      env.push({ dur: toSec(gap), amp: 0.0 }); // silent gap
+      const echoScale = randRange(
+        Math.min(doubleFlashScaleMin, doubleFlashScaleMax),
+        Math.max(doubleFlashScaleMin, doubleFlashScaleMax)
+      );
+      addPulse(echoScale);
     }
 
-    // Optionally chain a double-flash small echo
-    const doubleHit = Math.random() < doubleFlashChance;
-    if (doubleHit) {
-      env.push({ dur: 0.12, amp: 0.55 }); // quick echo
-    }
+    // Attach the chosen peak to the env for this event
+    env._peak = Math.max(1.0, peakLocal);
 
     // Normalize: ensure at least one segment
     if (env.length === 0) env.push({ dur: 0.12, amp: 1.0 });
-
     return env;
   };
 
@@ -351,7 +449,8 @@ export default function CustomSky({
     // Lightning logic
     let flashGain = 1.0;
 
-    if (lightningEnabled) {
+    const isLightningOn = (ctrlLightningEnabled ?? lightningEnabled) === true;
+    if (isLightningOn) {
       const now = timeRef.current;
 
       // Start a new pulse if time has come
@@ -369,7 +468,7 @@ export default function CustomSky({
         const elapsed = now - t0;
         if (elapsed <= duration) {
           const e = evalEnvelope(env, elapsed); // 0..1
-          const peak = Math.max(1.0, flashPeakGain);
+          const peak = Math.max(1.0, env._peak ?? flashPeakGain);
           flashGain = 1.0 + (peak - 1.0) * e;
         } else {
           // End pulse → schedule next

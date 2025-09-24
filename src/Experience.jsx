@@ -62,8 +62,6 @@ export default function Experience() {
     mieCoefficient,
     mieDirectionalG,
     skyDarken,
-    lightningEnabled,
-    flashPeakGain,
 
     dirLightIntensity,
 
@@ -123,14 +121,7 @@ export default function Experience() {
         step: 0.01,
         label: "Darken",
       },
-      lightningEnabled: { value: false, label: "Lightning" },
-      flashPeakGain: {
-        value: 1.6,
-        min: 1.0,
-        max: 2.5,
-        step: 0.01,
-        label: "Flash Peak",
-      },
+      // Lightning controls moved to "Sky / Lightning" folder inside CustomSky
     }),
   });
 
@@ -197,8 +188,7 @@ export default function Experience() {
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
         darken={skyDarken}
-        lightningEnabled={lightningEnabled}
-        flashPeakGain={flashPeakGain}
+        // Lightning controls are now managed inside CustomSky's "Sky / Lightning" folder
       />
       <Stars
         radius={360}
