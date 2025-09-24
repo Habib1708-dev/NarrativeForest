@@ -11,26 +11,35 @@ export default forwardRef(function Butterfly(
     rotation,
     // -------- single, uniform world scale (default tiny particle) --------
     scale = 0.02,
+
     // shader params
     color = "#ffffff",
     flapFreq = 2.5,
     flapSpeed = 1.0,
     flapAmp = 1.12,
-    tiltAmp = 0.1,
+
+    // NOTE: keep these for subtle Y-axis variety only (no vertical swing)
     noiseAmp = 0.05,
     noiseScale = 3.0,
+
     alphaCutoff = 0.02,
     doubleSide = true,
     depthWrite = false,
     billboard = false,
     texturePath = "/textures/butterfly/butterfly.png",
+
+    // vertical tilt (static, degrees)
+    verticalTiltDeg = 0.0,
+
     // optional Leva control for the single scale
     enableControls = true,
+
     // glow
     enableGlow = true,
     glowIntensity = 1.0,
     glowSize = 1.15,
     glowColor = "#88ccff",
+
     controlsFolder = "Butterfly",
     ...rest
   },
@@ -38,7 +47,7 @@ export default forwardRef(function Butterfly(
 ) {
   const tex = useTexture(texturePath);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.flipY = false; // keep; we flip v in the shader for consistency
+  tex.flipY = false; // we flip v in the shader for consistency
 
   const matRef = useRef();
   const meshRef = useRef();
@@ -57,7 +66,13 @@ export default forwardRef(function Butterfly(
               flapFreq: { value: flapFreq, min: 0.1, max: 20, step: 0.1 },
               flapSpeed: { value: flapSpeed, min: 0.0, max: 4.0, step: 0.05 },
               flapAmp: { value: flapAmp, min: 0.0, max: 1.5, step: 0.01 }, // radians
-              tiltAmp: { value: tiltAmp, min: 0.0, max: 0.8, step: 0.01 },
+              verticalTiltDeg: {
+                value: verticalTiltDeg,
+                min: -90,
+                max: 90,
+                step: 0.1,
+                label: "Vertical Tilt (deg)",
+              },
               noiseAmp: { value: noiseAmp, min: 0.0, max: 0.3, step: 0.005 },
               noiseScale: { value: noiseScale, min: 0.1, max: 10.0, step: 0.1 },
               alphaCutoff: {
@@ -140,9 +155,10 @@ export default forwardRef(function Butterfly(
     uniform float uFlapFreq;
     uniform float uFlapSpeed;
     uniform float uFlapAmp;
-    uniform float uTiltAmp;
     uniform float uNoiseAmp;
     uniform float uNoiseScale;
+    uniform float uTiltStatic; // << static vertical tilt (radians)
+
     varying vec2 vUv;
 
     // Rotation helpers
@@ -166,23 +182,24 @@ export default forwardRef(function Butterfly(
     void main() {
       // Provide flipped UV for sampling in fragment, once.
       vUv = vec2(uv.x, 1.0 - uv.y);
-      
-      // Phase and base angles
-      float phase = uTime * uFlapFreq * uFlapSpeed;
-      float baseFlap = sin(phase) * uFlapAmp;       // open/close around hinge (Y-axis)
-      float baseTilt = sin(phase + 1.5707963) * uTiltAmp; // up/down tilt (X-axis), 90deg phase shift
 
-      // Mild procedural flutter, subtle randomization
+      // Flap phase
+      float phase = uTime * uFlapFreq * uFlapSpeed;
+
+      // Open/close around hinge (Y-axis)
+      float baseFlap = sin(phase) * uFlapAmp;
+
+      // Mild procedural flutter (only affects flap, not vertical tilt)
       float flutter = snoise(vec3(position.xy * uNoiseScale, uTime * 0.5)) * uNoiseAmp;
 
       // Determine side of the wing relative to the body centerline (x=0)
       float side = sign(position.x);
-      // Avoid zero at center so both halves rotate robustly; this keeps axis at x=0 naturally
-      // Compose angles: opposing around Y for left/right (opening/closing) + global tilt around X
-      float angleY = baseFlap * side + flutter * 0.2;
-      float angleX = baseTilt + flutter * 0.05;
 
-      // Apply rotations around hinge at x=0 (Y-axis) then add a touch of X tilt
+      // Compose angles
+      float angleY = baseFlap * side + flutter * 0.2; // hinge flap
+      float angleX = uTiltStatic;                     // static vertical tilt only
+
+      // Apply rotations around hinge at x=0 (Y-axis) then static X tilt
       vec3 p = position;
       p = rotateY(p, angleY);
       p = rotateX(p, angleX);
@@ -210,7 +227,7 @@ export default forwardRef(function Butterfly(
     []
   );
 
-  // Glow fragment shader (uses same vertex shader to follow flap)
+  // Glow fragment shader (uses same vertex shader to follow flap & tilt)
   const glowFragment = useMemo(
     () => /* glsl */ `
     uniform sampler2D uTexture;
@@ -237,10 +254,10 @@ export default forwardRef(function Butterfly(
       uFlapFreq: { value: flapFreq },
       uFlapSpeed: { value: flapSpeed },
       uFlapAmp: { value: flapAmp },
-      uTiltAmp: { value: tiltAmp },
       uNoiseAmp: { value: noiseAmp },
       uNoiseScale: { value: noiseScale },
       uAlphaCutoff: { value: alphaCutoff },
+      uTiltStatic: { value: THREE.MathUtils.degToRad(verticalTiltDeg) },
     }),
     [
       tex,
@@ -248,10 +265,10 @@ export default forwardRef(function Butterfly(
       flapFreq,
       flapSpeed,
       flapAmp,
-      tiltAmp,
       noiseAmp,
       noiseScale,
       alphaCutoff,
+      verticalTiltDeg,
     ]
   );
 
@@ -263,34 +280,40 @@ export default forwardRef(function Butterfly(
       uFlapFreq: { value: flapFreq },
       uFlapSpeed: { value: flapSpeed },
       uFlapAmp: { value: flapAmp },
-      uTiltAmp: { value: tiltAmp },
       uNoiseAmp: { value: noiseAmp },
       uNoiseScale: { value: noiseScale },
       uAlphaCutoff: { value: alphaCutoff },
       uGlowColor: { value: new THREE.Color(glowColor) },
       uGlowIntensity: { value: glowIntensity },
+      uTiltStatic: { value: THREE.MathUtils.degToRad(verticalTiltDeg) },
     }),
     [
       tex,
       flapFreq,
       flapSpeed,
       flapAmp,
-      tiltAmp,
       noiseAmp,
       noiseScale,
       alphaCutoff,
       glowColor,
       glowIntensity,
+      verticalTiltDeg,
     ]
   );
 
   useFrame(({ clock, camera }) => {
+    const t = clock.getElapsedTime();
+    const ctrl = enableControls ? leva : undefined;
+
+    const tiltDeg =
+      (enableControls ? ctrl?.verticalTiltDeg : verticalTiltDeg) ??
+      verticalTiltDeg;
+    const tiltRad = THREE.MathUtils.degToRad(tiltDeg);
+
     if (matRef.current) {
-      const t = clock.getElapsedTime();
-      const ctrl = enableControls ? leva : undefined;
       matRef.current.uniforms.uTime.value = t;
+
       // live-update uniforms from controls (if enabled) or props
-      // color tint
       const nextColor = ctrl?.color ?? color;
       if (typeof nextColor === "string") {
         matRef.current.uniforms.uColor.value.set(nextColor);
@@ -298,28 +321,30 @@ export default forwardRef(function Butterfly(
       matRef.current.uniforms.uFlapFreq.value = ctrl?.flapFreq ?? flapFreq;
       matRef.current.uniforms.uFlapSpeed.value = ctrl?.flapSpeed ?? flapSpeed;
       matRef.current.uniforms.uFlapAmp.value = ctrl?.flapAmp ?? flapAmp;
-      matRef.current.uniforms.uTiltAmp.value = ctrl?.tiltAmp ?? tiltAmp;
+
       matRef.current.uniforms.uNoiseAmp.value = ctrl?.noiseAmp ?? noiseAmp;
       matRef.current.uniforms.uNoiseScale.value =
         ctrl?.noiseScale ?? noiseScale;
       matRef.current.uniforms.uAlphaCutoff.value =
         ctrl?.alphaCutoff ?? alphaCutoff;
+
+      // static vertical tilt
+      matRef.current.uniforms.uTiltStatic.value = tiltRad;
     }
-    // Glow uniforms + scale updates
+
     if (glowMatRef.current) {
-      const t = clock.getElapsedTime();
-      const ctrl = enableControls ? leva : undefined;
       glowMatRef.current.uniforms.uTime.value = t;
       glowMatRef.current.uniforms.uFlapFreq.value = ctrl?.flapFreq ?? flapFreq;
       glowMatRef.current.uniforms.uFlapSpeed.value =
         ctrl?.flapSpeed ?? flapSpeed;
       glowMatRef.current.uniforms.uFlapAmp.value = ctrl?.flapAmp ?? flapAmp;
-      glowMatRef.current.uniforms.uTiltAmp.value = ctrl?.tiltAmp ?? tiltAmp;
+
       glowMatRef.current.uniforms.uNoiseAmp.value = ctrl?.noiseAmp ?? noiseAmp;
       glowMatRef.current.uniforms.uNoiseScale.value =
         ctrl?.noiseScale ?? noiseScale;
       glowMatRef.current.uniforms.uAlphaCutoff.value =
         ctrl?.alphaCutoff ?? alphaCutoff;
+
       const nextGlowColor =
         (enableControls ? leva?.glowColor : glowColor) ?? glowColor;
       if (typeof nextGlowColor === "string") {
@@ -328,20 +353,22 @@ export default forwardRef(function Butterfly(
       glowMatRef.current.uniforms.uGlowIntensity.value = enableControls
         ? leva?.glowIntensity ?? glowIntensity
         : glowIntensity;
+
+      // static vertical tilt mirrors main mesh
+      glowMatRef.current.uniforms.uTiltStatic.value = tiltRad;
     }
+
     if (billboard && meshRef.current) {
       meshRef.current.quaternion.copy(camera.quaternion);
     }
     if (billboard && glowMeshRef.current) {
       glowMeshRef.current.quaternion.copy(camera.quaternion);
     }
+
     // keep world scale strictly uniform
-    if (meshRef.current) {
-      const s = enableControls ? leva?.scale ?? scale : scale;
-      meshRef.current.scale.set(s, s, s);
-    }
+    const s = enableControls ? leva?.scale ?? scale : scale;
+    if (meshRef.current) meshRef.current.scale.set(s, s, s);
     if (glowMeshRef.current) {
-      const s = enableControls ? leva?.scale ?? scale : scale;
       const gs = enableControls ? leva?.glowSize ?? glowSize : glowSize;
       glowMeshRef.current.scale.set(s * gs, s * gs, s * gs);
     }
@@ -362,6 +389,7 @@ export default forwardRef(function Butterfly(
           premultipliedAlpha={false}
         />
       </mesh>
+
       {(enableControls ? leva?.enableGlow ?? enableGlow : enableGlow) && (
         <mesh ref={glowMeshRef} position={position} rotation={rotation}>
           <planeGeometry args={args} />
