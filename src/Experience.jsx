@@ -1,6 +1,6 @@
 // src/Experience.jsx
 import { Perf } from "r3f-perf";
-import { OrbitControls, Sky, Stars } from "@react-three/drei";
+import { OrbitControls, Sky } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
@@ -28,6 +28,7 @@ import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
 import Fireflies from "./components/Fireflies";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
+import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
 
 export default function Experience() {
@@ -190,15 +191,7 @@ export default function Experience() {
         darken={skyDarken}
         // Lightning controls are now managed inside CustomSky's "Sky / Lightning" folder
       />
-      <Stars
-        radius={360}
-        depth={2}
-        count={2000}
-        factor={4}
-        saturation={0}
-        fade={false}
-        speed={0}
-      />
+      <Stars />
 
       <OrbitControls
         makeDefault
