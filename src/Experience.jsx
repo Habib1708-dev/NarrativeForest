@@ -34,6 +34,7 @@ import Fireflies from "./components/Fireflies";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
+import Butterfly from "./components/Butterfly";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -287,6 +288,7 @@ export default function Experience() {
         {/* <MagicMushrooms ref={mushroomsRef} /> */}
         {/* <Fireflies /> */}
         <UnifiedCrystalClusters />
+        <Butterfly position={[-2, -4, -2]} />
       </Suspense>
 
       <DistanceFade
