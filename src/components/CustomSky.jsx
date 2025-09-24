@@ -59,7 +59,7 @@ export default function CustomSky({
   hazeEnabled = true,
   hazeBottomY = -4.0,
   hazeTopY = 87.0,
-  hazeColor = null, // ignored when scene.fog?.color exists; kept as fallback
+  hazeColor = "#585858", // separate haze color for sky blending (independent of scene fog)
   hazePower = 1.0, // curve shaping (>=0.0001)
   hazeFeather = 0.75, // extra softening width (world units)
 
@@ -69,16 +69,17 @@ export default function CustomSky({
   const skyRef = useRef();
   const { scene } = useThree();
 
-  // Resolve haze color (defaults to scene fog color if available)
+  // Resolve haze color (initial seed; can be overridden via Leva control)
   const hazeColorRef = useRef(new THREE.Color());
   useEffect(() => {
     if (hazeColor) {
       hazeColorRef.current.set(hazeColor);
     } else if (scene?.fog?.color) {
+      // seed from fog on first mount if no explicit color provided
       hazeColorRef.current.copy(scene.fog.color);
     } else {
       // A sensible cool night fallback
-      hazeColorRef.current.set("#223140");
+      hazeColorRef.current.set("#585858");
     }
   }, [hazeColor, scene]);
 
@@ -88,13 +89,28 @@ export default function CustomSky({
     hazeTopY: ctrlHazeTopY,
     hazeFeather: ctrlHazeFeather,
     hazePower: ctrlHazePower,
+    hazeColor: ctrlHazeColor,
   } = useControls("Sky / Haze", {
     hazeEnabled: { value: hazeEnabled },
     hazeBottomY: { value: hazeBottomY, min: -200, max: 200, step: 0.1 },
     hazeTopY: { value: hazeTopY, min: -200, max: 200, step: 0.1 },
     hazeFeather: { value: hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
     hazePower: { value: hazePower, min: 0.25, max: 4.0, step: 0.05 },
+    hazeColor: {
+      value: hazeColor
+        ? new THREE.Color(hazeColor).getStyle()
+        : scene?.fog?.color
+        ? `#${scene.fog.color.getHexString()}`
+        : "#223140",
+    },
   });
+
+  // Keep shader haze color in sync with the Leva color
+  useEffect(() => {
+    if (ctrlHazeColor) {
+      hazeColorRef.current.set(ctrlHazeColor);
+    }
+  }, [ctrlHazeColor]);
 
   // Leva controls for Lightning frequency/durations
   const {
@@ -497,13 +513,9 @@ export default function CustomSky({
     if (ud?.uHazePower) ud.uHazePower.value = Math.max(0.0001, ctrlHazePower);
     if (ud?.uHazeFeather)
       ud.uHazeFeather.value = Math.max(0.0, ctrlHazeFeather);
-    // Always sync haze color to scene fog color when available; else fallback
+    // Use independent haze color (debug-friendly)
     if (ud?.uHazeColor) {
-      if (scene?.fog?.color) {
-        ud.uHazeColor.value.copy(scene.fog.color);
-      } else {
-        ud.uHazeColor.value.copy(hazeColorRef.current);
-      }
+      ud.uHazeColor.value.copy(hazeColorRef.current);
     }
   });
 
