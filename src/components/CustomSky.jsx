@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from "react";
 import { Sky } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
+import { useControls } from "leva";
 
 /**
  * CustomSky
@@ -34,10 +36,49 @@ export default function CustomSky({
   mieCoefficient = 0.0,
   mieDirectionalG = 0.0,
 
+  // --- New: Height-based haze (fog color blend) ---
+  // Fade the sky to a fog color below a world-space Y band.
+  // Example for terrain at y=-5:
+  //   hazeBottomY=-4 (full fog at/below -4), hazeTopY=-3 (full sky at/above -3)
+  hazeEnabled = true,
+  hazeBottomY = -4.0,
+  hazeTopY = 87.0,
+  hazeColor = null, // ignored when scene.fog?.color exists; kept as fallback
+  hazePower = 1.0, // curve shaping (>=0.0001)
+  hazeFeather = 0.75, // extra softening width (world units)
+
   // You can pass any other <Sky/> props via ...rest
   ...rest
 }) {
   const skyRef = useRef();
+  const { scene } = useThree();
+
+  // Resolve haze color (defaults to scene fog color if available)
+  const hazeColorRef = useRef(new THREE.Color());
+  useEffect(() => {
+    if (hazeColor) {
+      hazeColorRef.current.set(hazeColor);
+    } else if (scene?.fog?.color) {
+      hazeColorRef.current.copy(scene.fog.color);
+    } else {
+      // A sensible cool night fallback
+      hazeColorRef.current.set("#223140");
+    }
+  }, [hazeColor, scene]);
+
+  const {
+    hazeEnabled: ctrlHazeEnabled,
+    hazeBottomY: ctrlHazeBottomY,
+    hazeTopY: ctrlHazeTopY,
+    hazeFeather: ctrlHazeFeather,
+    hazePower: ctrlHazePower,
+  } = useControls("Sky / Haze", {
+    hazeEnabled: { value: hazeEnabled },
+    hazeBottomY: { value: hazeBottomY, min: -200, max: 200, step: 0.1 },
+    hazeTopY: { value: hazeTopY, min: -200, max: 200, step: 0.1 },
+    hazeFeather: { value: hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
+    hazePower: { value: hazePower, min: 0.25, max: 4.0, step: 0.05 },
+  });
 
   // ──────────────────────────────────────────────────────────────────────────
   // Shader patch (adds uSkyDarken and uSkyFlashGain to fragment shader)
@@ -52,10 +93,47 @@ export default function CustomSky({
     mat.onBeforeCompile = (shader) => {
       originalOBC?.(shader);
 
-      // 1) Always declare our uniforms at the very top
+      // 0) Vertex shader: carry world-space Y to fragment stage
+      //    Add varying and compute it at the end of main().
+      if (!/varying\s+float\s+vNF_WorldY\s*;/.test(shader.vertexShader)) {
+        shader.vertexShader =
+          `varying float vNF_WorldY;\n` + shader.vertexShader;
+      }
+      {
+        const vs = shader.vertexShader;
+        const mainOpen = vs.indexOf("void main()");
+        if (mainOpen >= 0) {
+          const braceOpen = vs.indexOf("{", mainOpen);
+          let depth = 0,
+            i = braceOpen;
+          for (; i < vs.length; i++) {
+            const ch = vs[i];
+            if (ch === "{") depth++;
+            else if (ch === "}") {
+              depth--;
+              if (depth === 0) break;
+            }
+          }
+          if (i > braceOpen) {
+            shader.vertexShader =
+              vs.slice(0, i) +
+              `\n              // narrative-forest: world-space Y for haze blending\n              vec4 nf_wp = modelMatrix * vec4(position, 1.0);\n              vNF_WorldY = nf_wp.y;\n              ` +
+              vs.slice(i);
+          }
+        }
+      }
+
+      // 1) Declare our uniforms at the very top of the fragment shader
       shader.fragmentShader =
         `uniform float uSkyDarken;\n` +
         `uniform float uSkyFlashGain;\n` +
+        `uniform float uHazeEnabled;\n` +
+        `uniform float uHazeBottomY;\n` +
+        `uniform float uHazeTopY;\n` +
+        `uniform float uHazePower;\n` +
+        `uniform float uHazeFeather;\n` +
+        `uniform vec3  uHazeColor;\n` +
+        `varying float vNF_WorldY;\n` +
         shader.fragmentShader;
 
       // 2) Rewrite final assignment → multiply with darken & flash
@@ -102,13 +180,62 @@ export default function CustomSky({
           }
         }
       }
+
+      // 3) Inject height-based haze blend near end of main()
+      {
+        const mainOpen = fs.indexOf("void main()");
+        if (mainOpen >= 0) {
+          const braceOpen = fs.indexOf("{", mainOpen);
+          let depth = 0,
+            i = braceOpen;
+          for (; i < fs.length; i++) {
+            const ch = fs[i];
+            if (ch === "{") depth++;
+            else if (ch === "}") {
+              depth--;
+              if (depth === 0) break;
+            }
+          }
+          if (i > braceOpen) {
+            fs =
+              fs.slice(0, i) +
+              `
+              // narrative-forest: blend sky with fog color by world-space height
+              if (uHazeEnabled > 0.5) {
+                // Feather widens the blend range for a smoother transition
+                float y0 = min(uHazeBottomY, uHazeTopY);
+                float y1 = max(uHazeBottomY, uHazeTopY);
+                float t = smoothstep(y0 - uHazeFeather, y1 + uHazeFeather, vNF_WorldY);
+                t = pow(t, max(0.0001, uHazePower));
+                gl_FragColor.rgb = mix(uHazeColor, gl_FragColor.rgb, t);
+              }
+              ` +
+              fs.slice(i);
+          }
+        }
+      }
+
       shader.fragmentShader = fs;
 
       // Keep uniforms reachable from React
       shader.uniforms.uSkyDarken = { value: darken };
       shader.uniforms.uSkyFlashGain = { value: 1.0 };
+      shader.uniforms.uHazeEnabled = { value: ctrlHazeEnabled ? 1 : 0 };
+      shader.uniforms.uHazeBottomY = { value: ctrlHazeBottomY };
+      shader.uniforms.uHazeTopY = { value: ctrlHazeTopY };
+      shader.uniforms.uHazePower = { value: Math.max(0.0001, ctrlHazePower) };
+      shader.uniforms.uHazeFeather = { value: Math.max(0.0, ctrlHazeFeather) };
+      shader.uniforms.uHazeColor = {
+        value: new THREE.Color(hazeColorRef.current),
+      };
       mat.userData.uSkyDarken = shader.uniforms.uSkyDarken;
       mat.userData.uSkyFlashGain = shader.uniforms.uSkyFlashGain;
+      mat.userData.uHazeEnabled = shader.uniforms.uHazeEnabled;
+      mat.userData.uHazeBottomY = shader.uniforms.uHazeBottomY;
+      mat.userData.uHazeTopY = shader.uniforms.uHazeTopY;
+      mat.userData.uHazePower = shader.uniforms.uHazePower;
+      mat.userData.uHazeFeather = shader.uniforms.uHazeFeather;
+      mat.userData.uHazeColor = shader.uniforms.uHazeColor;
     };
 
     mat.userData._patched = true;
@@ -124,6 +251,11 @@ export default function CustomSky({
     turbidity,
     mieCoefficient,
     mieDirectionalG,
+    ctrlHazeEnabled,
+    ctrlHazeBottomY,
+    ctrlHazeTopY,
+    ctrlHazePower,
+    ctrlHazeFeather,
   ]);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -257,6 +389,23 @@ export default function CustomSky({
 
     const uFlash = skyRef.current?.material?.userData?.uSkyFlashGain;
     if (uFlash) uFlash.value = flashGain;
+
+    // Update haze uniforms
+    const ud = skyRef.current?.material?.userData;
+    if (ud?.uHazeEnabled) ud.uHazeEnabled.value = ctrlHazeEnabled ? 1 : 0;
+    if (ud?.uHazeBottomY) ud.uHazeBottomY.value = ctrlHazeBottomY;
+    if (ud?.uHazeTopY) ud.uHazeTopY.value = ctrlHazeTopY;
+    if (ud?.uHazePower) ud.uHazePower.value = Math.max(0.0001, ctrlHazePower);
+    if (ud?.uHazeFeather)
+      ud.uHazeFeather.value = Math.max(0.0, ctrlHazeFeather);
+    // Always sync haze color to scene fog color when available; else fallback
+    if (ud?.uHazeColor) {
+      if (scene?.fog?.color) {
+        ud.uHazeColor.value.copy(scene.fog.color);
+      } else {
+        ud.uHazeColor.value.copy(hazeColorRef.current);
+      }
+    }
   });
 
   return (
