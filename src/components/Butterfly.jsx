@@ -1,26 +1,68 @@
 // src/components/Butterfly.jsx
-import React, { forwardRef, useMemo, useRef, useImperativeHandle } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useMemo,
+  useRef,
+  useImperativeHandle,
+} from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useControls, folder } from "leva";
 
+const DEFAULT_AREA_CENTER = Object.freeze([-2, -4.15, -1.5]);
+const DEFAULT_AREA_SIZE = Object.freeze([0.6, 0.35, 1.0]);
+const ZERO_VECTOR = Object.freeze([0, 0, 0]);
+const UP = new THREE.Vector3(0, 1, 0);
+const DEFAULT_FORWARD = new THREE.Vector3(0, 0, 1);
+const Y_FLIP = new THREE.Quaternion().setFromAxisAngle(
+  new THREE.Vector3(0, 1, 0),
+  Math.PI
+);
+const PI2 = Math.PI * 2;
+const EPSILON = 1e-6;
+const randomPhase = () => Math.random() * Math.PI * 2;
+const ensurePositive = (value, fallback) =>
+  value > EPSILON ? value : Math.max(fallback, EPSILON);
+
+const extractComponents = (value, fallback) => {
+  if (value instanceof THREE.Vector3) {
+    return [value.x, value.y, value.z];
+  }
+  if (Array.isArray(value)) {
+    return [
+      value[0] ?? fallback[0],
+      value[1] ?? fallback[1],
+      value[2] ?? fallback[2],
+    ];
+  }
+  if (value && typeof value === "object") {
+    return [
+      value.x ?? fallback[0],
+      value.y ?? fallback[1],
+      value.z ?? fallback[2],
+    ];
+  }
+  return [...fallback];
+};
+
 export default forwardRef(function Butterfly(
   {
-    position,
+    position = DEFAULT_AREA_CENTER,
     rotation,
     // -------- single, uniform world scale --------
     scale = 0.02,
 
     // shader params
     color = "#ffffff",
-    flapFreq = 2.5,
-    flapSpeed = 1.0,
-    flapAmp = 1.12, // radians (~64°) peak open (rear only)
+    flapFreq = 14.1,
+    flapSpeed = 1.25,
+    flapAmp = 1.04, // radians (~60°) peak open (rear only)
 
     // subtle variance (no vertical swing)
-    noiseAmp = 0.05,
-    noiseScale = 3.0,
+    noiseAmp = 0.3,
+    noiseScale = 0.1,
 
     alphaCutoff = 0.02,
     doubleSide = true,
@@ -28,10 +70,37 @@ export default forwardRef(function Butterfly(
     texturePath = "/textures/butterfly/butterfly.png",
 
     // static vertical tilt (degrees)
-    verticalTiltDeg = 0.0,
+    verticalTiltDeg = 62.3,
 
     // Leva control
     enableControls = true,
+
+    // navigation envelope
+    enableNavigation = true,
+    // Base navigation speed (abstract units). Internally we scale this down so fine control is easier.
+    navigationSpeed = 0.12,
+    navigationNoiseAmp = 0.36,
+    navigationNoiseVerticalAmp = 0.19,
+    navigationNoiseFrequency = 0.7,
+    speedToFlapRatio = 0.0,
+    movementTiltFactor = 0.0,
+    movementTiltLimit = 0,
+    orientationSmoothing = 20.0,
+
+    // habitat bounds
+    showHabitatBounds = true,
+    habitatWidth = DEFAULT_AREA_SIZE[0],
+    habitatHeight = DEFAULT_AREA_SIZE[1],
+    habitatDepth = DEFAULT_AREA_SIZE[2],
+    habitatWireColor = "#7fc7ff",
+    habitatWireOpacity = 0.45,
+
+    // waveform motion
+    waveFrequency = 0.7,
+    horizontalWaveAmp = 0.27,
+    verticalWaveAmp = 0.35,
+    forwardWaveAmp = 0.18,
+    rephaseOnTurn = false,
 
     // glow
     enableGlow = true,
@@ -48,11 +117,50 @@ export default forwardRef(function Butterfly(
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.flipY = false; // we flip v in the shader
 
+  const rootRef = useRef();
+  const butterflyGroupRef = useRef();
   const matRef = useRef();
   const meshRef = useRef();
   const glowMatRef = useRef();
   const glowMeshRef = useRef();
+  const navigationRef = useRef({
+    progress: 0,
+    direction: 1,
+    currentPosition: new THREE.Vector3(),
+    basePosition: new THREE.Vector3(),
+    lastPosition: new THREE.Vector3(),
+    velocity: new THREE.Vector3(),
+    forward: new THREE.Vector3(),
+    lateralAxis: new THREE.Vector3(),
+    targetQuaternion: new THREE.Quaternion(),
+    lookAtMatrix: new THREE.Matrix4(),
+    phase: randomPhase(),
+    offsets: {
+      x: randomPhase(),
+      y: randomPhase(),
+      z: randomPhase(),
+    },
+  });
+  const noiseSeed = useMemo(() => Math.random() * 1000, []);
   useImperativeHandle(ref, () => meshRef.current, []);
+
+  const [centerX, centerY, centerZ] = extractComponents(
+    position,
+    DEFAULT_AREA_CENTER
+  );
+  const baseCenter = useMemo(
+    () => new THREE.Vector3(centerX, centerY, centerZ),
+    [centerX, centerY, centerZ]
+  );
+  const fallbackWidth = DEFAULT_AREA_SIZE[0];
+  const fallbackHeight = DEFAULT_AREA_SIZE[1];
+  const fallbackDepth = DEFAULT_AREA_SIZE[2];
+
+  const rotationQuaternion = useMemo(() => {
+    if (rotation == null) return null;
+    const [rx, ry, rz] = extractComponents(rotation, ZERO_VECTOR);
+    return new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz));
+  }, [rotation]);
 
   // Leva controls
   const leva = useControls(
@@ -80,6 +188,128 @@ export default forwardRef(function Butterfly(
                 max: 0.2,
                 step: 0.001,
               },
+              enableNavigation: { value: enableNavigation },
+              navigationSpeed: {
+                value: navigationSpeed,
+                min: 0.0,
+                max: 0.5,
+                step: 0.005,
+                label: "Nav Speed (UI x0.25)",
+              },
+              navigationNoiseAmp: {
+                value: navigationNoiseAmp,
+                min: 0.0,
+                max: 0.5,
+                step: 0.005,
+                label: "Nav Noise (lateral)",
+              },
+              navigationNoiseVerticalAmp: {
+                value: navigationNoiseVerticalAmp,
+                min: 0.0,
+                max: 0.5,
+                step: 0.005,
+                label: "Nav Noise (vertical)",
+              },
+              navigationNoiseFrequency: {
+                value: navigationNoiseFrequency,
+                min: 0.0,
+                max: 5.0,
+                step: 0.01,
+                label: "Nav Noise Freq",
+              },
+              speedToFlapRatio: {
+                value: speedToFlapRatio,
+                min: 0.0,
+                max: 12.0,
+                step: 0.1,
+                label: "Speed → Flap Ratio",
+              },
+              movementTiltFactor: {
+                value: movementTiltFactor,
+                min: 0.0,
+                max: 2.0,
+                step: 0.05,
+                label: "Tilt Follow",
+              },
+              movementTiltLimit: {
+                value: movementTiltLimit,
+                min: 0,
+                max: 60,
+                step: 1,
+                label: "Tilt Limit (deg)",
+              },
+              orientationSmoothing: {
+                value: orientationSmoothing,
+                min: 0.0,
+                max: 20.0,
+                step: 0.1,
+                label: "Orientation Smooth",
+              },
+              waveFrequency: {
+                value: waveFrequency,
+                min: 0.05,
+                max: 5.0,
+                step: 0.01,
+                label: "Wave Frequency",
+              },
+              horizontalWaveAmp: {
+                value: horizontalWaveAmp,
+                min: 0.0,
+                max: 1.5,
+                step: 0.01,
+                label: "Horiz Wave Amp",
+              },
+              verticalWaveAmp: {
+                value: verticalWaveAmp,
+                min: 0.0,
+                max: 1.5,
+                step: 0.01,
+                label: "Vert Wave Amp",
+              },
+              forwardWaveAmp: {
+                value: forwardWaveAmp,
+                min: 0.0,
+                max: 1.0,
+                step: 0.01,
+                label: "Forward Wave",
+              },
+              rephaseOnTurn: { value: rephaseOnTurn, label: "Rephase On Turn" },
+              showHabitatBounds: {
+                value: showHabitatBounds,
+                label: "Show Habitat",
+              },
+              habitatWidth: {
+                value: habitatWidth,
+                min: 0.1,
+                max: 5.0,
+                step: 0.01,
+                label: "Habitat Width",
+              },
+              habitatHeight: {
+                value: habitatHeight,
+                min: 0.1,
+                max: 5.0,
+                step: 0.01,
+                label: "Habitat Height",
+              },
+              habitatDepth: {
+                value: habitatDepth,
+                min: 0.1,
+                max: 5.0,
+                step: 0.01,
+                label: "Habitat Depth",
+              },
+              habitatWireColor: {
+                value: habitatWireColor,
+                label: "Wire Color",
+              },
+              habitatWireOpacity: {
+                value: habitatWireOpacity,
+                min: 0.0,
+                max: 1.0,
+                step: 0.01,
+                label: "Wire Opacity",
+              },
               enableGlow: { value: enableGlow },
               glowIntensity: {
                 value: glowIntensity,
@@ -95,6 +325,91 @@ export default forwardRef(function Butterfly(
         }
       : {}
   );
+
+  const resolveControl = (key, fallback) =>
+    enableControls ? leva?.[key] ?? fallback : fallback;
+
+  const currentHabitatWidth = ensurePositive(
+    resolveControl("habitatWidth", habitatWidth),
+    fallbackWidth
+  );
+  const currentHabitatHeight = ensurePositive(
+    resolveControl("habitatHeight", habitatHeight),
+    fallbackHeight
+  );
+  const currentHabitatDepth = ensurePositive(
+    resolveControl("habitatDepth", habitatDepth),
+    fallbackDepth
+  );
+  const currentShowHabitat = !!resolveControl(
+    "showHabitatBounds",
+    showHabitatBounds
+  );
+  const currentWireColor = resolveControl("habitatWireColor", habitatWireColor);
+  const currentWireOpacity = resolveControl(
+    "habitatWireOpacity",
+    habitatWireOpacity
+  );
+  const currentWaveFrequency = resolveControl("waveFrequency", waveFrequency);
+  const currentHorizontalWaveAmp = resolveControl(
+    "horizontalWaveAmp",
+    horizontalWaveAmp
+  );
+  const currentVerticalWaveAmp = resolveControl(
+    "verticalWaveAmp",
+    verticalWaveAmp
+  );
+  const currentForwardWaveAmp = resolveControl(
+    "forwardWaveAmp",
+    forwardWaveAmp
+  );
+  const currentRephaseOnTurn = resolveControl("rephaseOnTurn", rephaseOnTurn);
+
+  const forwardSign = 1;
+  const navBasis = useMemo(() => {
+    const center = baseCenter.clone();
+    const halfDepth = currentHabitatDepth * 0.5;
+    const direction = new THREE.Vector3(0, 0, forwardSign);
+    const start = center.clone().addScaledVector(direction, -halfDepth);
+    const end = center.clone().addScaledVector(direction, halfDepth);
+
+    return {
+      center,
+      halfWidth: currentHabitatWidth * 0.5,
+      halfHeight: currentHabitatHeight * 0.5,
+      halfDepth,
+      direction,
+      distance: Math.max(currentHabitatDepth, EPSILON),
+      start,
+      end,
+    };
+  }, [
+    baseCenter,
+    currentHabitatWidth,
+    currentHabitatHeight,
+    currentHabitatDepth,
+    forwardSign,
+  ]);
+
+  useEffect(() => {
+    const nav = navigationRef.current;
+    nav.progress = 0;
+    nav.direction = forwardSign;
+    nav.currentPosition.copy(navBasis.start);
+    nav.lastPosition.copy(navBasis.start);
+    nav.basePosition.copy(navBasis.start);
+    nav.forward.copy(navBasis.direction);
+    nav.phase = randomPhase();
+    nav.offsets = {
+      x: randomPhase(),
+      y: randomPhase(),
+      z: randomPhase(),
+    };
+    if (butterflyGroupRef.current) {
+      butterflyGroupRef.current.position.copy(navBasis.start);
+      butterflyGroupRef.current.quaternion.identity();
+    }
+  }, [navBasis, forwardSign]);
 
   // Plane geometry (world size controlled only by `scale`)
   const args = useMemo(() => [1, 1, 12, 12], []);
@@ -301,100 +616,290 @@ export default forwardRef(function Butterfly(
     ]
   );
 
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
+  useFrame((state, delta) => {
+    const t = state.clock.getElapsedTime();
     const ctrl = enableControls ? leva : undefined;
 
-    const tiltDeg =
+    const navEnabled =
+      (enableControls ? ctrl?.enableNavigation : enableNavigation) ??
+      enableNavigation;
+    // Apply an internal scale so UI values remain small and intuitive.
+    const rawNavSpeed =
+      (enableControls ? ctrl?.navigationSpeed : navigationSpeed) ??
+      navigationSpeed;
+    const navSpeedValue = rawNavSpeed * 0.25; // internal scaling factor
+    const navNoiseLateral =
+      (enableControls ? ctrl?.navigationNoiseAmp : navigationNoiseAmp) ??
+      navigationNoiseAmp;
+    const navNoiseVertical =
+      (enableControls
+        ? ctrl?.navigationNoiseVerticalAmp
+        : navigationNoiseVerticalAmp) ?? navigationNoiseVerticalAmp;
+    const navNoiseFreq =
+      (enableControls
+        ? ctrl?.navigationNoiseFrequency
+        : navigationNoiseFrequency) ?? navigationNoiseFrequency;
+    const flapRatio =
+      (enableControls ? ctrl?.speedToFlapRatio : speedToFlapRatio) ??
+      speedToFlapRatio;
+    const tiltFollow =
+      (enableControls ? ctrl?.movementTiltFactor : movementTiltFactor) ??
+      movementTiltFactor;
+    const tiltLimit =
+      (enableControls ? ctrl?.movementTiltLimit : movementTiltLimit) ??
+      movementTiltLimit;
+    const orientSmooth =
+      (enableControls ? ctrl?.orientationSmoothing : orientationSmoothing) ??
+      orientationSmoothing;
+
+    const nav = navigationRef.current;
+    const distance = navBasis.distance;
+    let speed = 0;
+
+    if (navEnabled && distance > EPSILON) {
+      nav.progress += (delta * navSpeedValue * nav.direction) / distance;
+      let flipped = false;
+      if (nav.progress >= 1) {
+        nav.progress = 1;
+        nav.direction = -1;
+        flipped = true;
+      } else if (nav.progress <= 0) {
+        nav.progress = 0;
+        nav.direction = 1;
+        flipped = true;
+      }
+
+      if (flipped && currentRephaseOnTurn) {
+        nav.phase = randomPhase();
+        nav.offsets.x = randomPhase();
+        nav.offsets.y = randomPhase();
+        nav.offsets.z = randomPhase();
+      }
+
+      const waveDir = nav.direction >= 0 ? 1 : -1;
+      const waveSpeed = Math.max(navSpeedValue, 0.02);
+      nav.phase += delta * currentWaveFrequency * waveSpeed * waveDir;
+
+      const normalized = nav.progress * 2 - 1;
+      nav.basePosition.set(
+        navBasis.center.x,
+        navBasis.center.y,
+        navBasis.center.z + normalized * navBasis.halfDepth
+      );
+
+      const phase = nav.phase;
+      const sinPhase = Math.sin(phase + nav.offsets.x);
+      const cosPhase = Math.cos(phase * 1.3 + nav.offsets.y);
+      const forwardPhase = Math.sin(phase * 0.7 + nav.offsets.z);
+
+      const noisePhase = noiseSeed + t * navNoiseFreq;
+      const lateralNoise =
+        Math.sin(noisePhase + nav.offsets.x * 1.7) *
+        navNoiseLateral *
+        navBasis.halfWidth;
+      const verticalNoise =
+        Math.cos(noisePhase * 1.9 + nav.offsets.y * 2.3) *
+        navNoiseVertical *
+        navBasis.halfHeight;
+
+      nav.currentPosition.set(
+        navBasis.center.x +
+          sinPhase * navBasis.halfWidth * currentHorizontalWaveAmp +
+          lateralNoise,
+        navBasis.center.y +
+          cosPhase * navBasis.halfHeight * currentVerticalWaveAmp +
+          verticalNoise,
+        nav.basePosition.z +
+          forwardPhase * navBasis.halfDepth * currentForwardWaveAmp
+      );
+
+      nav.currentPosition.x = THREE.MathUtils.clamp(
+        nav.currentPosition.x,
+        navBasis.center.x - navBasis.halfWidth,
+        navBasis.center.x + navBasis.halfWidth
+      );
+      nav.currentPosition.y = THREE.MathUtils.clamp(
+        nav.currentPosition.y,
+        navBasis.center.y - navBasis.halfHeight,
+        navBasis.center.y + navBasis.halfHeight
+      );
+      nav.currentPosition.z = THREE.MathUtils.clamp(
+        nav.currentPosition.z,
+        navBasis.center.z - navBasis.halfDepth,
+        navBasis.center.z + navBasis.halfDepth
+      );
+
+      nav.velocity.copy(nav.currentPosition).sub(nav.lastPosition);
+      if (delta > EPSILON) {
+        nav.velocity.divideScalar(delta);
+      }
+      speed = nav.velocity.length();
+
+      if (nav.velocity.lengthSq() > EPSILON) {
+        nav.forward.copy(nav.velocity).normalize();
+      } else {
+        nav.forward.set(0, 0, waveDir);
+      }
+      nav.lastPosition.copy(nav.currentPosition);
+    } else {
+      nav.basePosition.copy(navBasis.center);
+      nav.currentPosition.copy(navBasis.center);
+      nav.velocity.set(0, 0, 0);
+      nav.forward.set(0, 0, forwardSign);
+      nav.lastPosition.copy(nav.currentPosition);
+      nav.phase += delta * currentWaveFrequency * 0.1;
+    }
+
+    if (butterflyGroupRef.current) {
+      butterflyGroupRef.current.position.copy(nav.currentPosition);
+    }
+
+    nav.basePosition.copy(nav.currentPosition).add(nav.forward);
+    nav.lookAtMatrix.lookAt(nav.currentPosition, nav.basePosition, UP);
+    nav.targetQuaternion.setFromRotationMatrix(nav.lookAtMatrix);
+    nav.targetQuaternion.multiply(Y_FLIP);
+    if (rotationQuaternion) {
+      nav.targetQuaternion.multiply(rotationQuaternion);
+    }
+
+    if (butterflyGroupRef.current) {
+      if (orientSmooth <= 0) {
+        butterflyGroupRef.current.quaternion.copy(nav.targetQuaternion);
+      } else {
+        const alpha = THREE.MathUtils.clamp(
+          1 - Math.exp(-orientSmooth * delta),
+          0,
+          1
+        );
+        butterflyGroupRef.current.quaternion.slerp(nav.targetQuaternion, alpha);
+      }
+    }
+
+    const baseColor = ctrl?.color ?? color;
+    const baseFlapFreq = ctrl?.flapFreq ?? flapFreq;
+    const flapSpeedValue = ctrl?.flapSpeed ?? flapSpeed;
+    const flapAmpValue = ctrl?.flapAmp ?? flapAmp;
+    const wingNoiseAmp = ctrl?.noiseAmp ?? noiseAmp;
+    const wingNoiseScale = ctrl?.noiseScale ?? noiseScale;
+    const alphaCut = ctrl?.alphaCutoff ?? alphaCutoff;
+    const glowColorValue = ctrl?.glowColor ?? glowColor;
+    const glowIntensityValue = ctrl?.glowIntensity ?? glowIntensity;
+    const scaleValue = ctrl?.scale ?? scale;
+    const glowSizeValue = ctrl?.glowSize ?? glowSize;
+
+    const dynamicFlapFreq = baseFlapFreq + speed * flapRatio;
+
+    const baseTiltDeg =
       (enableControls ? ctrl?.verticalTiltDeg : verticalTiltDeg) ??
       verticalTiltDeg;
+    const horizontalMag = Math.sqrt(
+      nav.forward.x * nav.forward.x + nav.forward.z * nav.forward.z
+    );
+    const slopeAngle = Math.atan2(nav.forward.y, horizontalMag || 1e-6);
+    const motionTiltDeg = THREE.MathUtils.clamp(
+      THREE.MathUtils.radToDeg(slopeAngle) * tiltFollow,
+      -tiltLimit,
+      tiltLimit
+    );
+    const tiltDeg = baseTiltDeg + motionTiltDeg;
     const tiltRad = THREE.MathUtils.degToRad(tiltDeg);
 
     if (matRef.current) {
-      matRef.current.uniforms.uTime.value = t;
-
-      const nextColor = ctrl?.color ?? color;
-      if (typeof nextColor === "string") {
-        matRef.current.uniforms.uColor.value.set(nextColor);
+      const uniforms = matRef.current.uniforms;
+      uniforms.uTime.value = t;
+      if (typeof baseColor === "string") {
+        uniforms.uColor.value.set(baseColor);
       }
-      matRef.current.uniforms.uFlapFreq.value = ctrl?.flapFreq ?? flapFreq;
-      matRef.current.uniforms.uFlapSpeed.value = ctrl?.flapSpeed ?? flapSpeed;
-      matRef.current.uniforms.uFlapAmp.value = ctrl?.flapAmp ?? flapAmp;
-
-      matRef.current.uniforms.uNoiseAmp.value = ctrl?.noiseAmp ?? noiseAmp;
-      matRef.current.uniforms.uNoiseScale.value =
-        ctrl?.noiseScale ?? noiseScale;
-      matRef.current.uniforms.uAlphaCutoff.value =
-        ctrl?.alphaCutoff ?? alphaCutoff;
-
-      matRef.current.uniforms.uTiltStatic.value = tiltRad;
+      uniforms.uFlapFreq.value = dynamicFlapFreq;
+      uniforms.uFlapSpeed.value = flapSpeedValue;
+      uniforms.uFlapAmp.value = flapAmpValue;
+      uniforms.uNoiseAmp.value = wingNoiseAmp;
+      uniforms.uNoiseScale.value = wingNoiseScale;
+      uniforms.uAlphaCutoff.value = alphaCut;
+      uniforms.uTiltStatic.value = tiltRad;
     }
 
     if (glowMatRef.current) {
-      glowMatRef.current.uniforms.uTime.value = t;
-      glowMatRef.current.uniforms.uFlapFreq.value = ctrl?.flapFreq ?? flapFreq;
-      glowMatRef.current.uniforms.uFlapSpeed.value =
-        ctrl?.flapSpeed ?? flapSpeed;
-      glowMatRef.current.uniforms.uFlapAmp.value = ctrl?.flapAmp ?? flapAmp;
-
-      glowMatRef.current.uniforms.uNoiseAmp.value = ctrl?.noiseAmp ?? noiseAmp;
-      glowMatRef.current.uniforms.uNoiseScale.value =
-        ctrl?.noiseScale ?? noiseScale;
-      glowMatRef.current.uniforms.uAlphaCutoff.value =
-        ctrl?.alphaCutoff ?? alphaCutoff;
-
-      const nextGlowColor =
-        (enableControls ? leva?.glowColor : glowColor) ?? glowColor;
-      if (typeof nextGlowColor === "string") {
-        glowMatRef.current.uniforms.uGlowColor.value.set(nextGlowColor);
+      const uniforms = glowMatRef.current.uniforms;
+      uniforms.uTime.value = t;
+      uniforms.uFlapFreq.value = dynamicFlapFreq;
+      uniforms.uFlapSpeed.value = flapSpeedValue;
+      uniforms.uFlapAmp.value = flapAmpValue;
+      uniforms.uNoiseAmp.value = wingNoiseAmp;
+      uniforms.uNoiseScale.value = wingNoiseScale;
+      uniforms.uAlphaCutoff.value = alphaCut;
+      if (typeof glowColorValue === "string") {
+        uniforms.uGlowColor.value.set(glowColorValue);
       }
-      glowMatRef.current.uniforms.uGlowIntensity.value = enableControls
-        ? leva?.glowIntensity ?? glowIntensity
-        : glowIntensity;
-
-      glowMatRef.current.uniforms.uTiltStatic.value = tiltRad;
+      uniforms.uGlowIntensity.value = glowIntensityValue;
+      uniforms.uTiltStatic.value = tiltRad;
     }
 
-    // uniform world scale
-    const s = enableControls ? leva?.scale ?? scale : scale;
-    if (meshRef.current) meshRef.current.scale.set(s, s, s);
+    if (meshRef.current) {
+      meshRef.current.scale.set(scaleValue, scaleValue, scaleValue);
+    }
     if (glowMeshRef.current) {
-      const gs = enableControls ? leva?.glowSize ?? glowSize : glowSize;
-      glowMeshRef.current.scale.set(s * gs, s * gs, s * gs);
+      const gs = scaleValue * glowSizeValue;
+      glowMeshRef.current.scale.set(gs, gs, gs);
     }
   });
 
-  return (
-    <group>
-      <mesh ref={meshRef} position={position} rotation={rotation} {...rest}>
-        <planeGeometry args={args} />
-        <shaderMaterial
-          ref={matRef}
-          vertexShader={vertex}
-          fragmentShader={fragment}
-          uniforms={uniforms}
-          transparent
-          depthWrite={depthWrite}
-          side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
-          premultipliedAlpha={false}
-        />
-      </mesh>
+  const showGlow = enableControls ? leva?.enableGlow ?? enableGlow : enableGlow;
+  const habitatArgs = useMemo(
+    () => [currentHabitatWidth, currentHabitatHeight, currentHabitatDepth],
+    [currentHabitatWidth, currentHabitatHeight, currentHabitatDepth]
+  );
+  const habitatPosition = useMemo(
+    () => [navBasis.center.x, navBasis.center.y, navBasis.center.z],
+    [navBasis]
+  );
 
-      {(enableControls ? leva?.enableGlow ?? enableGlow : enableGlow) && (
-        <mesh ref={glowMeshRef} position={position} rotation={rotation}>
-          <planeGeometry args={args} />
-          <shaderMaterial
-            ref={glowMatRef}
-            vertexShader={vertex}
-            fragmentShader={glowFragment}
-            uniforms={glowUniforms}
+  return (
+    <group ref={rootRef} {...rest}>
+      {currentShowHabitat && (
+        <mesh position={habitatPosition} frustumCulled={false}>
+          <boxGeometry args={habitatArgs} />
+          <meshBasicMaterial
+            color={currentWireColor}
+            wireframe
             transparent
+            opacity={currentWireOpacity}
             depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
           />
         </mesh>
       )}
+
+      <group ref={butterflyGroupRef}>
+        <mesh ref={meshRef}>
+          <planeGeometry args={args} />
+          <shaderMaterial
+            ref={matRef}
+            vertexShader={vertex}
+            fragmentShader={fragment}
+            uniforms={uniforms}
+            transparent
+            depthWrite={depthWrite}
+            side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
+            premultipliedAlpha={false}
+          />
+        </mesh>
+
+        {showGlow && (
+          <mesh ref={glowMeshRef}>
+            <planeGeometry args={args} />
+            <shaderMaterial
+              ref={glowMatRef}
+              vertexShader={vertex}
+              fragmentShader={glowFragment}
+              uniforms={glowUniforms}
+              transparent
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
+            />
+          </mesh>
+        )}
+      </group>
     </group>
   );
 });
