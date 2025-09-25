@@ -124,8 +124,10 @@ export default forwardRef(function Butterfly(
   const glowMatRef = useRef();
   const glowMeshRef = useRef();
   const navigationRef = useRef({
-    progress: 0,
+    // depthProgress / direction replaced by continuous travelPhase for smooth U-turns
+    progress: 0, // retained for UI compatibility (0..1 mapping of depth)
     direction: 1,
+    travelPhase: 0, // continuous phase driving forward/back motion (-1..1 via sin)
     currentPosition: new THREE.Vector3(),
     basePosition: new THREE.Vector3(),
     lastPosition: new THREE.Vector3(),
@@ -395,6 +397,7 @@ export default forwardRef(function Butterfly(
     const nav = navigationRef.current;
     nav.progress = 0;
     nav.direction = forwardSign;
+    nav.travelPhase = 0;
     nav.currentPosition.copy(navBasis.start);
     nav.lastPosition.copy(navBasis.start);
     nav.basePosition.copy(navBasis.start);
@@ -657,30 +660,35 @@ export default forwardRef(function Butterfly(
     let speed = 0;
 
     if (navEnabled && distance > EPSILON) {
-      nav.progress += (delta * navSpeedValue * nav.direction) / distance;
-      let flipped = false;
-      if (nav.progress >= 1) {
-        nav.progress = 1;
-        nav.direction = -1;
-        flipped = true;
-      } else if (nav.progress <= 0) {
-        nav.progress = 0;
-        nav.direction = 1;
-        flipped = true;
-      }
-
-      if (flipped && currentRephaseOnTurn) {
-        nav.phase = randomPhase();
-        nav.offsets.x = randomPhase();
-        nav.offsets.y = randomPhase();
-        nav.offsets.z = randomPhase();
-      }
-
-      const waveDir = nav.direction >= 0 ? 1 : -1;
+      const nav = navigationRef.current;
+      // advance continuous phase (one full sine cycle = out and back)
       const waveSpeed = Math.max(navSpeedValue, 0.02);
-      nav.phase += delta * currentWaveFrequency * waveSpeed * waveDir;
+      const prevPhase = nav.travelPhase;
+      nav.travelPhase += delta * waveSpeed;
+      // depth oscillation: sin gives smooth turnaround at edges
+  // Cosine gives smooth acceleration/deceleration at edges (derivative zero at extremes)
+  const depthCos = Math.cos(nav.travelPhase * Math.PI * 2.0); // 1 -> -1 -> 1...
+  const normalized = -depthCos; // map 1-> -1 (rear) then -1 -> +1 (front)
 
-      const normalized = nav.progress * 2 - 1;
+      // Detect U-turn: sign change of derivative (~sin) near endpoints
+      const derivBefore = Math.sin(prevPhase * Math.PI * 2.0);
+      const derivAfter = Math.sin(nav.travelPhase * Math.PI * 2.0);
+      const turning = derivBefore * derivAfter < 0; // passed a peak
+      if (turning) {
+        nav.direction *= -1; // semantic direction (forward/back)
+        if (currentRephaseOnTurn) {
+          nav.phase = randomPhase();
+          nav.offsets.x = randomPhase();
+          nav.offsets.y = randomPhase();
+          nav.offsets.z = randomPhase();
+        }
+      }
+
+      // progress 0..1 mapping for potential external uses
+      nav.progress = (normalized + 1) * 0.5;
+
+      nav.phase += delta * currentWaveFrequency * waveSpeed * nav.direction;
+
       nav.basePosition.set(
         navBasis.center.x,
         navBasis.center.y,
@@ -738,7 +746,9 @@ export default forwardRef(function Butterfly(
       if (nav.velocity.lengthSq() > EPSILON) {
         nav.forward.copy(nav.velocity).normalize();
       } else {
-        nav.forward.set(0, 0, waveDir);
+        // derive forward direction from phase derivative for consistent orientation
+        const d = Math.sin(nav.travelPhase * Math.PI * 2.0); // derivative of cos-based depth
+        nav.forward.set(0, 0, Math.sign(d) || nav.direction);
       }
       nav.lastPosition.copy(nav.currentPosition);
     } else {
