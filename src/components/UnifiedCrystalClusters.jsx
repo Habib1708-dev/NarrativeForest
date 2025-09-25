@@ -517,8 +517,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
 
   // Unified controls
   const unifiedGradient = useControls("Crystals / Gradient", {
-    U_colorA: { value: "#0099d1ff", label: "Bottom Color (A)" },
-    U_colorB: { value: "#bc00f5ff", label: "Top Color (B)" },
+    U_colorA: { value: "#ecfaff", label: "Bottom Color (A)" },
+    U_colorB: { value: "#bc00f5", label: "Top Color (B)" },
     U_mid: {
       value: 0.38,
       min: 0,
@@ -622,10 +622,10 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     },
     Pair_A_Bottom: { value: "#2ec5ff", label: "A Bottom" },
     Pair_A_Top: { value: "#b000ff", label: "A Top" },
-    Pair_B_Bottom: { value: "#00ffc8", label: "B Bottom" },
-    Pair_B_Top: { value: "#0078ff", label: "B Top" },
-    Pair_C_Bottom: { value: "#ffd44a", label: "C Bottom" },
-    Pair_C_Top: { value: "#ff3a7c", label: "C Top" },
+    Pair_B_Bottom: { value: "#00ff23", label: "B Bottom" },
+    Pair_B_Top: { value: "#f9ff87", label: "B Top" },
+    Pair_C_Bottom: { value: "#ffc300", label: "C Bottom" },
+    Pair_C_Top: { value: "#adadad", label: "C Top" },
   });
 
   const dissolve = useControls("Crystals Dissolve", {
