@@ -666,9 +666,9 @@ export default forwardRef(function Butterfly(
       const prevPhase = nav.travelPhase;
       nav.travelPhase += delta * waveSpeed;
       // depth oscillation: sin gives smooth turnaround at edges
-  // Cosine gives smooth acceleration/deceleration at edges (derivative zero at extremes)
-  const depthCos = Math.cos(nav.travelPhase * Math.PI * 2.0); // 1 -> -1 -> 1...
-  const normalized = -depthCos; // map 1-> -1 (rear) then -1 -> +1 (front)
+      // Cosine gives smooth acceleration/deceleration at edges (derivative zero at extremes)
+      const depthCos = Math.cos(nav.travelPhase * Math.PI * 2.0); // 1 -> -1 -> 1...
+      const normalized = -depthCos; // map 1-> -1 (rear) then -1 -> +1 (front)
 
       // Detect U-turn: sign change of derivative (~sin) near endpoints
       const derivBefore = Math.sin(prevPhase * Math.PI * 2.0);
