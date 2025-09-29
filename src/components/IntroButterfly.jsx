@@ -47,7 +47,7 @@ export default forwardRef(function IntroButterfly(
     // initial transform
     position = [-0.131, -3.934, -5.104],
     rotation,
-    scale = 0.02,
+    scale = 0.03,
 
     // wings / shading
     color = "#ffffff",
@@ -174,14 +174,14 @@ export default forwardRef(function IntroButterfly(
               // Camera tethering
               tieToCamera: { value: true, label: "Tie To Camera" },
               aheadDistance: {
-                value: 0.9,
+                value: 1.4, //0.9,
                 min: 0.1,
                 max: 6,
                 step: 0.01,
                 label: "Ahead Distance",
               },
               centerFollow: {
-                value: 4.0,
+                value: 8.0,
                 min: 0.1,
                 max: 20,
                 step: 0.1,
@@ -198,14 +198,14 @@ export default forwardRef(function IntroButterfly(
               roamFreqZ: { value: 0.7, min: 0.05, max: 3, step: 0.01 },
               roamJitter: { value: 0.35, min: 0, max: 1, step: 0.01 },
               camInfluence: {
-                value: 0.6,
+                value: 0.4,
                 min: 0,
                 max: 2,
                 step: 0.01,
                 label: "Cam Motion Influence",
               },
-              maxSpeed: { value: 1.4, min: 0.2, max: 4, step: 0.01 },
-              orientationSmoothing: { value: 18.0, min: 0, max: 50, step: 0.1 },
+              maxSpeed: { value: 1.5, min: 0.2, max: 4, step: 0.01 },
+              orientationSmoothing: { value: 50.0, min: 0, max: 50, step: 0.1 },
 
               // Habitat
               showHabitat: { value: true, label: "Show Habitat" },
