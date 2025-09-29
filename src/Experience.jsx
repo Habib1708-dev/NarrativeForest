@@ -35,6 +35,7 @@ import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
+import IntroButterfly from "./components/IntroButterfly";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -285,10 +286,11 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
-        {/* <MagicMushrooms ref={mushroomsRef} /> */}
-        {/* <Fireflies /> */}
+        <MagicMushrooms ref={mushroomsRef} />
+        <Fireflies />
         <UnifiedCrystalClusters />
         <Butterfly />
+        <IntroButterfly />
       </Suspense>
 
       <DistanceFade
