@@ -361,11 +361,14 @@ export default forwardRef(function IntroButterfly(
     uniform sampler2D uTexture;
     uniform vec3 uColor;
     uniform float uAlphaCutoff;
+    uniform float uVisibility; // 0..1 fade control
     varying vec2 vUv;
     void main(){
       vec4 texel = texture2D(uTexture, vUv);
       if (texel.a <= uAlphaCutoff) discard;
-      gl_FragColor = vec4(texel.rgb * uColor, texel.a);
+      float alpha = texel.a * uVisibility;
+      if (alpha <= 0.0001) discard;
+      gl_FragColor = vec4(texel.rgb * uColor, alpha);
     }`,
     []
   );
@@ -374,11 +377,14 @@ export default forwardRef(function IntroButterfly(
     () => /* glsl */ `
     uniform sampler2D uTexture;
     uniform vec3 uGlowColor;
-    uniform float uGlowIntensity, uAlphaCutoff;
+    uniform float uGlowIntensity, uGlowBoost, uAlphaCutoff, uVisibility;
     varying vec2 vUv;
     void main(){
       vec4 texel = texture2D(uTexture, vUv);
-      float a = smoothstep(uAlphaCutoff, 1.0, texel.a) * uGlowIntensity;
+      float base = smoothstep(uAlphaCutoff, 1.0, texel.a);
+      float intensity = max(0.0, uGlowIntensity + uGlowBoost);
+      float a = base * intensity * uVisibility;
+      if (a <= 0.0001) discard;
       gl_FragColor = vec4(uGlowColor * a, a);
     }`,
     []
@@ -396,6 +402,7 @@ export default forwardRef(function IntroButterfly(
       uNoiseScale: { value: noiseScale },
       uAlphaCutoff: { value: alphaCutoff },
       uTiltStatic: { value: THREE.MathUtils.degToRad(verticalTiltDeg) },
+      uVisibility: { value: 1.0 },
     }),
     [
       tex,
@@ -423,6 +430,8 @@ export default forwardRef(function IntroButterfly(
       uGlowColor: { value: new THREE.Color(glowColor) },
       uGlowIntensity: { value: glowIntensity },
       uTiltStatic: { value: THREE.MathUtils.degToRad(verticalTiltDeg) },
+      uGlowBoost: { value: 0.0 },
+      uVisibility: { value: 1.0 },
     }),
     [
       tex,
@@ -441,6 +450,9 @@ export default forwardRef(function IntroButterfly(
   // Init
   useEffect(() => {
     if (camera) st.current.lastCamPos.copy(camera.position);
+    // init visibility
+    st.current.visAlpha = 1.0;
+    st.current.visTarget = 1.0;
   }, [camera]);
 
   useFrame((state, dt) => {
@@ -525,6 +537,20 @@ export default forwardRef(function IntroButterfly(
     const camInf = get("camInfluence", 0.6);
     const maxSpeed = Math.max(0.01, get("maxSpeed", 1.4));
     const orientSmooth = Math.max(0, get("orientationSmoothing", 18.0));
+    // Edge fade controls
+    const enableEdgeFade = true;
+    const edgeFadeFraction = THREE.MathUtils.clamp(
+      get("edgeFadeFraction", 0.12),
+      0.0,
+      0.49
+    );
+    const reappearFraction = THREE.MathUtils.clamp(
+      get("reappearFraction", 0.2),
+      0.0,
+      0.49
+    );
+    const fadeRate = Math.max(0.1, get("fadeRate", 2.0)); // 1/s
+    const glowUpMax = Math.max(0.0, get("glowUpMax", 1.5));
 
     // camera forward speed projected on habitat forward
     const camFwdAlongHabitat = camForwardSpeed * camF.dot(forward); // signed
@@ -669,6 +695,61 @@ export default forwardRef(function IntroButterfly(
       u.uTiltStatic.value = tiltRad;
     }
 
+    // Visibility and glow-up handling near forward edge of habitat
+    if (enableEdgeFade) {
+      // local z within habitat basis
+      const rel = s.pos.clone().sub(s.center);
+      const zLocal = rel.dot(forward);
+      const nearEdgeZ = s.halfD * (1.0 - edgeFadeFraction);
+      const reappearZ = s.halfD * (1.0 - reappearFraction);
+
+      if ((s.visTarget ?? 1.0) > 0.5) {
+        // visible target -> trigger fade-out when near forward edge
+        if (zLocal >= nearEdgeZ) s.visTarget = 0.0;
+      } else {
+        // invisible target -> trigger fade-in when moved back enough
+        if (zLocal <= reappearZ) s.visTarget = 1.0;
+      }
+
+      // update visibility alpha toward target
+      s.visAlpha = s.visAlpha ?? 1.0;
+      const dir =
+        (s.visTarget ?? 1.0) > s.visAlpha + 1e-4
+          ? 1.0
+          : (s.visTarget ?? 1.0) < s.visAlpha - 1e-4
+          ? -1.0
+          : 0.0;
+      if (dir !== 0.0) {
+        s.visAlpha = THREE.MathUtils.clamp(
+          s.visAlpha + dir * fadeRate * dtSafe,
+          0.0,
+          1.0
+        );
+      }
+      // set object visibility to avoid draw calls when fully invisible
+      if (groupRef.current) {
+        if (s.visTarget === 0.0 && s.visAlpha <= 0.001)
+          groupRef.current.visible = false;
+        else groupRef.current.visible = true;
+      }
+
+      // glow boost peaks while invisible and reduces as fully visible
+      s.glowBoost = (1.0 - s.visAlpha) * glowUpMax;
+    } else {
+      s.visAlpha = 1.0;
+      s.glowBoost = 0.0;
+      if (groupRef.current) groupRef.current.visible = true;
+    }
+
+    // apply uniforms for visibility and glow boost
+    if (matRef.current) {
+      matRef.current.uniforms.uVisibility.value = s.visAlpha;
+    }
+    if (glowMatRef.current) {
+      glowMatRef.current.uniforms.uVisibility.value = s.visAlpha;
+      glowMatRef.current.uniforms.uGlowBoost.value = s.glowBoost;
+    }
+
     if (meshRef.current) meshRef.current.scale.set(sc, sc, sc);
     if (glowRef.current) {
       const g = sc * glowSz;
@@ -704,6 +785,11 @@ export default forwardRef(function IntroButterfly(
 
   return (
     <group ref={rootRef} {...rest}>
+      {/* Controls for edge fade/glow-up (in Leva) */}
+      {
+        enableControls &&
+          null /* UI already created in useControls; values pulled via get() */
+      }
       {showHabitat && (
         <group position={[hcx, hcy, hcz]} rotation={[0, hyaw, 0]}>
           <mesh frustumCulled={false}>
