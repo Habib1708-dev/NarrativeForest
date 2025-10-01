@@ -304,7 +304,7 @@ export default forwardRef(function Cabin(_, ref) {
   );
 
   return (
-    <group ref={rootRef}>
+    <group ref={rootRef} userData={{ noDistanceFade: true }}>
       {/* Cabin model */}
       <group
         position={position}

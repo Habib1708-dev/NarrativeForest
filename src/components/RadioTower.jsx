@@ -412,7 +412,12 @@ export default forwardRef(function RadioTower({ visible = true }, ref) {
   if (!cloned) return null;
 
   return (
-    <group ref={rootRef} name="RadioTower" dispose={null}>
+    <group
+      ref={rootRef}
+      name="RadioTower"
+      dispose={null}
+      userData={{ noDistanceFade: true }}
+    >
       <group position={position} rotation={[0, rotationY, 0]} scale={scaleVec}>
         <primitive object={cloned} />
       </group>

@@ -1015,6 +1015,7 @@ export default forwardRef(function MagicMushrooms(
         groupRef.current = n;
       }}
       name="MagicMushrooms"
+      userData={{ noDistanceFade: true }}
       {...props}
     >
       {/* Instanced mushrooms (all submeshes) */}

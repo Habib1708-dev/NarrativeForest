@@ -173,6 +173,8 @@ void DFade_doDiscard(float df_vViewDist){
     m.morphTargets = !!srcMat?.morphTargets;
     m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
+      // Only patch if this shader uses the standard project_vertex chunk
+      if (!shader.vertexShader.includes("#include <project_vertex>")) return;
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
         "varying float df_vViewDist;\n" +
@@ -180,11 +182,7 @@ void DFade_doDiscard(float df_vViewDist){
           "#include <project_vertex>",
           `
 #include <project_vertex>
-vec4 df_mv = modelViewMatrix * vec4( transformed, 1.0 );
-#ifdef USE_INSTANCING
-  df_mv = modelViewMatrix * ( instanceMatrix * vec4( transformed, 1.0 ) );
-#endif
-df_vViewDist = length(df_mv.xyz);
+df_vViewDist = length(mvPosition.xyz);
 `
         );
       shader.fragmentShader =
@@ -208,6 +206,7 @@ df_vViewDist = length(df_mv.xyz);
     m.morphTargets = !!srcMat?.morphTargets;
     m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
+      if (!shader.vertexShader.includes("#include <project_vertex>")) return;
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
         "varying float df_vViewDist;\n" +
@@ -215,11 +214,7 @@ df_vViewDist = length(df_mv.xyz);
           "#include <project_vertex>",
           `
 #include <project_vertex>
-vec4 df_mv = modelViewMatrix * vec4( transformed, 1.0 );
-#ifdef USE_INSTANCING
-  df_mv = modelViewMatrix * ( instanceMatrix * vec4( transformed, 1.0 ) );
-#endif
-df_vViewDist = length(df_mv.xyz);
+df_vViewDist = length(mvPosition.xyz);
 `
         );
       shader.fragmentShader =
@@ -236,8 +231,18 @@ df_vViewDist = length(df_mv.xyz);
   }
 
   // ---------- patcher ----------
+  const hasNoDistanceFade = (obj) => {
+    let o = obj;
+    while (o) {
+      if (o.userData && o.userData.noDistanceFade) return true;
+      o = o.parent;
+    }
+    return false;
+  };
+
   const patchMaterial = (mat, mesh) => {
     if (!effEnabled || !mat || patched.current.has(mat)) return;
+    if (hasNoDistanceFade(mesh) || mat?.userData?.noDistanceFade) return;
 
     if (
       mat.isShaderMaterial ||
@@ -253,6 +258,11 @@ df_vViewDist = length(df_mv.xyz);
 
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader) => {
+      // Only patch shaders that use the standard project_vertex chunk
+      if (!shader.vertexShader.includes("#include <project_vertex>")) {
+        prev?.(shader);
+        return;
+      }
       prev?.(shader);
       Object.assign(shader.uniforms, uniforms);
 
@@ -262,11 +272,7 @@ df_vViewDist = length(df_mv.xyz);
           "#include <project_vertex>",
           `
 #include <project_vertex>
-vec4 df_mv = modelViewMatrix * vec4( transformed, 1.0 );
-#ifdef USE_INSTANCING
-  df_mv = modelViewMatrix * ( instanceMatrix * vec4( transformed, 1.0 ) );
-#endif
-df_vViewDist = length(df_mv.xyz);
+df_vViewDist = length(mvPosition.xyz);
 `
         );
 
@@ -283,6 +289,8 @@ df_vViewDist = length(df_mv.xyz);
     }
 
     patched.current.add(mat);
+    // One-shot recompile so our onBeforeCompile takes effect deterministically
+    mat.needsUpdate = true;
 
     stats.current.count++;
     const t = mat.type || "UnknownMaterial";
