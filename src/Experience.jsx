@@ -111,10 +111,10 @@ export default function Experience() {
       fogMode: { value: "exp2", options: ["linear", "exp2"] },
       fogNear: { value: 4, min: 0, max: 50, step: 1 },
       fogFar: { value: 10, min: 3, max: 30, step: 3 },
-      fogDensity: { value: 0.3, min: 0.0, max: 0.8, step: 0.001 },
+      fogDensity: { value: 0.4, min: 0.0, max: 0.8, step: 0.001 },
     }),
     Lights: folder({
-      dirLightIntensity: { value: 0.1, min: 0, max: 5, step: 0.01 },
+      dirLightIntensity: { value: 0.0, min: 0, max: 5, step: 0.01 },
     }),
     "Unified Fog": folder({
       fEnabled: { value: true },
@@ -262,7 +262,7 @@ export default function Experience() {
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
         <Cat ref={catRef} />
-        {showRadioTower && <RadioTower ref={radioTowerRef} />}
+        <RadioTower ref={radioTowerRef} visible={showRadioTower} />
         <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
@@ -294,7 +294,7 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
-        {showMushrooms && <MagicMushrooms ref={mushroomsRef} />}
+        <MagicMushrooms ref={mushroomsRef} visible={showMushrooms} />
         <Fireflies />
         <UnifiedCrystalClusters />
         <Butterfly />
@@ -302,7 +302,7 @@ export default function Experience() {
       </Suspense>
 
       <DistanceFade
-        enabled={false}
+        enabled
         distStart={fDistStart}
         distEnd={fDistEnd}
         clipStart={0.2}

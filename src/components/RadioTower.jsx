@@ -12,7 +12,7 @@ import { useControls, folder, button } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useFrame } from "@react-three/fiber";
 
-export default forwardRef(function RadioTower(_, ref) {
+export default forwardRef(function RadioTower({ visible = true }, ref) {
   const glbPath = "/models/radioTower/Radio%20tower.glb";
   const { scene } = useGLTF(glbPath);
 
@@ -398,7 +398,8 @@ export default forwardRef(function RadioTower(_, ref) {
 
   // Animate dissolve
   useFrame((_, dt) => {
-    const target = params.build ? 1.1 : -0.2;
+    const wantBuilt = visible && params.build;
+    const target = wantBuilt ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = params.speed * dt * dir;

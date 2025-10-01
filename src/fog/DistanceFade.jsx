@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { useControls, folder } from "leva";
+import { useControls, folder, button } from "leva";
 
 /**
  * DistanceFade — bulletproof patcher with on-the-fly Leva controls.
@@ -37,6 +37,11 @@ export default function DistanceFade({
       "Debug / Diagnostics": folder({
         forceKill: { value: forceKill },
         debugTint: { value: debugTint },
+        RepatchNow: button(() => {
+          // manual patch trigger
+          didLog.current = false;
+          runPatchPass();
+        }),
       }),
     },
     { collapsed: false }
@@ -166,6 +171,7 @@ void DFade_doDiscard(float df_vViewDist){
     });
     m.skinning = !!srcMat?.skinning;
     m.morphTargets = !!srcMat?.morphTargets;
+    m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
@@ -189,7 +195,6 @@ df_vViewDist = length(df_mv.xyz);
           "gl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );",
           `DFade_doDiscard(df_vViewDist);\ngl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );`
         );
-      m.needsUpdate = true;
     };
     depthMatCache.current.set(srcMat, m);
     return m;
@@ -201,6 +206,7 @@ df_vViewDist = length(df_mv.xyz);
     const m = new THREE.MeshDistanceMaterial();
     m.skinning = !!srcMat?.skinning;
     m.morphTargets = !!srcMat?.morphTargets;
+    m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
@@ -224,7 +230,6 @@ df_vViewDist = length(df_mv.xyz);
           "gl_FragColor = packDepthToRGBA( fragCoordZ );",
           `DFade_doDiscard(df_vViewDist);\ngl_FragColor = packDepthToRGBA( fragCoordZ );`
         );
-      m.needsUpdate = true;
     };
     distMatCache.current.set(srcMat, m);
     return m;
@@ -242,7 +247,9 @@ df_vViewDist = length(df_mv.xyz);
     )
       return;
 
+    // Align flags to reduce odd blending/culling artifacts
     mat.fog = true; // helps some variants expose fog-related chunks
+    // Preserve original blending flags (no overrides here)
 
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader) => {
@@ -268,8 +275,6 @@ df_vViewDist = length(df_mv.xyz);
         GLSL_SHARED +
         "\n" +
         insertDiscardBlock(shader.fragmentShader);
-
-      mat.needsUpdate = true;
     };
 
     if (mesh) {
@@ -278,22 +283,20 @@ df_vViewDist = length(df_mv.xyz);
     }
 
     patched.current.add(mat);
-    mat.needsUpdate = true;
 
     stats.current.count++;
     const t = mat.type || "UnknownMaterial";
     stats.current.byType.set(t, (stats.current.byType.get(t) || 0) + 1);
   };
 
-  // Traverse & patch continuously (only affects new/unseen materials after first pass)
-  useFrame(() => {
+  // Patch pass helper
+  const runPatchPass = () => {
     if (!effEnabled) return;
     scene.traverse((o) => {
       if (!o.isMesh) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) patchMaterial(m, o);
     });
-
     if (!didLog.current && stats.current.count > 0) {
       didLog.current = true;
       const breakdown = [...stats.current.byType.entries()]
@@ -303,6 +306,34 @@ df_vViewDist = length(df_mv.xyz);
         `[DistanceFade] patched materials: ${stats.current.count} (${breakdown})`
       );
     }
+  };
+
+  // Initial delayed patch to avoid racing with scene mount
+  useEffect(() => {
+    if (!effEnabled) return;
+    const t = setTimeout(runPatchPass, 50);
+    return () => clearTimeout(t);
+  }, [effEnabled, scene]);
+
+  // Re-run a patch pass when uniforms ranges change significantly (new materials may arrive later)
+  useEffect(() => {
+    if (!effEnabled) return;
+    runPatchPass();
+  }, [effEnabled, effDistStart, effDistEnd, effClipStart, effClipEnd]);
+
+  // Warm-up: patch for a short window to catch late-mounting assets (GLTF/Suspense)
+  const warmupFramesRef = useRef(120); // ~2s at 60fps
+  const throttleRef = useRef(0);
+  useFrame(() => {
+    if (!effEnabled) return;
+    if (warmupFramesRef.current > 0) {
+      runPatchPass();
+      warmupFramesRef.current -= 1;
+      return;
+    }
+    // Throttled patch pass every ~0.5s at 60fps to catch late-mounting meshes
+    throttleRef.current = (throttleRef.current + 1) % 30;
+    if (throttleRef.current === 0) runPatchPass();
   });
 
   // Cleanup
