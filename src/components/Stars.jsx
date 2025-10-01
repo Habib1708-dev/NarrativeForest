@@ -21,10 +21,10 @@ export default function Stars() {
     {
       radius: { value: 360, min: 1, max: 2000, step: 1 },
       depth: { value: 2, min: 1, max: 50, step: 1 },
-      count: { value: 2000, min: 0, max: 10000, step: 50 },
+      count: { value: 10000, min: 0, max: 10000, step: 50 },
       factor: { value: 4, min: 0, max: 20, step: 0.1 },
       saturation: { value: 0, min: 0, max: 1, step: 0.01 },
-      fade: { value: false },
+      fade: { value: true },
       speed: { value: 0, min: 0, max: 1, step: 0.01 },
       cutoffEnabled: { value: true, label: "Cutoff by height" },
       cutoffY: {

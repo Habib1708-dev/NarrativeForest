@@ -70,10 +70,7 @@ const seeded = (i, salt = 1) => {
   return x - Math.floor(x);
 };
 
-export default forwardRef(function MagicMushrooms(
-  { visible = true, ...props },
-  ref
-) {
+export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
   const { gl, clock } = useThree();
 
@@ -777,19 +774,7 @@ export default forwardRef(function MagicMushrooms(
     if (patchedAny) {
       shadersPatchedRef.current = true;
     }
-  }, [
-    sources,
-    dissolveCtl.edgeWidth,
-    dissolveCtl.noiseScale,
-    dissolveCtl.noiseAmp,
-    dissolveCtl.glowStrength,
-    dissolveCtl.seed,
-    gradCtl.bottomColor,
-    gradCtl.topColor,
-    gradCtl.height,
-    gradCtl.soft,
-    gradCtl.intensity,
-  ]);
+  }, [sources, dissolveCtl.edgeWidth, dissolveCtl.noiseScale, dissolveCtl.noiseAmp, dissolveCtl.glowStrength, dissolveCtl.seed, gradCtl.bottomColor, gradCtl.topColor, gradCtl.height, gradCtl.soft, gradCtl.intensity]);
 
   // =========================
   // Live uniform updates
@@ -848,9 +833,7 @@ export default forwardRef(function MagicMushrooms(
   // Dissolve animation
   // =========================
   useFrame((_, dt) => {
-    // External visibility forces hidden unless user explicitly builds while visible
-    const wantBuilt = visible && dissolveCtl.build;
-    const target = wantBuilt ? 1.1 : -0.2;
+    const target = dissolveCtl.build ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = dissolveCtl.speed * dt * dir;
