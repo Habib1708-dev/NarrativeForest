@@ -57,6 +57,10 @@ export default function Experience() {
   const prevExclRef = useRef(null);
 
   const {
+    // Scene toggles
+    showRadioTower,
+    showMushrooms,
+
     fogColor,
     fogNear,
     fogFar,
@@ -89,6 +93,10 @@ export default function Experience() {
     fSkyRadius,
     globalDarken,
   } = useControls({
+    Actors: folder({
+      showRadioTower: { value: false, label: "Show Radio Tower" },
+      showMushrooms: { value: false, label: "Show Magic Mushrooms" },
+    }),
     Scene: folder({
       globalDarken: {
         value: 0.0,
@@ -254,7 +262,7 @@ export default function Experience() {
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
         <Cat ref={catRef} />
-        <RadioTower ref={radioTowerRef} />
+        {showRadioTower && <RadioTower ref={radioTowerRef} />}
         <Lake ref={lakeRef} />
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
@@ -286,7 +294,7 @@ export default function Experience() {
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
         />
-        <MagicMushrooms ref={mushroomsRef} />
+        {showMushrooms && <MagicMushrooms ref={mushroomsRef} />}
         <Fireflies />
         <UnifiedCrystalClusters />
         <Butterfly />
@@ -294,7 +302,7 @@ export default function Experience() {
       </Suspense>
 
       <DistanceFade
-        enabled
+        enabled={false}
         distStart={fDistStart}
         distEnd={fDistEnd}
         clipStart={0.2}

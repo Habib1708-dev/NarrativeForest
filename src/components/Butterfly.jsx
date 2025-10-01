@@ -150,10 +150,6 @@ export default forwardRef(function Butterfly(
     position,
     DEFAULT_AREA_CENTER
   );
-  const baseCenter = useMemo(
-    () => new THREE.Vector3(centerX, centerY, centerZ),
-    [centerX, centerY, centerZ]
-  );
   const fallbackWidth = DEFAULT_AREA_SIZE[0];
   const fallbackHeight = DEFAULT_AREA_SIZE[1];
   const fallbackDepth = DEFAULT_AREA_SIZE[2];
@@ -301,6 +297,28 @@ export default forwardRef(function Butterfly(
                 step: 0.01,
                 label: "Habitat Depth",
               },
+              // Habitat center position controls (world space)
+              habitatCenterX: {
+                value: centerX,
+                min: -20,
+                max: 20,
+                step: 0.01,
+                label: "Habitat X",
+              },
+              habitatCenterY: {
+                value: centerY,
+                min: -10,
+                max: 10,
+                step: 0.01,
+                label: "Habitat Y",
+              },
+              habitatCenterZ: {
+                value: centerZ,
+                min: -20,
+                max: 20,
+                step: 0.01,
+                label: "Habitat Z",
+              },
               habitatWireColor: {
                 value: habitatWireColor,
                 label: "Wire Color",
@@ -366,6 +384,15 @@ export default forwardRef(function Butterfly(
     forwardWaveAmp
   );
   const currentRephaseOnTurn = resolveControl("rephaseOnTurn", rephaseOnTurn);
+
+  // Habitat center (world position) from controls or props
+  const currentCenterX = resolveControl("habitatCenterX", centerX);
+  const currentCenterY = resolveControl("habitatCenterY", centerY);
+  const currentCenterZ = resolveControl("habitatCenterZ", centerZ);
+  const baseCenter = useMemo(
+    () => new THREE.Vector3(currentCenterX, currentCenterY, currentCenterZ),
+    [currentCenterX, currentCenterY, currentCenterZ]
+  );
 
   const forwardSign = 1;
   const navBasis = useMemo(() => {

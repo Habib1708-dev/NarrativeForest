@@ -198,7 +198,7 @@ export default forwardRef(function IntroButterfly(
               roamFreqZ: { value: 0.7, min: 0.05, max: 3, step: 0.01 },
               roamJitter: { value: 0.35, min: 0, max: 1, step: 0.01 },
               camInfluence: {
-                value: 0.4,
+                value: 0.1,
                 min: 0,
                 max: 2,
                 step: 0.01,
