@@ -36,6 +36,7 @@ import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
 import IntroButterfly from "./components/IntroButterfly";
+import CameraControllerR3F from "./components/CameraControllerR3F";
 
 export default function Experience() {
   const { gl } = useThree();
@@ -211,15 +212,17 @@ export default function Experience() {
 
       <OrbitControls
         makeDefault
-        minDistance={1}
-        maxDistance={200}
+        minDistance={0.05}
+        maxDistance={600}
         target={[-1.25, -4.45, -2.9]}
         enableDamping
         dampingFactor={0.05}
         enablePan
-        panSpeed={0.5}
+        panSpeed={1.0}
+        enableZoom
+        zoomSpeed={1.2}
         screenSpacePanning
-        rotateSpeed={0.5}
+        rotateSpeed={0.6}
       />
 
       <ambientLight intensity={0} />
@@ -314,6 +317,9 @@ export default function Experience() {
         {/* Apply a global darkening pass; brightness expects [-1, 1], so use negative values to darken */}
         <BrightnessContrast brightness={-globalDarken} contrast={0} />
       </EffectComposer>
+
+      {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
+      <CameraControllerR3F />
     </>
   );
 }
