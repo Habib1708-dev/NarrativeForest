@@ -183,7 +183,64 @@ const seedWaypoints = [
   {
     name: "ring-close",
     position: [-1.737, -4.0, -2.663],
-    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    // Horizontal lens: yaw-only, no pitch/roll
+    orientation: { yaw: (Math.PI * 145.5) / 180, pitch: 0 },
+    ease: { name: "sineInOut" },
+  },
+  // New sequence: start looking upward, then gradually lower again with midpoints to smooth transitions
+  {
+    name: "seq-1",
+    position: [-1.42, -3.363, -2.194],
+    // Adjusted to start slightly upward for skyward feel
+    orientation: { yaw: (Math.PI * 137.3) / 180, pitch: (Math.PI * 8.0) / 180 },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "seq-2",
+    position: [-2.429, -4.394, -1.081],
+    orientation: {
+      yaw: (Math.PI * 135.0) / 180,
+      pitch: (Math.PI * 31.2) / 180,
+    },
+    ease: { name: "sineInOut" },
+  },
+  // Midpoint between seq-2 and seq-3 to ease pitch from 31.2° downwards
+  {
+    name: "seq-2-3-mid",
+    position: [-5.2935, -3.9515, -1.083],
+    orientation: {
+      yaw: (Math.PI * 93.75) / 180,
+      pitch: (Math.PI * 15.1) / 180,
+    },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "seq-3",
+    position: [-8.158, -3.509, -1.085],
+    orientation: { yaw: (Math.PI * 52.5) / 180, pitch: (Math.PI * -1.0) / 180 },
+    ease: { name: "sineInOut" },
+  },
+  // Midpoint toward the final to smooth yaw/pitch
+  {
+    name: "seq-3-4-mid",
+    position: [-8.735, -3.2895, -2.3175],
+    orientation: {
+      yaw: (Math.PI * 23.05) / 180,
+      pitch: (Math.PI * 11.25) / 180,
+    },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "seq-4",
+    position: [-9.312, -3.07, -3.55],
+    orientation: { yaw: (Math.PI * -6.4) / 180, pitch: (Math.PI * 23.5) / 180 },
+    ease: { name: "sineInOut" },
+  },
+  // Final: small upward move and slight upward tilt, continuing the motion in a gentle arc
+  {
+    name: "last-stop",
+    position: [-8.85, -2.82, -4.38],
+    orientation: { yaw: (Math.PI * -20.0) / 180, pitch: (Math.PI * 5.0) / 180 },
     ease: { name: "sineInOut" },
   },
 ];
