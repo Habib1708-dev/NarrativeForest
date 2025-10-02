@@ -13,7 +13,7 @@ import * as THREE from "three";
 /**
  * @typedef {Object} Waypoint
  * @property {[number, number, number]} position
- * @property {{ lookAt: [number, number, number] } | { yaw: number, pitch: number }} orientation
+ * @property {{ lookAt: [number, number, number], roll?: number } | { yaw: number, pitch: number }} orientation
  * @property {number} [fov]
  * @property {EaseSpec} [ease]
  * @property {string} [name]
@@ -56,6 +56,17 @@ export function quaternionFromWaypoint(wp) {
     const m = new THREE.Matrix4();
     m.lookAt(pos, target, UP);
     q.setFromRotationMatrix(m);
+    // Optional roll (rotate around camera forward/local-Z)
+    if (
+      typeof wp.orientation.roll === "number" &&
+      isFinite(wp.orientation.roll)
+    ) {
+      const qRoll = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 0, -1),
+        wp.orientation.roll
+      );
+      q.multiply(qRoll);
+    }
     return q;
   }
   // yaw (y), pitch (x)

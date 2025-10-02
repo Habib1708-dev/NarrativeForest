@@ -123,24 +123,68 @@ const seedWaypoints = [
     orientation: { yaw: (Math.PI * -92.8) / 180, pitch: (Math.PI * 4.3) / 180 },
     ease: { name: "sineInOut" },
   },
-  // Previous seeds retained for continuity
+  // Additional user-provided stops
   {
-    name: "orbit-entry",
-    position: [-1.5, 2.0, 2.2],
-    orientation: { yaw: Math.PI * -0.4, pitch: -0.05 },
+    name: "stop-14",
+    position: [-0.63, -3.763, -4.098],
+    orientation: {
+      yaw: (Math.PI * 138.1) / 180,
+      pitch: (Math.PI * -18.7) / 180,
+    },
+    ease: { name: "sineInOut" },
+  },
+  // Stop 15 (down-look) and ring journey around a fixed target
+  // Fixed target center (XZ from stop-15, Y near ground)
+  {
+    name: "stop-15-down",
+    position: [-1.737, -2.49, -2.663],
+    orientation: { lookAt: [-1.737, -3.9, -2.663], roll: Math.PI },
+    ease: { name: "sineInOut" },
+  },
+  // Transition to more horizontal view while still looking at the same center
+  {
+    name: "ring-entry",
+    position: [0.008, -4.065, -2.946],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  // Ring journey "almost following" the provided points; all look at the fixed center
+  {
+    name: "ring-1",
+    position: [-0.698, -4.149, -1.209],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
     ease: { name: "sineInOut" },
   },
   {
-    name: "orbit-mid",
-    position: [-1.0, 2.2, 1.2],
-    orientation: { yaw: Math.PI * -0.15, pitch: -0.06 },
+    name: "ring-2",
+    position: [-2.568, -4.3, -1.079],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
     ease: { name: "sineInOut" },
   },
   {
-    name: "orbit-exit",
-    position: [-0.6, 2.0, 1.8],
-    orientation: { yaw: Math.PI * 0.1, pitch: -0.05 },
-    ease: { name: "easeInOut" },
+    name: "ring-3",
+    position: [-3.459, -4.2, -3.124],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  // Added midpoint to follow the arc between ring-3 and ring-4 while keeping the same focus
+  {
+    name: "ring-3a",
+    position: [-2.346, -4.057, -4.336],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "ring-4",
+    position: [-0.73, -3.914, -4.129],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "ring-close",
+    position: [-1.737, -4.0, -2.663],
+    orientation: { lookAt: [-1.737, -3.9, -2.663] },
+    ease: { name: "sineInOut" },
   },
 ];
 
