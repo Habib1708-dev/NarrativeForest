@@ -37,9 +37,11 @@ import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
 import IntroButterfly from "./components/IntroButterfly";
 import CameraControllerR3F from "./components/CameraControllerR3F";
+import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
   const { gl } = useThree();
+  const enabled = useCameraStore((s) => s.enabled);
 
   // ==== REFS ====
   const cabinRef = useRef(null);
@@ -219,7 +221,7 @@ export default function Experience() {
         dampingFactor={0.05}
         enablePan
         panSpeed={1.0}
-        enableZoom
+        enableZoom={!enabled}
         zoomSpeed={1.2}
         screenSpacePanning
         rotateSpeed={0.6}

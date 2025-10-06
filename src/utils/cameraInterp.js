@@ -122,6 +122,11 @@ export function interpolatePose(a, b, u) {
   const quat = new THREE.Quaternion();
   quat.slerpQuaternions(qa, qb, ue);
 
+  // Enforce no sideways tilt: zero out roll component
+  const eNoRoll = new THREE.Euler().setFromQuaternion(quat, "YXZ");
+  eNoRoll.z = 0; // roll
+  quat.setFromEuler(eNoRoll);
+
   const fovA = a.fov ?? DEFAULT_FOV;
   const fovB = b.fov ?? fovA;
   const fov = THREE.MathUtils.lerp(fovA, fovB, ue);
