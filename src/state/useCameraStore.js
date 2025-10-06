@@ -42,6 +42,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -20.7) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-4-5-mid",
@@ -60,6 +61,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -17.1) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-6",
@@ -69,6 +71,7 @@ const seedWaypoints = [
       pitch: (Math.PI * 20.9) / 180,
     },
     ease: { name: "easeInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-7",
@@ -135,6 +138,7 @@ const seedWaypoints = [
     position: [-3.188, -4.043, -2.062],
     orientation: { yaw: (Math.PI * -80.3) / 180, pitch: (Math.PI * 2.6) / 180 },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-13a",
@@ -180,6 +184,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -18.7) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-15-down",
@@ -189,6 +194,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -89.8) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-15-spin-90",
@@ -231,6 +237,7 @@ const seedWaypoints = [
     position: [0.008, -4.065, -2.946],
     orientation: { lookAt: [-1.737, -4.265, -2.663] },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "ring-1",
@@ -276,6 +283,7 @@ const seedWaypoints = [
     position: [-1.737, -4.0, -2.663],
     orientation: { yaw: (Math.PI * 145.5) / 180, pitch: (Math.PI * -2) / 180 },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "seq-1",
@@ -339,6 +347,7 @@ const seedWaypoints = [
       pitch: (Math.PI * 15.0) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
 ];
 
@@ -398,6 +407,17 @@ export const useCameraStore = create((set, get) => ({
   // overlays / gizmos (kept)
   overlays: { bobAmp: 0.02, bobFreq: 0.6, driftAmt: 0.02 },
   gizmos: Object.fromEntries(seedWaypoints.map((w) => [w.name ?? "wp", false])),
+
+  // Anchor configuration for major stopping points
+  anchors: {
+    enabled: true, // global anchor system toggle
+    snapRadius: 0.022, // distance threshold to trigger snap
+    dwellMs: 100, // how long to pause at anchor after snap
+    snapEase: "power2.out", // GSAP easing for snap animation
+    snapDuration: 1.8, // snap animation duration
+    releaseGraceMs: 1000, // after leaving an anchor, ignore pull for this long
+  },
+
   // Micro smoothing config (soften each step visually)
   microSmooth: {
     enabled: true,
@@ -418,6 +438,10 @@ export const useCameraStore = create((set, get) => ({
   _dwellUntil: 0,
   _smoothOffset: 0,
   _smoothTween: null,
+  _snapTween: null, // GSAP tween for anchor snap animation
+  _anchorDwelling: false, // flag to indicate we're dwelling at an anchor
+  _anchorReleaseUntil: 0,
+  _lastAnchorIndex: -1,
 
   // ---------- setters (with backward compatibility) ----------
   setT: (t) => set({ t: clamp01(t) }),
@@ -468,6 +492,9 @@ export const useCameraStore = create((set, get) => ({
 
   setMicroSmooth: (patch) =>
     set((s) => ({ microSmooth: { ...s.microSmooth, ...patch } })),
+
+  setAnchors: (patch) => set((s) => ({ anchors: { ...s.anchors, ...patch } })),
+
   setScenic: (name, v) =>
     set((s) => ({ scenic: { ...s.scenic, [name]: !!v } })),
   toggleScenic: (name) =>
@@ -491,9 +518,29 @@ export const useCameraStore = create((set, get) => ({
 
   // ---------- wheel input → STEP + GLIDE (micro) ----------
   applyWheel: (deltaY) => {
-    const { enabled, paused } = get();
-    if (!enabled || paused || deltaY === 0) return;
+    const initialState = get();
+    if (!initialState.enabled || initialState.paused || deltaY === 0) return;
 
+    const nowMs = performance.now();
+    let releaseUntil = initialState._anchorReleaseUntil ?? 0;
+
+    // If dwelling at anchor, release gracefully and grant a grace window
+    if (initialState._dwellUntil && nowMs < initialState._dwellUntil) {
+      const snapTween = initialState._snapTween;
+      if (snapTween && typeof snapTween.kill === "function") {
+        snapTween.kill();
+      }
+      const releaseMs = (initialState.anchors?.releaseGraceMs ?? 350) | 0;
+      releaseUntil = nowMs + Math.max(0, releaseMs);
+      set({
+        _dwellUntil: 0,
+        _anchorDwelling: false,
+        _snapTween: null,
+        _anchorReleaseUntil: releaseUntil,
+      });
+    }
+
+    const state = get();
     const dir = deltaY < 0 ? +1 : -1;
     const mag = Math.abs(deltaY);
 
@@ -505,7 +552,7 @@ export const useCameraStore = create((set, get) => ({
       maxStep,
       glideRatio,
       replaceVelocity,
-    } = get().magnitudeMap;
+    } = state.magnitudeMap;
 
     // Normalize magnitude to step units, then power-map and scale
     const steps = mag / Math.max(1, baseStep);
@@ -513,13 +560,55 @@ export const useCameraStore = create((set, get) => ({
       Math.pow(steps, Math.max(0.001, power)) * Math.max(0, scaleFactor);
 
     // optional per-segment multiplier (kept)
-    const segIndex = get().getSegmentIndex();
+    const segIndex = state.getSegmentIndex();
     // Effective sensitivity; guard against accidental near-zero making scroll feel dead
-    const sens = get().getEffectiveSensitivity(segIndex);
+    const sens = state.getEffectiveSensitivity(segIndex);
     stepSize *= sens > 1e-4 ? sens : 1.0;
 
     if (stepSize < (minImpulse ?? 0)) return;
     stepSize = Math.min(stepSize, maxStep ?? 0.02);
+
+    const anchorsConf = state.anchors;
+    const anchorWaypoints = state.waypoints;
+    const currT = state.t ?? 0;
+
+    let releaseActive = anchorsConf?.enabled && nowMs < releaseUntil;
+
+    if (anchorsConf?.enabled && (anchorWaypoints?.length ?? 0) > 1) {
+      const nSeg = anchorWaypoints.length - 1;
+      const snapRadius = Math.max(0, anchorsConf.snapRadius ?? 0.015);
+      let closestIdx = -1;
+      let closestDist = Infinity;
+      let closestT = 0;
+      for (let i = 0; i < anchorWaypoints.length; i++) {
+        const wp = anchorWaypoints[i];
+        if (!wp?.isAnchor) continue;
+        const tAnchor = nSeg > 0 ? i / nSeg : 0;
+        const dist = Math.abs(tAnchor - currT);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestIdx = i;
+          closestT = tAnchor;
+        }
+      }
+      if (closestIdx >= 0 && closestDist <= snapRadius + 1e-6) {
+        const movingAway =
+          (dir > 0 && closestT <= currT) || (dir < 0 && closestT >= currT);
+        if (movingAway) {
+          const releaseMs = Math.max(0, anchorsConf.releaseGraceMs ?? 350);
+          const newUntil = nowMs + releaseMs;
+          releaseActive = true;
+          if (newUntil > releaseUntil) {
+            releaseUntil = newUntil;
+            set({ _anchorReleaseUntil: newUntil });
+          }
+        }
+      }
+    }
+
+    releaseActive = !!(anchorsConf?.enabled && nowMs < releaseUntil);
+
+    let effectiveStep = Math.abs(stepSize);
 
     set((s) => {
       // Immediate step in t with optional slip extension
@@ -570,7 +659,7 @@ export const useCameraStore = create((set, get) => ({
         t = clamp01(s.t + dir * totalStep);
       }
       // Compute glide distance proportional to step
-      const gDist = Math.abs(stepSize) * (glideRatio ?? 0.1);
+      const gDist = Math.abs(totalStep) * (glideRatio ?? 0.1);
       // Convert desired glide distance to initial velocity using exponential decay model
       const lambda = Math.LN2 / Math.max(s.physics.halfLife, 1e-6);
       let vGlide = gDist * lambda * dir;
@@ -583,13 +672,14 @@ export const useCameraStore = create((set, get) => ({
       );
       // Clamp to boundaries and zero if at bounds moving outward
       if ((t <= 0 && vNew < 0) || (t >= 1 && vNew > 0)) vNew = 0;
+      effectiveStep = Math.abs(totalStep);
       return { t, v: vNew, _dwellUntil: 0 };
     });
 
     // Visual smoothing with gentle tail: -cancel -> tail -> 0
     const ms = get().microSmooth ?? {};
     if (ms.enabled) {
-      const sAbs = Math.abs(stepSize);
+      const sAbs = effectiveStep;
       const cancel = Math.min(sAbs * (ms.frac ?? 1.0), ms.maxOffset ?? 0.006);
       const amt = cancel * dir;
       const prev = get()._smoothTween;
@@ -651,18 +741,60 @@ export const useCameraStore = create((set, get) => ({
       scenicDwellMs,
       waypoints,
       scenic,
+      anchors,
     } = state;
     if (!enabled || paused || locked) return;
 
     let { t, v } = state;
 
-    // scenic dwell hold
+    if (state._anchorReleaseUntil && nowMs >= state._anchorReleaseUntil) {
+      set({ _anchorReleaseUntil: 0 });
+    }
+
+    // If snap tween is active, let it control movement
+    if (state._snapTween) {
+      if (v !== 0) set({ v: 0 });
+      return;
+    }
+
+    // scenic/anchor dwell hold
     if (state._dwellUntil && nowMs < state._dwellUntil) {
       if (v !== 0) set({ v: 0 });
       return;
     }
 
-    // Exponential decay driven by halfLife
+    const releaseActive = anchors?.enabled && state._anchorReleaseUntil > nowMs;
+
+    // Find nearest anchor if anchor system enabled and not in release grace
+    let nearestAnchor = null;
+    let nearestAnchorIdx = -1;
+    let distToAnchor = Infinity;
+    let anchorT = 0;
+    let isApproaching = false;
+
+    if (anchors?.enabled && !releaseActive) {
+      const nSeg = waypoints.length - 1;
+      if (nSeg > 0) {
+        // Check all anchor waypoints
+        waypoints.forEach((wp, idx) => {
+          if (wp.isAnchor) {
+            const wpT = idx / nSeg;
+            const dist = Math.abs(t - wpT);
+            // Check if we're moving toward this anchor
+            const movingToward = (v > 0 && wpT > t) || (v < 0 && wpT < t);
+            if (movingToward && dist < distToAnchor) {
+              distToAnchor = dist;
+              nearestAnchor = wp;
+              anchorT = wpT;
+              nearestAnchorIdx = idx;
+              isApproaching = true;
+            }
+          }
+        });
+      }
+    }
+
+    // Exponential decay driven by base physics settings (no extra boost)
     const lambda = Math.LN2 / Math.max(physics.halfLife, 1e-6);
     const decay = Math.exp(-lambda * Math.max(0, dt));
     v *= decay;
@@ -670,13 +802,40 @@ export const useCameraStore = create((set, get) => ({
     // snap to zero when tiny
     if (Math.abs(v) < physics.deadZone) v = 0;
 
-    // Optional scenic soft snap
+    // Anchor snap logic
+    if (anchors?.enabled && !releaseActive && nearestAnchor && isApproaching) {
+      const snapRadius = anchors.snapRadius ?? 0.015;
+      if (distToAnchor <= snapRadius && Math.abs(v) < physics.deadZone * 2) {
+        // Start smooth snap to anchor
+        const holder = { val: t };
+        const snapTween = gsap.to(holder, {
+          val: anchorT,
+          duration: anchors.snapDuration ?? 0.3,
+          ease: anchors.snapEase ?? "power2.out",
+          onUpdate: () => set({ t: holder.val }),
+          onComplete: () => {
+            set({
+              t: anchorT,
+              v: 0,
+              _snapTween: null,
+              _dwellUntil: nowMs + (anchors.dwellMs ?? 600),
+              _anchorDwelling: true,
+              _lastAnchorIndex: nearestAnchorIdx,
+            });
+          },
+        });
+        set({ _snapTween: snapTween, v: 0 });
+        return;
+      }
+    }
+
+    // Optional scenic soft snap (legacy, kept for non-anchor waypoints)
     if (scenic && Object.values(scenic).some(Boolean)) {
       const nSeg = waypoints.length - 1;
       if (nSeg > 0) {
         const nearestIdx = Math.round(t * nSeg);
         const wp = waypoints[nearestIdx];
-        if (wp && scenic[wp.name]) {
+        if (wp && scenic[wp.name] && !wp.isAnchor) {
           const tStar = nearestIdx / nSeg;
           const dist = Math.abs(t - tStar);
           if (dist <= scenicSnapRadius) {
@@ -711,7 +870,7 @@ export const useCameraStore = create((set, get) => ({
       if (t === 0 || t === 1) v = 0;
     }
 
-    set({ t, v });
+    set({ t, v, _anchorDwelling: false });
   },
 
   // ---------- Derived selectors ----------
