@@ -72,6 +72,7 @@ export default function CameraControllerR3F() {
   const scenicDwellMs = useCameraStore((s) => s.scenicDwellMs);
   const scenicSnapRadius = useCameraStore((s) => s.scenicSnapRadius);
   const scenicResist = useCameraStore((s) => s.scenicResist);
+  const microSmooth = useCameraStore((s) => s.microSmooth);
   const applyWheel = useCameraStore((s) => s.applyWheel);
   const stepStore = useCameraStore((s) => s.step);
   const tRef = useRef(useCameraStore.getState().t ?? 0);
@@ -261,6 +262,89 @@ export default function CameraControllerR3F() {
           max: 1,
           step: 0.01,
           onChange: (v) => useCameraStore.getState().setScenicResist(v),
+        },
+      }),
+      "Micro Smooth": folder({
+        enabled: {
+          value: useCameraStore.getState().microSmooth.enabled,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ enabled: v }),
+        },
+        frac: {
+          value: useCameraStore.getState().microSmooth.frac,
+          min: 0,
+          max: 1.5,
+          step: 0.05,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ frac: v }),
+        },
+        maxOffset: {
+          value: useCameraStore.getState().microSmooth.maxOffset,
+          min: 0,
+          max: 0.02,
+          step: 0.0005,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ maxOffset: v }),
+        },
+        duration: {
+          value: useCameraStore.getState().microSmooth.duration,
+          min: 0.05,
+          max: 0.4,
+          step: 0.01,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ duration: v }),
+        },
+        ease: {
+          value: useCameraStore.getState().microSmooth.ease,
+          options: {
+            "sine.out": "sine.out",
+            "power1.out": "power1.out",
+            "quad.out": "quad.out",
+          },
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ ease: v }),
+        },
+        tailFrac: {
+          value: useCameraStore.getState().microSmooth.tailFrac,
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ tailFrac: v }),
+        },
+        tailMax: {
+          value: useCameraStore.getState().microSmooth.tailMax,
+          min: 0,
+          max: 0.02,
+          step: 0.0005,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ tailMax: v }),
+        },
+        tailBoundFrac: {
+          value: useCameraStore.getState().microSmooth.tailBoundFrac,
+          min: 0,
+          max: 1.0,
+          step: 0.01,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ tailBoundFrac: v }),
+        },
+        tailDuration: {
+          value: useCameraStore.getState().microSmooth.tailDuration,
+          min: 0.05,
+          max: 1.0,
+          step: 0.01,
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ tailDuration: v }),
+        },
+        tailEase: {
+          value: useCameraStore.getState().microSmooth.tailEase,
+          options: {
+            "sine.out": "sine.out",
+            "power1.out": "power1.out",
+            "quad.out": "quad.out",
+          },
+          onChange: (v) =>
+            useCameraStore.getState().setMicroSmooth({ tailEase: v }),
         },
       }),
     },

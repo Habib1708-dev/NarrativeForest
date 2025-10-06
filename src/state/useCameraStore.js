@@ -1,6 +1,7 @@
 // src/state/useCameraStore.js
 import { create } from "zustand";
 import * as THREE from "three";
+import { gsap } from "gsap";
 import { getPoseAt, segmentAt } from "../utils/cameraInterp";
 
 /**
@@ -397,9 +398,26 @@ export const useCameraStore = create((set, get) => ({
   // overlays / gizmos (kept)
   overlays: { bobAmp: 0.02, bobFreq: 0.6, driftAmt: 0.02 },
   gizmos: Object.fromEntries(seedWaypoints.map((w) => [w.name ?? "wp", false])),
+  // Micro smoothing config (soften each step visually)
+  microSmooth: {
+    enabled: true,
+    // Stage A: catch-up from a brief holdback
+    frac: 1.5, // fraction of step size to initially cancel
+    maxOffset: 0.006, // cap the visual cancel amount in t-space
+    duration: 0.4, // time to go from -cancel to tail (or to 0 if no tail)
+    ease: "sine.out",
+    // Stage B: optional gentle tail (cool-down) that progresses a tiny bit further, then ceases
+    tailFrac: 0.1, // fraction of step size for tail amplitude
+    tailMax: 0.004, // cap of tail amplitude in t-space
+    tailBoundFrac: 0.7, // keep within this fraction of remaining distance to boundary
+    tailDuration: 1.0, // time to fade tail to zero
+    tailEase: "sine.out",
+  },
 
   // internals
   _dwellUntil: 0,
+  _smoothOffset: 0,
+  _smoothTween: null,
 
   // ---------- setters (with backward compatibility) ----------
   setT: (t) => set({ t: clamp01(t) }),
@@ -447,6 +465,9 @@ export const useCameraStore = create((set, get) => ({
 
   setOverlays: (patch) =>
     set((s) => ({ overlays: { ...s.overlays, ...patch } })),
+
+  setMicroSmooth: (patch) =>
+    set((s) => ({ microSmooth: { ...s.microSmooth, ...patch } })),
   setScenic: (name, v) =>
     set((s) => ({ scenic: { ...s.scenic, [name]: !!v } })),
   toggleScenic: (name) =>
@@ -501,8 +522,53 @@ export const useCameraStore = create((set, get) => ({
     stepSize = Math.min(stepSize, maxStep ?? 0.02);
 
     set((s) => {
-      // Immediate step in t
-      let t = clamp01(s.t + dir * stepSize);
+      // Immediate step in t with optional slip extension
+      let totalStep = stepSize;
+      const slip = s.microSlip ?? {};
+      if (slip.enabled) {
+        const wps = s.waypoints;
+        const nSeg = Math.max(0, wps.length - 1);
+        let i = nSeg > 0 ? Math.floor(s.t * nSeg) : 0;
+        i = THREE.MathUtils.clamp(i, 0, Math.max(0, nSeg - 1));
+        const tCurr = nSeg > 0 ? i / nSeg : 0;
+        const tNext = nSeg > 0 ? (i + 1) / nSeg : 1;
+        const remaining =
+          dir > 0 ? Math.max(0, tNext - s.t) : Math.max(0, s.t - tCurr);
+        const y = Math.min(
+          Math.abs(stepSize) * (slip.frac ?? 0.25),
+          slip.maxSlip ?? 0.005,
+          (slip.boundFrac ?? 0.7) * remaining
+        );
+        totalStep = stepSize + y;
+      }
+      const wps2 = s.waypoints;
+      const nSeg2 = Math.max(0, wps2.length - 1);
+      let t;
+      if (nSeg2 > 0) {
+        const EPS = 1e-6;
+        let ii = Math.floor(s.t * nSeg2);
+        ii = THREE.MathUtils.clamp(ii, 0, Math.max(0, nSeg2 - 1));
+        let tMin = ii / nSeg2;
+        let tMax = (ii + 1) / nSeg2;
+        // If we are effectively at a boundary, allow crossing by choosing adjacent segment bounds
+        if (dir > 0 && Math.abs(s.t - tMax) <= EPS && ii < nSeg2 - 0) {
+          // move into next segment when scrolling forward
+          const jj = Math.min(ii + 1, nSeg2 - 1);
+          tMin = jj / nSeg2;
+          tMax = (jj + 1) / nSeg2;
+        } else if (dir < 0 && Math.abs(s.t - tMin) <= EPS && ii > 0) {
+          // move into previous segment when scrolling backward
+          const jj = Math.max(ii - 1, 0);
+          tMin = jj / nSeg2;
+          tMax = (jj + 1) / nSeg2;
+        }
+        const tTarget = s.t + dir * totalStep;
+        // clamp target within the chosen segment bounds
+        const tBound = THREE.MathUtils.clamp(tTarget, tMin, tMax);
+        t = clamp01(tBound);
+      } else {
+        t = clamp01(s.t + dir * totalStep);
+      }
       // Compute glide distance proportional to step
       const gDist = Math.abs(stepSize) * (glideRatio ?? 0.1);
       // Convert desired glide distance to initial velocity using exponential decay model
@@ -519,6 +585,57 @@ export const useCameraStore = create((set, get) => ({
       if ((t <= 0 && vNew < 0) || (t >= 1 && vNew > 0)) vNew = 0;
       return { t, v: vNew, _dwellUntil: 0 };
     });
+
+    // Visual smoothing with gentle tail: -cancel -> tail -> 0
+    const ms = get().microSmooth ?? {};
+    if (ms.enabled) {
+      const sAbs = Math.abs(stepSize);
+      const cancel = Math.min(sAbs * (ms.frac ?? 1.0), ms.maxOffset ?? 0.006);
+      const amt = cancel * dir;
+      const prev = get()._smoothTween;
+      if (prev && typeof prev.kill === "function") prev.kill();
+      if (amt !== 0) {
+        const holder = { val: -amt };
+        set({ _smoothOffset: holder.val });
+        // compute a safe tail amplitude (can be zero)
+        let tail = 0;
+        if ((ms.tailFrac ?? 0) > 0 || (ms.tailMax ?? 0) > 0) {
+          const wps = get().waypoints;
+          const nSeg = Math.max(0, wps.length - 1);
+          const tNow = get().t ?? 0;
+          let i = nSeg > 0 ? Math.floor(tNow * nSeg) : 0;
+          i = THREE.MathUtils.clamp(i, 0, Math.max(0, nSeg - 1));
+          const tCurr = nSeg > 0 ? i / nSeg : 0;
+          const tNext = nSeg > 0 ? (i + 1) / nSeg : 1;
+          const remaining =
+            dir > 0 ? Math.max(0, tNext - tNow) : Math.max(0, tNow - tCurr);
+          const tailRaw = Math.min(
+            sAbs * (ms.tailFrac ?? 0.1),
+            ms.tailMax ?? 0.004
+          );
+          tail = Math.min(tailRaw, (ms.tailBoundFrac ?? 0.7) * remaining) * dir;
+        }
+        const tl = gsap.timeline();
+        tl.to(holder, {
+          val: tail || 0,
+          duration: Math.max(0.05, ms.duration ?? 0.14),
+          ease: ms.ease ?? "sine.out",
+          onUpdate: () => set({ _smoothOffset: holder.val }),
+        });
+        tl.to(holder, {
+          val: 0,
+          duration: Math.max(0.05, ms.tailDuration ?? 0.3),
+          ease: ms.tailEase ?? "sine.out",
+          onUpdate: () => set({ _smoothOffset: holder.val }),
+          onComplete: () => set({ _smoothTween: null, _smoothOffset: 0 }),
+        });
+        set({ _smoothTween: tl });
+      }
+    }
+
+    // Micro pop removed per request
+
+    // Micro glide removed per request
   },
 
   // ---------- per-frame integrator (exponential decay to full stop) ----------
@@ -600,9 +717,12 @@ export const useCameraStore = create((set, get) => ({
   // ---------- Derived selectors ----------
   getPose: (t) => {
     const waypoints = get().waypoints;
+    const baseT = t ?? get().t;
+    const oSmooth = get()._smoothOffset ?? 0;
+    const tt = clamp01(baseT + oSmooth);
     const { position, quaternion, fov, segmentIndex } = getPoseAt(
       waypoints,
-      t ?? get().t
+      tt
     );
     return { position, quaternion, fov, segmentIndex };
   },
