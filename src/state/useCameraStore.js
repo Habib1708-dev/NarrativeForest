@@ -81,6 +81,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -26.2) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-8",
@@ -90,12 +91,14 @@ const seedWaypoints = [
       pitch: (Math.PI * -1.8) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-8-9-left",
     position: [-1.847, -4.305, -2.286],
     orientation: { yaw: (Math.PI * 46.2) / 180, pitch: (Math.PI * -1.0) / 180 },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-9",
@@ -105,6 +108,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -0.2) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-10",
@@ -114,6 +118,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -3.1) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-11",
@@ -123,6 +128,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -21.5) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-12",
@@ -132,6 +138,7 @@ const seedWaypoints = [
       pitch: (Math.PI * -14.5) / 180,
     },
     ease: { name: "sineInOut" },
+    isAnchor: true,
   },
   {
     name: "stop-13",
