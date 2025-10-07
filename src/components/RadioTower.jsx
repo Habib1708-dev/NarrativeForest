@@ -11,6 +11,7 @@ import { useGLTF } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useFrame } from "@react-three/fiber";
+import { useCameraStore } from "../state/useCameraStore";
 
 export default forwardRef(function RadioTower(_, ref) {
   const glbPath = "/models/radioTower/Radio%20tower.glb";
@@ -127,7 +128,7 @@ export default forwardRef(function RadioTower(_, ref) {
             step: 0.1,
             label: "Glow Strength",
           },
-          glowColor: { value: "#ffb97d", label: "Glow Color" },
+          glowColor: { value: "#ffffff", label: "Glow Color" },
           seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
           Replay: button(() => {
             progressRef.current = -0.2;
@@ -177,6 +178,36 @@ export default forwardRef(function RadioTower(_, ref) {
   // -------- Dissolve state --------
   const progressRef = useRef(-0.2);
   const worldYRangeRef = useRef({ min: 0, max: 1 });
+  const shouldBuildRef = useRef(false);
+
+  // Subscribe to camera store to detect stop-13 and beyond
+  const currentWaypointIndex = useCameraStore((state) => {
+    const waypoints = state.waypoints || [];
+    const t = state.t ?? 0;
+    const nSeg = waypoints.length - 1;
+    if (nSeg <= 0) return -1;
+    // Find nearest waypoint
+    const nearestIdx = Math.round(t * nSeg);
+    return nearestIdx;
+  });
+
+  // Determine if tower should be built based on waypoint position
+  useEffect(() => {
+    const stop13Index = 14; // stop-13 is at index 14 in the waypoints array
+
+    // Build if at stop-13 or beyond, dissolve if before stop-13
+    const shouldBuild =
+      currentWaypointIndex >= stop13Index && currentWaypointIndex !== -1;
+
+    if (shouldBuild !== shouldBuildRef.current) {
+      shouldBuildRef.current = shouldBuild;
+      console.log(
+        shouldBuild
+          ? `🗼 Camera at waypoint ${currentWaypointIndex} (>= stop-13): Building tower...`
+          : `🗼 Camera at waypoint ${currentWaypointIndex} (< stop-13): Dissolving tower...`
+      );
+    }
+  }, [currentWaypointIndex]);
 
   const updateUniformAll = (name, val) => {
     materialsRef.current.forEach((m) => {
@@ -398,7 +429,8 @@ export default forwardRef(function RadioTower(_, ref) {
 
   // Animate dissolve
   useFrame((_, dt) => {
-    const target = params.build ? 1.1 : -0.2;
+    // Use camera-driven state unless manual control overrides
+    const target = params.build || shouldBuildRef.current ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = params.speed * dt * dir;

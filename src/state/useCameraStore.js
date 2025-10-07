@@ -98,7 +98,6 @@ const seedWaypoints = [
     position: [-1.847, -4.305, -2.286],
     orientation: { yaw: (Math.PI * 46.2) / 180, pitch: (Math.PI * -1.0) / 180 },
     ease: { name: "sineInOut" },
-    isAnchor: true,
   },
   {
     name: "stop-9",
@@ -368,32 +367,6 @@ const frictionToHalfLife = (f) => {
 const halfLifeToFriction = (h) => Math.pow(0.5, 1 / Math.max(1e-6, h));
 
 const WAYPOINT_EPS = 1e-4;
-const RELEASE_MARGIN = 1e-4;
-
-const maybeRestoreSuppressedAnchor = (get, set) => {
-  const stateNow = get();
-  const suppressed = stateNow._suppressedAnchorIndex ?? -1;
-  if (suppressed < 0) return;
-  const suppressedT = stateNow._suppressedAnchorT;
-  const wps = stateNow.waypoints ?? [];
-  const nSeg = Math.max(0, wps.length - 1);
-  if (nSeg <= 0) {
-    if (suppressed !== -1)
-      set({ _suppressedAnchorIndex: -1, _suppressedAnchorT: null });
-    return;
-  }
-  const tNow = clamp01(stateNow.t ?? 0);
-  const nearestIdx = Math.round(tNow * nSeg);
-  const atWaypoint = Math.abs(tNow - nearestIdx / nSeg) <= WAYPOINT_EPS;
-  const anchorsConf = stateNow.anchors ?? {};
-  const snapRadius = Math.max(0, anchorsConf.snapRadius ?? 0.015);
-  const distFromSuppressed =
-    suppressedT == null ? Infinity : Math.abs(tNow - suppressedT);
-  const farEnough = distFromSuppressed >= snapRadius + RELEASE_MARGIN;
-  if ((atWaypoint && nearestIdx !== suppressed) || farEnough) {
-    set({ _suppressedAnchorIndex: -1, _suppressedAnchorT: null });
-  }
-};
 
 export const useCameraStore = create((set, get) => ({
   waypoints: seedWaypoints,
@@ -409,7 +382,7 @@ export const useCameraStore = create((set, get) => ({
   locked: false,
 
   // segment-aware sensitivity (unit baseline). Keep magnitudeMap micro; use GlobalSS as macro multiplier.
-  globalSS: 1.0,
+  globalSS: 1.68,
   localSSPercent: {},
 
   // Magnitude → Glide mapping (new)
@@ -477,8 +450,7 @@ export const useCameraStore = create((set, get) => ({
   _anchorDwelling: false, // flag to indicate we're dwelling at an anchor
   _anchorRelease: null,
   _lastAnchorIndex: -1,
-  _suppressedAnchorIndex: -1,
-  _suppressedAnchorT: null,
+  _currentAnchorIndex: -1, // index of anchor we're currently at (to prevent re-snapping)
 
   // ---------- setters (with backward compatibility) ----------
   setT: (t) => set({ t: clamp01(t) }),
@@ -552,15 +524,13 @@ export const useCameraStore = create((set, get) => ({
     const clamped = Math.max(0, Math.min(count - 1, index));
     const t = clamped / nSeg;
     const isAnchor = waypoints[clamped]?.isAnchor;
-    const suppressIdx = isAnchor ? clamped : -1;
-    const suppressT = isAnchor ? t : null;
+    const currentAnchorIdx = isAnchor ? clamped : -1;
     set({
       t,
       v: 0,
       _dwellUntil: 0,
       _anchorRelease: null,
-      _suppressedAnchorIndex: suppressIdx,
-      _suppressedAnchorT: suppressT,
+      _currentAnchorIndex: currentAnchorIdx,
     });
   },
 
@@ -605,6 +575,7 @@ export const useCameraStore = create((set, get) => ({
         _anchorDwelling: false,
         _snapTween: null,
         _anchorRelease: releaseEntry,
+        // DON'T clear _currentAnchorIndex here - keep it so we know which anchor to ignore
       });
     }
 
@@ -639,11 +610,11 @@ export const useCameraStore = create((set, get) => ({
     const anchorsConf = state.anchors;
     const anchorWaypoints = state.waypoints;
     const currT = state.t ?? 0;
-    const suppressedIdx = state._suppressedAnchorIndex ?? -1;
+    const currentAnchorIdx = state._currentAnchorIndex ?? -1;
 
     let releaseActive = false;
     if (anchorsConf?.enabled && state._anchorRelease) {
-      if (state._anchorRelease.anchorIndex === suppressedIdx) {
+      if (state._anchorRelease.anchorIndex === currentAnchorIdx) {
         set({ _anchorRelease: null });
       } else {
         const snapRadius = Math.max(0, anchorsConf.snapRadius ?? 0.015);
@@ -666,7 +637,7 @@ export const useCameraStore = create((set, get) => ({
     if (
       anchorsConf?.enabled &&
       (anchorWaypoints?.length ?? 0) > 1 &&
-      suppressedIdx !== null
+      currentAnchorIdx !== null
     ) {
       const nSeg = anchorWaypoints.length - 1;
       const snapRadius = Math.max(0, anchorsConf.snapRadius ?? 0.015);
@@ -675,7 +646,7 @@ export const useCameraStore = create((set, get) => ({
       let closestT = 0;
       for (let i = 0; i < anchorWaypoints.length; i++) {
         const wp = anchorWaypoints[i];
-        if (!wp?.isAnchor || i === suppressedIdx) continue;
+        if (!wp?.isAnchor || i === currentAnchorIdx) continue;
         const tAnchor = nSeg > 0 ? i / nSeg : 0;
         const dist = Math.abs(tAnchor - currT);
         if (dist < closestDist) {
@@ -772,19 +743,22 @@ export const useCameraStore = create((set, get) => ({
       return { t, v: vNew, _dwellUntil: 0 };
     });
 
-    maybeRestoreSuppressedAnchor(get, set);
-
     // Visual smoothing with gentle tail: -cancel -> tail -> 0
-    const ms = get().microSmooth ?? {};
-    if (ms.enabled) {
+    const postState = get();
+    const ms = postState.microSmooth ?? {};
+    const prev = postState._smoothTween;
+    const anchorHoldActive =
+      !!postState._snapTween ||
+      !!postState._anchorDwelling ||
+      !!postState._anchorRelease;
+    if (ms.enabled && !anchorHoldActive) {
       const sAbs = effectiveStep;
       const cancel = Math.min(sAbs * (ms.frac ?? 1.0), ms.maxOffset ?? 0.006);
       const amt = cancel * dir;
-      const prev = get()._smoothTween;
       if (prev && typeof prev.kill === "function") prev.kill();
       if (amt !== 0) {
         const holder = { val: -amt };
-        set({ _smoothOffset: holder.val });
+        set({ _smoothOffset: holder.val, _smoothTween: null });
         // compute a safe tail amplitude (can be zero)
         let tail = 0;
         if ((ms.tailFrac ?? 0) > 0 || (ms.tailMax ?? 0) > 0) {
@@ -819,6 +793,11 @@ export const useCameraStore = create((set, get) => ({
         });
         set({ _smoothTween: tl });
       }
+    } else {
+      if (prev && typeof prev.kill === "function") prev.kill();
+      if (prev || (postState._smoothOffset ?? 0) !== 0) {
+        set({ _smoothTween: null, _smoothOffset: 0 });
+      }
     }
 
     // Micro pop removed per request
@@ -844,7 +823,7 @@ export const useCameraStore = create((set, get) => ({
     if (!enabled || paused || locked) return;
 
     let { t, v } = state;
-    const suppressedIdx = state._suppressedAnchorIndex ?? -1;
+    const currentAnchorIdx = state._currentAnchorIndex ?? -1;
 
     // If snap tween is active, let it control movement
     if (state._snapTween) {
@@ -860,27 +839,29 @@ export const useCameraStore = create((set, get) => ({
 
     let releaseActive = false;
     if (anchors?.enabled && state._anchorRelease) {
-      if (state._anchorRelease.anchorIndex === suppressedIdx) {
+      const snapRadius = Math.max(0, anchors.snapRadius ?? 0.015);
+      const exitDistance =
+        state._anchorRelease.exitDistance ??
+        Math.max(snapRadius * 1.5, snapRadius + 0.002);
+      const anchorT = state._anchorRelease.anchorT;
+      const distFromAnchor = Math.abs(t - (anchorT ?? t));
+      const withinDistance = distFromAnchor <= exitDistance + 1e-6;
+      const withinTime =
+        state._anchorRelease.until != null &&
+        nowMs < state._anchorRelease.until;
+      releaseActive = withinDistance || withinTime;
+      if (!releaseActive) {
         set({ _anchorRelease: null });
       } else {
-        const snapRadius = Math.max(0, anchors.snapRadius ?? 0.015);
-        const exitDistance =
-          state._anchorRelease.exitDistance ??
-          Math.max(snapRadius * 1.5, snapRadius + 0.002);
-        const anchorT = state._anchorRelease.anchorT;
-        const distFromAnchor = Math.abs(t - (anchorT ?? t));
-        const withinDistance = distFromAnchor <= exitDistance + 1e-6;
-        const withinTime =
-          state._anchorRelease.until != null &&
-          nowMs < state._anchorRelease.until;
-        releaseActive = withinDistance || withinTime;
-        if (!releaseActive) {
-          set({ _anchorRelease: null });
+        // During release grace period, clear current anchor index so we can find new ones
+        if (currentAnchorIdx >= 0 && distFromAnchor > snapRadius) {
+          set({ _currentAnchorIndex: -1 });
         }
       }
     }
 
     // Find nearest anchor if anchor system enabled and not in release grace
+    // KEY CHANGE: Only find anchors we're NOT currently at
     let nearestAnchor = null;
     let nearestAnchorIdx = -1;
     let distToAnchor = Infinity;
@@ -890,9 +871,9 @@ export const useCameraStore = create((set, get) => ({
     if (anchors?.enabled && !releaseActive) {
       const nSeg = waypoints.length - 1;
       if (nSeg > 0) {
-        // Check all anchor waypoints
+        // Check all anchor waypoints EXCEPT the one we're currently at
         waypoints.forEach((wp, idx) => {
-          if (wp.isAnchor && idx !== suppressedIdx) {
+          if (wp.isAnchor && idx !== currentAnchorIdx) {
             const wpT = idx / nSeg;
             const dist = Math.abs(t - wpT);
             // Check if we're moving toward this anchor
@@ -906,6 +887,18 @@ export const useCameraStore = create((set, get) => ({
             }
           }
         });
+
+        // Clear _currentAnchorIndex if we've moved far enough from the current anchor
+        if (currentAnchorIdx >= 0) {
+          const currentAnchorT = currentAnchorIdx / nSeg;
+          const distFromCurrent = Math.abs(t - currentAnchorT);
+          const snapRadius = anchors.snapRadius ?? 0.015;
+          const clearThreshold = snapRadius * 2; // Clear when 2x snap radius away
+
+          if (distFromCurrent > clearThreshold) {
+            set({ _currentAnchorIndex: -1 });
+          }
+        }
       }
     }
 
@@ -917,10 +910,16 @@ export const useCameraStore = create((set, get) => ({
     // snap to zero when tiny
     if (Math.abs(v) < physics.deadZone) v = 0;
 
-    // Anchor snap logic
+    // Anchor snap logic - only snap when approaching a DIFFERENT anchor
     if (anchors?.enabled && !releaseActive && nearestAnchor && isApproaching) {
       const snapRadius = anchors.snapRadius ?? 0.015;
       if (distToAnchor <= snapRadius && Math.abs(v) < physics.deadZone * 2) {
+        // Mark this anchor as current so it won't pull us anymore
+        set({
+          _currentAnchorIndex: nearestAnchorIdx,
+          v: 0,
+        });
+
         // Start smooth snap to anchor
         const holder = { val: t };
         const snapTween = gsap.to(holder, {
@@ -936,13 +935,11 @@ export const useCameraStore = create((set, get) => ({
               _dwellUntil: nowMs + (anchors.dwellMs ?? 600),
               _anchorDwelling: true,
               _lastAnchorIndex: nearestAnchorIdx,
-              _suppressedAnchorIndex: nearestAnchorIdx,
-              _suppressedAnchorT: anchorT,
               _anchorRelease: null,
             });
           },
         });
-        set({ _snapTween: snapTween, v: 0 });
+        set({ _snapTween: snapTween });
         return;
       }
     }
@@ -989,8 +986,6 @@ export const useCameraStore = create((set, get) => ({
     }
 
     set({ t, v, _anchorDwelling: false });
-
-    maybeRestoreSuppressedAnchor(get, set);
   },
 
   // ---------- Derived selectors ----------

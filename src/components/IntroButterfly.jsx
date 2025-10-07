@@ -208,7 +208,7 @@ export default forwardRef(function IntroButterfly(
               orientationSmoothing: { value: 50.0, min: 0, max: 50, step: 0.1 },
 
               // Habitat
-              showHabitat: { value: true, label: "Show Habitat" },
+              showHabitat: { value: false, label: "Show Habitat" },
               habitatCenterX: {
                 value: position[0],
                 min: -10,

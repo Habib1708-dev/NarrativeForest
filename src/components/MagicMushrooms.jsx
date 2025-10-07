@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useControls, folder, button } from "leva";
+import { useCameraStore } from "../state/useCameraStore";
 
 const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
 
@@ -156,6 +157,37 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   // Dissolve controls
   // =========================
   const progressRef = useRef(-0.2);
+  const shouldBuildRef = useRef(false);
+
+  // Subscribe to camera store to detect stop-14 and beyond
+  const currentWaypointIndex = useCameraStore((state) => {
+    const waypoints = state.waypoints || [];
+    const t = state.t ?? 0;
+    const nSeg = waypoints.length - 1;
+    if (nSeg <= 0) return -1;
+    // Find nearest waypoint
+    const nearestIdx = Math.round(t * nSeg);
+    return nearestIdx;
+  });
+
+  // Determine if mushrooms should be built based on waypoint position
+  useEffect(() => {
+    const stop14Index = 20; // stop-14 is at index 20 in the waypoints array
+
+    // Build if at stop-14 or beyond, dissolve if before stop-14
+    const shouldBuild =
+      currentWaypointIndex >= stop14Index && currentWaypointIndex !== -1;
+
+    if (shouldBuild !== shouldBuildRef.current) {
+      shouldBuildRef.current = shouldBuild;
+      console.log(
+        shouldBuild
+          ? `🍄 Camera at waypoint ${currentWaypointIndex} (>= stop-14): Building mushrooms...`
+          : `🍄 Camera at waypoint ${currentWaypointIndex} (< stop-14): Dissolving mushrooms...`
+      );
+    }
+  }, [currentWaypointIndex]);
+
   const dissolveCtl = useControls({
     Mushrooms: folder(
       {
@@ -833,7 +865,8 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   // Dissolve animation
   // =========================
   useFrame((_, dt) => {
-    const target = dissolveCtl.build ? 1.1 : -0.2;
+    // Use camera-driven state unless manual control overrides
+    const target = dissolveCtl.build || shouldBuildRef.current ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = dissolveCtl.speed * dt * dir;

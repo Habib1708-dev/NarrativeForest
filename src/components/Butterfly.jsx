@@ -11,8 +11,8 @@ import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useControls, folder } from "leva";
 
-const DEFAULT_AREA_CENTER = Object.freeze([-2, -4.15, -1.5]);
-const DEFAULT_AREA_SIZE = Object.freeze([0.6, 0.35, 1.0]);
+const DEFAULT_AREA_CENTER = Object.freeze([-2, -3.99, -2.86]);
+const DEFAULT_AREA_SIZE = Object.freeze([1.8, 0.47, 2]);
 const ZERO_VECTOR = Object.freeze([0, 0, 0]);
 const UP = new THREE.Vector3(0, 1, 0);
 const DEFAULT_FORWARD = new THREE.Vector3(0, 0, 1);
@@ -88,7 +88,7 @@ export default forwardRef(function Butterfly(
     orientationSmoothing = 20.0,
 
     // habitat bounds
-    showHabitatBounds = true,
+    showHabitatBounds = false,
     habitatWidth = DEFAULT_AREA_SIZE[0],
     habitatHeight = DEFAULT_AREA_SIZE[1],
     habitatDepth = DEFAULT_AREA_SIZE[2],

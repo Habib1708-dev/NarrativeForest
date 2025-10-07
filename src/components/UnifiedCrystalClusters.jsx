@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
+import { useCameraStore } from "../state/useCameraStore";
 
 const GLB_A = "/models/magicPlantsAndCrystal/CrystalCluster.glb";
 const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
@@ -693,6 +694,36 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   // Materials & state
   const progressRef = useRef(-0.2); // dissolve gate (-0.2..1.1)
   const coolMixRef = useRef(0.0); // 0..1 glow/heat
+  const shouldBuildRef = useRef(false);
+
+  // Subscribe to camera store to detect stop-15-down and beyond
+  const currentWaypointIndex = useCameraStore((state) => {
+    const waypoints = state.waypoints || [];
+    const t = state.t ?? 0;
+    const nSeg = waypoints.length - 1;
+    if (nSeg <= 0) return -1;
+    // Find nearest waypoint
+    const nearestIdx = Math.round(t * nSeg);
+    return nearestIdx;
+  });
+
+  // Determine if crystals should be built based on waypoint position
+  useEffect(() => {
+    const stop15DownIndex = 21; // stop-15-down is at index 21 in the waypoints array
+
+    // Build if at stop-15-down or beyond, dissolve if before stop-15-down
+    const shouldBuild =
+      currentWaypointIndex >= stop15DownIndex && currentWaypointIndex !== -1;
+
+    if (shouldBuild !== shouldBuildRef.current) {
+      shouldBuildRef.current = shouldBuild;
+      console.log(
+        shouldBuild
+          ? `💎 Camera at waypoint ${currentWaypointIndex} (>= stop-15-down): Building crystals...`
+          : `💎 Camera at waypoint ${currentWaypointIndex} (< stop-15-down): Dissolving crystals...`
+      );
+    }
+  }, [currentWaypointIndex]);
 
   const materialA = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
   const materialB = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
@@ -1204,7 +1235,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
 
   useFrame((_, dt) => {
     // Dissolve anim
-    const target = dissolve.build ? 1.1 : -0.2;
+    // Use camera-driven state unless manual control overrides
+    const target = dissolve.build || shouldBuildRef.current ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
       const step = dissolve.speed * dt * dir;
@@ -1218,9 +1250,14 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     // - ramp up again while dissolving out
     // - cool after fully built
     // - snap to 0 when fully gone
-    const building = dissolve.build && dir >= 0 && progressRef.current < 1.0;
+    const building =
+      (dissolve.build || shouldBuildRef.current) &&
+      dir >= 0 &&
+      progressRef.current < 1.0;
     const dissolving =
-      !dissolve.build && dir <= 0 && progressRef.current > -0.2;
+      !(dissolve.build || shouldBuildRef.current) &&
+      dir <= 0 &&
+      progressRef.current > -0.2;
 
     if (building || dissolving) {
       const riseK = 1 - Math.exp(-6.0 * dt); // quick heat

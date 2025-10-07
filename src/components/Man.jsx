@@ -4,11 +4,13 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useState,
 } from "react";
 import * as THREE from "three";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { useCameraStore } from "../state/useCameraStore";
 
 export default forwardRef(function Man(_, ref) {
   // Load the GLB from /public
@@ -46,6 +48,9 @@ export default forwardRef(function Man(_, ref) {
     scale,
     clipName,
     playbackSpeed,
+    waveOnStop5,
+    waveDuration,
+    manualTriggerWave,
   } = useControls({
     Man: folder({
       Transform: folder({
@@ -53,7 +58,7 @@ export default forwardRef(function Man(_, ref) {
         positionY: { value: -4.433, min: -50, max: 50, step: 0.01 },
         positionZ: { value: -2.95, min: -50, max: 50, step: 0.01 },
         rotationYDeg: {
-          value: 34.3,
+          value: 12.9,
           min: -180,
           max: 180,
           step: 0.1,
@@ -74,6 +79,20 @@ export default forwardRef(function Man(_, ref) {
           label: "Clip",
         },
         playbackSpeed: { value: 1, min: 0, max: 3, step: 0.05, label: "Speed" },
+      }),
+      "Stop-5 Integration": folder({
+        waveOnStop5: { value: true, label: "Enable Wave at Stop-5" },
+        waveDuration: {
+          value: 3.0,
+          min: 0.5,
+          max: 10,
+          step: 0.1,
+          label: "Wave Duration (s)",
+        },
+        manualTriggerWave: {
+          value: false,
+          label: "Manual Trigger Wave",
+        },
       }),
     }),
   });
@@ -169,6 +188,100 @@ export default forwardRef(function Man(_, ref) {
 
   // Switch animation on control change
   const currentActionRef = useRef(null);
+  const [lastWaypointIndex, setLastWaypointIndex] = useState(-1);
+  const waveActionRef = useRef(null);
+
+  // Subscribe to camera store to detect stop-5
+  const currentWaypointIndex = useCameraStore((state) => {
+    const waypoints = state.waypoints || [];
+    const t = state.t ?? 0;
+    const nSeg = waypoints.length - 1;
+    if (nSeg <= 0) return -1;
+    // Find nearest waypoint
+    const nearestIdx = Math.round(t * nSeg);
+    const WAYPOINT_EPS = 1e-4;
+    const atWaypoint = Math.abs(t - nearestIdx / nSeg) <= WAYPOINT_EPS;
+    return atWaypoint ? nearestIdx : -1;
+  });
+
+  // Detect arrival at stop-5 and trigger wave animation
+  useEffect(() => {
+    if (!waveOnStop5 || !actions) return;
+
+    const stop5Index = 5; // stop-5 is at index 5 in the waypoints array
+
+    // Check if we just arrived at stop-5
+    if (
+      currentWaypointIndex === stop5Index &&
+      lastWaypointIndex !== stop5Index
+    ) {
+      console.log("🎬 Camera reached stop-5! Triggering wave animation...");
+      triggerWaveAnimation();
+    }
+
+    setLastWaypointIndex(currentWaypointIndex);
+  }, [currentWaypointIndex, waveOnStop5, actions, lastWaypointIndex]);
+
+  // Manual trigger for testing
+  useEffect(() => {
+    if (manualTriggerWave && actions) {
+      console.log("🎬 Manual wave trigger activated");
+      triggerWaveAnimation();
+    }
+  }, [manualTriggerWave, actions]);
+
+  // Function to play wave animation once
+  const triggerWaveAnimation = () => {
+    if (!actions) return;
+
+    const waveClipName = "CharacterArmature|Wave";
+    const waveAction = actions[waveClipName];
+
+    if (!waveAction) {
+      console.warn(`⚠️ Wave animation "${waveClipName}" not found in actions`);
+      return;
+    }
+
+    // Stop current looping animation temporarily
+    const currentAction = currentActionRef.current;
+    if (currentAction && currentAction !== waveAction) {
+      currentAction.fadeOut(0.3);
+    }
+
+    // Configure wave to play once
+    waveAction.reset();
+    waveAction.setLoop(THREE.LoopOnce, 1);
+    waveAction.clampWhenFinished = true;
+    waveAction.timeScale = 1.0;
+
+    // Calculate duration and play
+    const clipDuration = waveAction.getClip().duration;
+    const effectiveDuration = waveDuration || clipDuration;
+
+    waveAction.fadeIn(0.3).play();
+    waveActionRef.current = waveAction;
+
+    console.log(
+      `👋 Playing wave animation (clip duration: ${clipDuration.toFixed(
+        2
+      )}s, user duration: ${effectiveDuration.toFixed(2)}s)`
+    );
+
+    // After wave finishes, resume the previous animation
+    setTimeout(() => {
+      if (waveAction) {
+        waveAction.fadeOut(0.3);
+      }
+      if (currentAction && currentAction !== waveAction) {
+        currentAction.reset().fadeIn(0.3).play();
+        console.log(
+          `↩️ Resumed previous animation: ${currentAction.getClip().name}`
+        );
+      }
+      waveActionRef.current = null;
+    }, effectiveDuration * 1000);
+  };
+
   useEffect(() => {
     if (!mixer) return;
     mixer.timeScale = playbackSpeed ?? 1;
