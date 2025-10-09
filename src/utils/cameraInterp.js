@@ -103,11 +103,9 @@ export function segmentAt(t, count) {
  * @param {Waypoint} a
  * @param {Waypoint} b
  * @param {number} u local [0..1]
- * @param {Waypoint} [prev] previous waypoint for smooth curve
- * @param {Waypoint} [next] next waypoint for smooth curve
  * @returns {{ position: THREE.Vector3, quaternion: THREE.Quaternion, fov: number }}
  */
-export function interpolatePose(a, b, u, prev = null, next = null) {
+export function interpolatePose(a, b, u) {
   const ea = easeFn(a?.ease?.name, a?.ease?.tension);
   const eb = easeFn(b?.ease?.name, b?.ease?.tension);
   // Blend the ease by u (softly transition ease types)
@@ -115,36 +113,9 @@ export function interpolatePose(a, b, u, prev = null, next = null) {
   const tB = eb(u);
   const ue = (1 - u) * tA + u * tB;
 
-  // Use Catmull-Rom spline for smooth path interpolation
   const pa = new THREE.Vector3(...a.position);
   const pb = new THREE.Vector3(...b.position);
-
-  let pos;
-  if (prev && next) {
-    // Full Catmull-Rom with surrounding waypoints
-    const p0 = new THREE.Vector3(...prev.position);
-    const p1 = pa;
-    const p2 = pb;
-    const p3 = new THREE.Vector3(...next.position);
-    pos = catmullRom(p0, p1, p2, p3, ue);
-  } else if (prev) {
-    // Only have previous waypoint - use it for smoother entry
-    const p0 = new THREE.Vector3(...prev.position);
-    const p1 = pa;
-    const p2 = pb;
-    const p3 = pb.clone().sub(pa).add(pb); // extrapolate next
-    pos = catmullRom(p0, p1, p2, p3, ue);
-  } else if (next) {
-    // Only have next waypoint - use it for smoother exit
-    const p0 = pa.clone().sub(pb).add(pa); // extrapolate prev
-    const p1 = pa;
-    const p2 = pb;
-    const p3 = new THREE.Vector3(...next.position);
-    pos = catmullRom(p0, p1, p2, p3, ue);
-  } else {
-    // No surrounding waypoints - fall back to linear interpolation
-    pos = pa.clone().lerp(pb, ue);
-  }
+  const pos = pa.clone().lerp(pb, ue);
 
   const qa = quaternionFromWaypoint(a);
   const qb = quaternionFromWaypoint(b);
@@ -161,46 +132,6 @@ export function interpolatePose(a, b, u, prev = null, next = null) {
   const fov = THREE.MathUtils.lerp(fovA, fovB, ue);
 
   return { position: pos, quaternion: quat, fov };
-}
-
-/**
- * Catmull-Rom spline interpolation
- * @param {THREE.Vector3} p0 point before start
- * @param {THREE.Vector3} p1 start point
- * @param {THREE.Vector3} p2 end point
- * @param {THREE.Vector3} p3 point after end
- * @param {number} t interpolation parameter [0..1]
- * @returns {THREE.Vector3}
- */
-function catmullRom(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-
-  const result = new THREE.Vector3();
-
-  // Catmull-Rom basis functions
-  result.x =
-    0.5 *
-    (2 * p1.x +
-      (-p0.x + p2.x) * t +
-      (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-      (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
-
-  result.y =
-    0.5 *
-    (2 * p1.y +
-      (-p0.y + p2.y) * t +
-      (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-      (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-
-  result.z =
-    0.5 *
-    (2 * p1.z +
-      (-p0.z + p2.z) * t +
-      (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 +
-      (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3);
-
-  return result;
 }
 
 /**
@@ -230,12 +161,7 @@ export function getPoseAt(waypoints, t) {
   const { i, u } = segmentAt(t, count);
   const a = waypoints[i];
   const b = waypoints[i + 1];
-
-  // Get surrounding waypoints for smooth curve
-  const prev = i > 0 ? waypoints[i - 1] : null;
-  const next = i + 2 < count ? waypoints[i + 2] : null;
-
-  const pose = interpolatePose(a, b, u, prev, next);
+  const pose = interpolatePose(a, b, u);
   return { ...pose, segmentIndex: i };
 }
 

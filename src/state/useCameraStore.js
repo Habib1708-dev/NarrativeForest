@@ -413,7 +413,7 @@ export const useCameraStore = create((set, get) => ({
   // Micro smoothing config (soften each step visually)
   microSmooth: {
     enabled: true,
-    frac: 1.5, // fraction of step size to initially cancel
+    frac: 0.85, // fraction of step size to initially cancel
     maxOffset: 0.006, // cap the visual cancel amount in t-space
     duration: 0.4, // time to fade the offset back to zero
     ease: "sine.out",
@@ -599,7 +599,8 @@ export const useCameraStore = create((set, get) => ({
     const prev = postState._smoothTween;
     if (ms.enabled) {
       const sAbs = effectiveStep;
-      const cancel = Math.min(sAbs * (ms.frac ?? 1.0), ms.maxOffset ?? 0.006);
+      const rawCancel = Math.max(0, sAbs * (ms.frac ?? 1.0));
+      const cancel = Math.min(rawCancel, ms.maxOffset ?? 0.006, sAbs);
       const amt = cancel * dir;
       if (prev && typeof prev.kill === "function") prev.kill();
       if (amt !== 0) {
