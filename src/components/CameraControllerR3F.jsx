@@ -4,7 +4,6 @@ import * as THREE from "three";
 import { useControls, folder } from "leva";
 import { useCameraStore } from "../state/useCameraStore";
 import { yawPitchFromQuaternion } from "../utils/cameraInterp";
-import { gsap } from "gsap";
 
 // Minimal gizmos: spheres at waypoint positions and optional lines to lookAt targets
 function CameraWaypointGizmos() {
@@ -66,24 +65,13 @@ export default function CameraControllerR3F() {
   const getEffectiveSensitivity = useCameraStore(
     (s) => s.getEffectiveSensitivity
   );
-  const physics = useCameraStore((s) => s.physics);
-  const overlays = useCameraStore((s) => s.overlays);
   const scenic = useCameraStore((s) => s.scenic);
   const scenicDwellMs = useCameraStore((s) => s.scenicDwellMs);
   const scenicSnapRadius = useCameraStore((s) => s.scenicSnapRadius);
   const scenicResist = useCameraStore((s) => s.scenicResist);
-  const microSmooth = useCameraStore((s) => s.microSmooth);
   const applyWheel = useCameraStore((s) => s.applyWheel);
-  const stepStore = useCameraStore((s) => s.step);
   const tRef = useRef(useCameraStore.getState().t ?? 0);
   const lastSegRef = useRef(-1);
-  const velRef = useRef(0); // velocity in t/sec
-  const scenicTimerRef = useRef(null);
-  const bobPhaseRef = useRef(0);
-  const driftRef = useRef(new THREE.Vector3());
-  const lastWheelAtRef = useRef(0);
-  const brakingRef = useRef(false);
-  const brakeTweenRef = useRef(null);
 
   // Leva controls
   const waypointNames = useMemo(
@@ -150,25 +138,6 @@ export default function CameraControllerR3F() {
           ])
         )
       ),
-      Physics: folder({
-        friction: {
-          value: useCameraStore.getState().physics.friction,
-          min: 0.1,
-          max: 0.999,
-          step: 0.001,
-          onChange: (v) =>
-            useCameraStore.getState().setPhysics({ friction: v }),
-        },
-        // wheelBoost acts as legacy alias to step scaleFactor; use Step Model controls instead
-        maxSpeed: {
-          value: useCameraStore.getState().physics.maxSpeed,
-          min: 0.1,
-          max: 3,
-          step: 0.05,
-          onChange: (v) =>
-            useCameraStore.getState().setPhysics({ maxSpeed: v }),
-        },
-      }),
       "Step Model": folder({
         baseStep: {
           value: useCameraStore.getState().magnitudeMap.baseStep,
@@ -202,44 +171,6 @@ export default function CameraControllerR3F() {
           onChange: (v) =>
             useCameraStore.getState().setMagnitudeMap({ maxStep: v }),
         },
-        glideRatio: {
-          value: useCameraStore.getState().magnitudeMap.glideRatio,
-          min: 0.0,
-          max: 0.5,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setMagnitudeMap({ glideRatio: v }),
-        },
-        replaceVelocity: {
-          value: useCameraStore.getState().magnitudeMap.replaceVelocity,
-          onChange: (v) =>
-            useCameraStore.getState().setMagnitudeMap({ replaceVelocity: v }),
-        },
-      }),
-      Overlays: folder({
-        bobAmp: {
-          value: useCameraStore.getState().overlays.bobAmp,
-          min: 0,
-          max: 0.1,
-          step: 0.001,
-          onChange: (v) => useCameraStore.getState().setOverlays({ bobAmp: v }),
-        },
-        bobFreq: {
-          value: useCameraStore.getState().overlays.bobFreq,
-          min: 0,
-          max: 3,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setOverlays({ bobFreq: v }),
-        },
-        driftAmt: {
-          value: useCameraStore.getState().overlays.driftAmt,
-          min: 0,
-          max: 0.2,
-          step: 0.001,
-          onChange: (v) =>
-            useCameraStore.getState().setOverlays({ driftAmt: v }),
-        },
       }),
       Scenic: folder({
         dwellMs: {
@@ -262,89 +193,6 @@ export default function CameraControllerR3F() {
           max: 1,
           step: 0.01,
           onChange: (v) => useCameraStore.getState().setScenicResist(v),
-        },
-      }),
-      "Micro Smooth": folder({
-        enabled: {
-          value: useCameraStore.getState().microSmooth.enabled,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ enabled: v }),
-        },
-        frac: {
-          value: useCameraStore.getState().microSmooth.frac,
-          min: 0,
-          max: 1.5,
-          step: 0.05,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ frac: v }),
-        },
-        maxOffset: {
-          value: useCameraStore.getState().microSmooth.maxOffset,
-          min: 0,
-          max: 0.02,
-          step: 0.0005,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ maxOffset: v }),
-        },
-        duration: {
-          value: useCameraStore.getState().microSmooth.duration,
-          min: 0.05,
-          max: 0.4,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ duration: v }),
-        },
-        ease: {
-          value: useCameraStore.getState().microSmooth.ease,
-          options: {
-            "sine.out": "sine.out",
-            "power1.out": "power1.out",
-            "quad.out": "quad.out",
-          },
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ ease: v }),
-        },
-        tailFrac: {
-          value: useCameraStore.getState().microSmooth.tailFrac,
-          min: 0,
-          max: 0.5,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ tailFrac: v }),
-        },
-        tailMax: {
-          value: useCameraStore.getState().microSmooth.tailMax,
-          min: 0,
-          max: 0.02,
-          step: 0.0005,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ tailMax: v }),
-        },
-        tailBoundFrac: {
-          value: useCameraStore.getState().microSmooth.tailBoundFrac,
-          min: 0,
-          max: 1.0,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ tailBoundFrac: v }),
-        },
-        tailDuration: {
-          value: useCameraStore.getState().microSmooth.tailDuration,
-          min: 0.05,
-          max: 1.0,
-          step: 0.01,
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ tailDuration: v }),
-        },
-        tailEase: {
-          value: useCameraStore.getState().microSmooth.tailEase,
-          options: {
-            "sine.out": "sine.out",
-            "power1.out": "power1.out",
-            "quad.out": "quad.out",
-          },
-          onChange: (v) =>
-            useCameraStore.getState().setMicroSmooth({ tailEase: v }),
         },
       }),
     },
@@ -376,27 +224,7 @@ export default function CameraControllerR3F() {
     // Apply pose only when enabled and not locked/paused
     if (enabled && !(locked || paused)) {
       const { position, quaternion, fov } = getPose();
-      // Micro overlays: bobbing (vertical) and drift (lateral based on velocity)
-      const speed = Math.min(Math.abs(velRef.current), physics?.maxSpeed ?? 1);
-      // Bobbing
-      bobPhaseRef.current +=
-        (overlays?.bobFreq ?? 0.6) * dt * 2 * Math.PI * (0.2 + speed);
-      const bobOffset =
-        Math.sin(bobPhaseRef.current) *
-        (overlays?.bobAmp ?? 0.02) *
-        (0.2 + speed);
-      // Drift: sideways relative to camera right vector
-      const driftAmt =
-        (overlays?.driftAmt ?? 0.02) *
-        (speed > 0 ? speed / (physics?.maxSpeed ?? 1) : 0);
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
-      driftRef.current
-        .copy(right)
-        .multiplyScalar(driftAmt * Math.sign(velRef.current || 0));
-      const posWithOverlays = position.clone();
-      posWithOverlays.y += bobOffset;
-      posWithOverlays.add(driftRef.current);
-      camera.position.copy(posWithOverlays);
+      camera.position.copy(position);
       camera.quaternion.copy(quaternion);
       if (camera.isPerspectiveCamera && fov != null) {
         camera.fov = fov;
@@ -442,31 +270,11 @@ export default function CameraControllerR3F() {
       if (!useCameraStore.getState().enabled) return;
       if (useCameraStore.getState().locked || useCameraStore.getState().paused)
         return;
-      if (brakingRef.current) return;
-      lastWheelAtRef.current = performance.now();
       applyWheel(e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
-  }, [getSegmentIndex, getEffectiveSensitivity, physics]);
-
-  // Advance store integrator per frame and mirror v for overlays
-  useFrame((_, dt) => {
-    if (!enabled || locked || paused) return;
-    if (brakingRef.current) return;
-    stepStore(dt);
-    velRef.current = useCameraStore.getState().v ?? 0;
-  });
-
-  // Kill brake tween on unmount
-  useEffect(() => {
-    return () => {
-      if (brakeTweenRef.current) {
-        brakeTweenRef.current.kill();
-        brakeTweenRef.current = null;
-      }
-    };
-  }, []);
+  }, [applyWheel]);
 
   return (
     <>

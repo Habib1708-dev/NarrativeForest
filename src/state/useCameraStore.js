@@ -1,7 +1,5 @@
 // src/state/useCameraStore.js
 import { create } from "zustand";
-import * as THREE from "three";
-import { gsap } from "gsap";
 import { getPoseAt, segmentAt } from "../utils/cameraInterp";
 
 /**
@@ -359,22 +357,13 @@ const seedWaypoints = [
 
 // ---------------------- helpers ----------------------
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
-// legacy friction ↔ halfLife mapping
-const frictionToHalfLife = (f) => {
-  const ff = THREE.MathUtils.clamp(f, 1e-4, 0.999999);
-  return Math.log(0.5) / Math.log(ff); // t when v halves if v *= f^t
-};
-const halfLifeToFriction = (h) => Math.pow(0.5, 1 / Math.max(1e-6, h));
-
-const WAYPOINT_EPS = 1e-4;
+const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
 
 export const useCameraStore = create((set, get) => ({
   waypoints: seedWaypoints,
 
   // normalized [0..1]
   t: 0,
-  // current glide velocity in t/sec
-  v: 0,
 
   // flags
   enabled: false,
@@ -392,36 +381,10 @@ export const useCameraStore = create((set, get) => ({
     power: 1.0, // 1 = linear; >1 flattens small flicks; <1 boosts them
     minImpulse: 0.0,
     maxStep: 0.02, // cap immediate step
-    glideRatio: 0.1, // glide distance as a fraction of step size
-    replaceVelocity: true, // whether new glide replaces prior velocity
-  },
-
-  // Physics (new). halfLife actually drives decay; 'friction' is a legacy alias.
-  physics: {
-    halfLife: 0.08, // fast stop
-    deadZone: 0.03, // snap-to-zero threshold
-    maxSpeed: 0.8,
-    // ------- legacy/compat fields expected by your Leva panel -------
-    friction: halfLifeToFriction(0.08), // shown/edited in Leva; mapped to halfLife
-    wheelBoost: 0.1, // alias to magnitudeMap.scaleFactor
   },
 
   // overlays / gizmos (kept)
-  overlays: { bobAmp: 0.02, bobFreq: 0.6, driftAmt: 0.02 },
   gizmos: Object.fromEntries(seedWaypoints.map((w) => [w.name ?? "wp", false])),
-
-  // Micro smoothing config (soften each step visually)
-  microSmooth: {
-    enabled: true,
-    frac: 0.85, // fraction of step size to initially cancel
-    maxOffset: 0.006, // cap the visual cancel amount in t-space
-    duration: 0.4, // time to fade the offset back to zero
-    ease: "sine.out",
-  },
-
-  // internals
-  _smoothOffset: 0,
-  _smoothTween: null,
 
   // ---------- setters (with backward compatibility) ----------
   setT: (t) => set({ t: clamp01(t) }),
@@ -435,43 +398,7 @@ export const useCameraStore = create((set, get) => ({
     set((s) => ({ localSSPercent: { ...s.localSSPercent, [index]: v } })),
 
   setMagnitudeMap: (patch) =>
-    set((s) => {
-      const next = { ...s.magnitudeMap, ...patch };
-      // keep legacy alias in sync
-      const nextPhysics = { ...s.physics, wheelBoost: next.scaleFactor };
-      return { magnitudeMap: next, physics: nextPhysics };
-    }),
-
-  setPhysics: (patch) =>
-    set((s) => {
-      const out = { ...s.physics, ...patch };
-
-      // --- legacy inputs mapping ---
-      if (patch && typeof patch.friction === "number") {
-        // Update halfLife from provided friction
-        out.halfLife = frictionToHalfLife(patch.friction);
-      } else if (patch && typeof patch.halfLife === "number") {
-        // Keep friction mirror in sync for Leva display
-        out.friction = halfLifeToFriction(patch.halfLife);
-      }
-
-      if (patch && typeof patch.wheelBoost === "number") {
-        // Map legacy wheelBoost → magnitude scale
-        const scale = Math.max(0, patch.wheelBoost);
-        return {
-          physics: out,
-          magnitudeMap: { ...s.magnitudeMap, scaleFactor: scale },
-        };
-      }
-
-      return { physics: out };
-    }),
-
-  setOverlays: (patch) =>
-    set((s) => ({ overlays: { ...s.overlays, ...patch } })),
-
-  setMicroSmooth: (patch) =>
-    set((s) => ({ microSmooth: { ...s.microSmooth, ...patch } })),
+    set((s) => ({ magnitudeMap: { ...s.magnitudeMap, ...patch } })),
 
   setGizmo: (name, v) => set((s) => ({ gizmos: { ...s.gizmos, [name]: !!v } })),
   toggleGizmo: (name) =>
@@ -484,58 +411,39 @@ export const useCameraStore = create((set, get) => ({
     const nSeg = count - 1;
     const clamped = Math.max(0, Math.min(count - 1, index));
     const t = clamped / nSeg;
-    set({
-      t,
-      v: 0,
-    });
+    set({ t });
   },
 
-  // ---------- wheel input → STEP + GLIDE (micro) ----------
+  // ---------- wheel input → direct step ----------
   applyWheel: (deltaY) => {
-    const initialState = get();
-    if (!initialState.enabled || initialState.paused || deltaY === 0) return;
-
-    const nowMs = performance.now();
-
     const state = get();
+    if (!state.enabled || state.paused || deltaY === 0) return;
+
     const dir = deltaY < 0 ? +1 : -1;
     const mag = Math.abs(deltaY);
 
-    const {
-      baseStep,
-      scaleFactor,
-      power,
-      minImpulse,
-      maxStep,
-      glideRatio,
-      replaceVelocity,
-    } = state.magnitudeMap;
+    const { baseStep, scaleFactor, power, minImpulse, maxStep } =
+      state.magnitudeMap;
 
-    // Normalize magnitude to step units, then power-map and scale
     const steps = mag / Math.max(1, baseStep);
     let stepSize =
       Math.pow(steps, Math.max(0.001, power)) * Math.max(0, scaleFactor);
 
-    // optional per-segment multiplier (kept)
     const segIndex = state.getSegmentIndex();
-    // Effective sensitivity; guard against accidental near-zero making scroll feel dead
     const sens = state.getEffectiveSensitivity(segIndex);
     stepSize *= sens > 1e-4 ? sens : 1.0;
 
     if (stepSize < (minImpulse ?? 0)) return;
     stepSize = Math.min(stepSize, maxStep ?? 0.02);
 
-    let effectiveStep = Math.abs(stepSize);
-
     set((s) => {
-      // Immediate step in t with optional slip extension
       let totalStep = stepSize;
       const slip = s.microSlip ?? {};
       if (slip.enabled) {
         const wps = s.waypoints;
         const nSeg = Math.max(0, wps.length - 1);
         let i = nSeg > 0 ? Math.floor(s.t * nSeg) : 0;
-        i = THREE.MathUtils.clamp(i, 0, Math.max(0, nSeg - 1));
+        i = clamp(i, 0, Math.max(0, nSeg - 1));
         const tCurr = nSeg > 0 ? i / nSeg : 0;
         const tNext = nSeg > 0 ? (i + 1) / nSeg : 1;
         const remaining =
@@ -547,127 +455,40 @@ export const useCameraStore = create((set, get) => ({
         );
         totalStep = stepSize + y;
       }
+
       const wps2 = s.waypoints;
       const nSeg2 = Math.max(0, wps2.length - 1);
       let t;
       if (nSeg2 > 0) {
         const EPS = 1e-6;
         let ii = Math.floor(s.t * nSeg2);
-        ii = THREE.MathUtils.clamp(ii, 0, Math.max(0, nSeg2 - 1));
+        ii = clamp(ii, 0, Math.max(0, nSeg2 - 1));
         let tMin = ii / nSeg2;
         let tMax = (ii + 1) / nSeg2;
-        // If we are effectively at a boundary, allow crossing by choosing adjacent segment bounds
         if (dir > 0 && Math.abs(s.t - tMax) <= EPS && ii < nSeg2 - 0) {
-          // move into next segment when scrolling forward
           const jj = Math.min(ii + 1, nSeg2 - 1);
           tMin = jj / nSeg2;
           tMax = (jj + 1) / nSeg2;
         } else if (dir < 0 && Math.abs(s.t - tMin) <= EPS && ii > 0) {
-          // move into previous segment when scrolling backward
           const jj = Math.max(ii - 1, 0);
           tMin = jj / nSeg2;
           tMax = (jj + 1) / nSeg2;
         }
         const tTarget = s.t + dir * totalStep;
-        // clamp target within the chosen segment bounds
-        const tBound = THREE.MathUtils.clamp(tTarget, tMin, tMax);
+        const tBound = clamp(tTarget, tMin, tMax);
         t = clamp01(tBound);
       } else {
         t = clamp01(s.t + dir * totalStep);
       }
-      // Compute glide distance proportional to step
-      const gDist = Math.abs(totalStep) * (glideRatio ?? 0.1);
-      // Convert desired glide distance to initial velocity using exponential decay model
-      const lambda = Math.LN2 / Math.max(s.physics.halfLife, 1e-6);
-      let vGlide = gDist * lambda * dir;
-      // Replace or add to current velocity
-      let vNew = replaceVelocity ? vGlide : s.v + vGlide;
-      vNew = THREE.MathUtils.clamp(
-        vNew,
-        -s.physics.maxSpeed,
-        s.physics.maxSpeed
-      );
-      // Clamp to boundaries and zero if at bounds moving outward
-      if ((t <= 0 && vNew < 0) || (t >= 1 && vNew > 0)) vNew = 0;
-      effectiveStep = Math.abs(totalStep);
-      return { t, v: vNew };
+      return { t };
     });
-
-    // Visual smoothing: apply cancel offset that fades back to zero
-    const postState = get();
-    const ms = postState.microSmooth ?? {};
-    const prev = postState._smoothTween;
-    if (ms.enabled) {
-      const sAbs = effectiveStep;
-      const rawCancel = Math.max(0, sAbs * (ms.frac ?? 1.0));
-      const cancel = Math.min(rawCancel, ms.maxOffset ?? 0.006, sAbs);
-      const amt = cancel * dir;
-      if (prev && typeof prev.kill === "function") prev.kill();
-      if (amt !== 0) {
-        const holder = { val: -amt };
-        set({ _smoothOffset: holder.val, _smoothTween: null });
-        const tween = gsap.to(holder, {
-          val: 0,
-          duration: Math.max(0.05, ms.duration ?? 0.4),
-          ease: ms.ease ?? "sine.out",
-          onUpdate: () => set({ _smoothOffset: holder.val }),
-          onComplete: () => set({ _smoothTween: null, _smoothOffset: 0 }),
-        });
-        set({ _smoothTween: tween });
-      }
-    } else {
-      if (prev && typeof prev.kill === "function") prev.kill();
-      if (prev || (postState._smoothOffset ?? 0) !== 0) {
-        set({ _smoothTween: null, _smoothOffset: 0 });
-      }
-    }
-  },
-
-  // ---------- per-frame integrator (exponential decay to full stop) ----------
-  step: (dt, nowMs = performance.now()) => {
-    const state = get();
-    const { enabled, paused, locked, physics, waypoints } = state;
-    if (!enabled || paused || locked) return;
-
-    let { t, v } = state;
-
-    // Exponential decay driven by base physics settings (no extra boost)
-    const lambda = Math.LN2 / Math.max(physics.halfLife, 1e-6);
-    const decay = Math.exp(-lambda * Math.max(0, dt));
-    v *= decay;
-
-    // snap to zero when tiny
-    if (Math.abs(v) < physics.deadZone) v = 0;
-
-    // integrate t and enforce stop at each waypoint boundary
-    if (v !== 0) {
-      const nSeg = Math.max(0, waypoints.length - 1);
-      const tPrev = t;
-      t = clamp01(t + v * dt);
-      if (nSeg > 0) {
-        const i = Math.floor(tPrev * nSeg);
-        const tCurr = i / nSeg;
-        const tNext = (i + 1) / nSeg;
-        if (v > 0 && t >= tNext) {
-          t = tNext;
-          v = 0;
-        } else if (v < 0 && t <= tCurr) {
-          t = tCurr;
-          v = 0;
-        }
-      }
-      if (t === 0 || t === 1) v = 0;
-    }
-
-    set({ t, v });
   },
 
   // ---------- Derived selectors ----------
   getPose: (t) => {
     const waypoints = get().waypoints;
     const baseT = t ?? get().t;
-    const oSmooth = get()._smoothOffset ?? 0;
-    const tt = clamp01(baseT + oSmooth);
+    const tt = clamp01(baseT);
     const { position, quaternion, fov, segmentIndex } = getPoseAt(
       waypoints,
       tt
