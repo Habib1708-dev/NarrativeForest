@@ -1,5 +1,6 @@
 // src/state/useCameraStore.js
 import { create } from "zustand";
+import { gsap } from "gsap";
 import { getPoseAt, segmentAt } from "../utils/cameraInterp";
 
 /**
@@ -31,6 +32,15 @@ const seedWaypoints = [
     position: [-0.926, -3.791, -3.993],
     orientation: { yaw: 2.574360646691636, pitch: -0.2321287905152458 },
     ease: { name: "easeInOut" },
+  },
+  {
+    name: "stop-3-smooth",
+    position: [-1.68, -3.82, -4.35],
+    orientation: {
+      yaw: (Math.PI * -173.0) / 180,
+      pitch: (Math.PI * -17.0) / 180,
+    },
+    ease: { name: "sineInOut" },
   },
   {
     name: "stop-4",
@@ -90,12 +100,6 @@ const seedWaypoints = [
     },
     ease: { name: "sineInOut" },
     isAnchor: true,
-  },
-  {
-    name: "stop-8-9-left",
-    position: [-1.847, -4.305, -2.286],
-    orientation: { yaw: (Math.PI * 46.2) / 180, pitch: (Math.PI * -1.0) / 180 },
-    ease: { name: "sineInOut" },
   },
   {
     name: "stop-9",
@@ -181,6 +185,48 @@ const seedWaypoints = [
     ease: { name: "sineInOut" },
   },
   {
+    name: "stop-13c-arc-1",
+    position: [-2.3, -3.5, 0.75],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-2",
+    position: [-3.45, -3.6, 0.0],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-3",
+    position: [-4.1, -3.72, -1.35],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-4",
+    position: [-4.279, -3.8, -3.588],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-5",
+    position: [-2.662, -3.8, -5.204],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-6",
+    position: [-0.385, -3.78, -5.007],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
+    name: "stop-13c-arc-7",
+    position: [-0.11, -3.77, -4.8],
+    orientation: { lookAt: [-1.737, -4.114, -2.663] },
+    ease: { name: "sineInOut" },
+  },
+  {
     name: "stop-14",
     position: [-0.63, -3.763, -4.098],
     orientation: {
@@ -204,7 +250,7 @@ const seedWaypoints = [
     name: "stop-15-spin-90",
     position: [-1.77, -2.427, -2.556],
     orientation: {
-      yaw: (Math.PI * 89.5) / 180,
+      yaw: (Math.PI * 269.5) / 180,
       pitch: (Math.PI * -89.8) / 180,
     },
     ease: { name: "sineInOut" },
@@ -222,7 +268,7 @@ const seedWaypoints = [
     name: "stop-15-spin-270",
     position: [-1.77, -2.427, -2.556],
     orientation: {
-      yaw: (Math.PI * 269.5) / 180,
+      yaw: (Math.PI * 89.5) / 180,
       pitch: (Math.PI * -89.8) / 180,
     },
     ease: { name: "sineInOut" },
@@ -358,96 +404,199 @@ const seedWaypoints = [
 // ---------------------- helpers ----------------------
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
+const isBrowser = typeof window !== "undefined";
 
-export const useCameraStore = create((set, get) => ({
-  waypoints: seedWaypoints,
+const tDriver = { value: 0 };
+const scrollState = { velocity: 0 };
 
-  // normalized [0..1]
-  t: 0,
+export const useCameraStore = create((set, get) => {
+  const localScrollState = scrollState;
+  let velocityTween = null;
+  let tickerActive = false;
 
-  // flags
-  enabled: false,
-  paused: false,
-  locked: false,
+  const stopTicker = () => {
+    if (!tickerActive) return;
+    gsap.ticker.remove(tick);
+    tickerActive = false;
+  };
 
-  // segment-aware sensitivity (unit baseline). Keep magnitudeMap micro; use GlobalSS as macro multiplier.
-  globalSS: 1.68,
-  localSSPercent: {},
+  function tick() {
+    if (!isBrowser) {
+      stopTicker();
+      return;
+    }
 
-  // Magnitude → Glide mapping (new)
-  magnitudeMap: {
-    baseStep: 100, // typical wheel notch size
-    scaleFactor: 0.0015, // |deltaY|=100 → 0.0015 t immediate step (micro)
-    power: 1.0, // 1 = linear; >1 flattens small flicks; <1 boosts them
-    minImpulse: 0.0,
-    maxStep: 0.02, // cap immediate step
-  },
+    const { enabled, paused, locked, scrollDynamics } = get();
+    const dynamics = scrollDynamics ?? {};
 
-  // overlays / gizmos (kept)
-  gizmos: Object.fromEntries(seedWaypoints.map((w) => [w.name ?? "wp", false])),
+    if (!enabled || paused || locked) {
+      if (
+        (!velocityTween || !velocityTween.isActive()) &&
+        Math.abs(localScrollState.velocity) <=
+          (dynamics.minVelocityThreshold ?? 1e-4)
+      ) {
+        stopTicker();
+      }
+      return;
+    }
 
-  // ---------- setters (with backward compatibility) ----------
-  setT: (t) => set({ t: clamp01(t) }),
-  setEnabled: (v) => set({ enabled: !!v }),
-  setPaused: (v) => set({ paused: !!v }),
-  setLocked: (v) => set({ locked: !!v }),
+    const deltaRatio = gsap.ticker.deltaRatio();
+    const dt = (deltaRatio / 60) * (dynamics.timeScale ?? 1);
+    if (dt <= 0) return;
 
-  // restored for your UI
-  setGlobalSS: (v) => set({ globalSS: Math.max(0, Math.min(5, v)) }),
-  setLocalSSPercent: (index, v) =>
-    set((s) => ({ localSSPercent: { ...s.localSSPercent, [index]: v } })),
+    const velocityThreshold = dynamics.minVelocityThreshold ?? 1e-4;
+    const velocity = localScrollState.velocity;
 
-  setMagnitudeMap: (patch) =>
-    set((s) => ({ magnitudeMap: { ...s.magnitudeMap, ...patch } })),
+    if (Math.abs(velocity) <= velocityThreshold) {
+      localScrollState.velocity = 0;
+      if (!velocityTween || !velocityTween.isActive()) {
+        stopTicker();
+      }
+      return;
+    }
 
-  setGizmo: (name, v) => set((s) => ({ gizmos: { ...s.gizmos, [name]: !!v } })),
-  toggleGizmo: (name) =>
-    set((s) => ({ gizmos: { ...s.gizmos, [name]: !s.gizmos[name] } })),
+    const velocityDtScale = dynamics.velocityDtScale ?? 1;
+    let nextT = tDriver.value + velocity * velocityDtScale * dt;
 
-  jumpToWaypoint: (index) => {
-    const waypoints = get().waypoints;
-    const count = waypoints.length;
-    if (count <= 1) return;
-    const nSeg = count - 1;
-    const clamped = Math.max(0, Math.min(count - 1, index));
-    const t = clamped / nSeg;
-    set({ t });
-  },
+    if (nextT <= 0 || nextT >= 1) {
+      nextT = clamp01(nextT);
+      localScrollState.velocity = 0;
+      if (velocityTween) {
+        velocityTween.kill();
+        velocityTween = null;
+      }
+    }
 
-  // ---------- wheel input → direct step ----------
-  applyWheel: (deltaY) => {
-    const state = get();
-    if (!state.enabled || state.paused || deltaY === 0) return;
+    if (Math.abs(nextT - tDriver.value) > 1e-6) {
+      tDriver.value = nextT;
+      set({ t: nextT });
+    }
 
-    const dir = deltaY < 0 ? +1 : -1;
-    const mag = Math.abs(deltaY);
+    if (
+      (!velocityTween || !velocityTween.isActive()) &&
+      Math.abs(localScrollState.velocity) <= velocityThreshold
+    ) {
+      stopTicker();
+    }
+  }
 
-    const { baseStep, scaleFactor, power, minImpulse, maxStep } =
-      state.magnitudeMap;
+  const ensureTicker = () => {
+    if (!isBrowser) return;
+    if (tickerActive) return;
+    tickerActive = true;
+    gsap.ticker.add(tick);
+  };
 
-    const steps = mag / Math.max(1, baseStep);
-    let stepSize =
-      Math.pow(steps, Math.max(0.001, power)) * Math.max(0, scaleFactor);
+  return {
+    waypoints: seedWaypoints,
 
-    const segIndex = state.getSegmentIndex();
-    const sens = state.getEffectiveSensitivity(segIndex);
-    stepSize *= sens > 1e-4 ? sens : 1.0;
+    // normalized [0..1]
+    t: 0,
 
-    if (stepSize < (minImpulse ?? 0)) return;
-    stepSize = Math.min(stepSize, maxStep ?? 0.02);
+    // flags
+    enabled: false,
+    paused: false,
+    locked: false,
 
-    set((s) => {
+    // segment-aware sensitivity (unit baseline). Keep magnitudeMap micro; use GlobalSS as macro multiplier.
+    globalSS: 1.68,
+    localSSPercent: {},
+
+    // Magnitude → Glide mapping (new)
+    magnitudeMap: {
+      baseStep: 100, // typical wheel notch size
+      scaleFactor: 0.0015, // |deltaY|=100 → 0.0015 t immediate step (micro)
+      power: 1.0, // 1 = linear; >1 flattens small flicks; <1 boosts them
+      minImpulse: 0.0,
+      maxStep: 0.03, // cap immediate step
+    },
+
+    scrollDynamics: {
+      immediateStepRatio: 0.32,
+      velocityScale: 7.5,
+      maxVelocity: 0.24,
+      minVelocityThreshold: 0.0006,
+      velocityDecay: 1.05,
+      velocityEase: "power3.out",
+      timeScale: 1,
+      velocityDtScale: 1,
+    },
+
+    // overlays / gizmos (kept)
+    gizmos: Object.fromEntries(
+      seedWaypoints.map((w) => [w.name ?? "wp", false])
+    ),
+
+    // ---------- setters (with backward compatibility) ----------
+    setT: (t) => {
+      const tt = clamp01(t);
+      localScrollState.velocity = 0;
+      if (velocityTween) {
+        velocityTween.kill();
+        velocityTween = null;
+      }
+      stopTicker();
+      tDriver.value = tt;
+      set({ t: tt });
+    },
+    setEnabled: (v) => set({ enabled: !!v }),
+    setPaused: (v) => set({ paused: !!v }),
+    setLocked: (v) => set({ locked: !!v }),
+
+    // restored for your UI
+    setGlobalSS: (v) => set({ globalSS: Math.max(0, Math.min(5, v)) }),
+    setLocalSSPercent: (index, v) =>
+      set((s) => ({ localSSPercent: { ...s.localSSPercent, [index]: v } })),
+
+    setMagnitudeMap: (patch) =>
+      set((s) => ({ magnitudeMap: { ...s.magnitudeMap, ...patch } })),
+
+    setScrollDynamics: (patch) =>
+      set((s) => ({ scrollDynamics: { ...s.scrollDynamics, ...patch } })),
+
+    setGizmo: (name, v) =>
+      set((s) => ({ gizmos: { ...s.gizmos, [name]: !!v } })),
+    toggleGizmo: (name) =>
+      set((s) => ({ gizmos: { ...s.gizmos, [name]: !s.gizmos[name] } })),
+
+    jumpToWaypoint: (index) => {
+      const waypoints = get().waypoints;
+      const count = waypoints.length;
+      if (count <= 1) return;
+      const nSeg = count - 1;
+      const clamped = Math.max(0, Math.min(count - 1, index));
+      const t = clamped / nSeg;
+      get().setT(t);
+    },
+
+    // ---------- wheel input → direct step ----------
+    applyWheel: (deltaY) => {
+      const state = get();
+      if (!state.enabled || state.paused || state.locked || deltaY === 0)
+        return;
+
+      const dir = deltaY < 0 ? +1 : -1;
+      const mag = Math.abs(deltaY);
+
+      const { baseStep, scaleFactor, power, minImpulse, maxStep } =
+        state.magnitudeMap;
+
+      const steps = mag / Math.max(1, baseStep);
+      let stepSize =
+        Math.pow(steps, Math.max(0.001, power)) * Math.max(0, scaleFactor);
+
+      const segIndex = state.getSegmentIndex();
+      const sens = state.getEffectiveSensitivity(segIndex);
+      stepSize *= sens > 1e-4 ? sens : 1.0;
+
+      if (stepSize < (minImpulse ?? 0)) return;
+      stepSize = Math.min(stepSize, maxStep ?? 0.03);
+
       let totalStep = stepSize;
-      const slip = s.microSlip ?? {};
+      const slip = state.microSlip ?? {};
       if (slip.enabled) {
-        const wps = s.waypoints;
-        const nSeg = Math.max(0, wps.length - 1);
-        let i = nSeg > 0 ? Math.floor(s.t * nSeg) : 0;
-        i = clamp(i, 0, Math.max(0, nSeg - 1));
-        const tCurr = nSeg > 0 ? i / nSeg : 0;
-        const tNext = nSeg > 0 ? (i + 1) / nSeg : 1;
         const remaining =
-          dir > 0 ? Math.max(0, tNext - s.t) : Math.max(0, s.t - tCurr);
+          dir > 0 ? Math.max(0, 1 - state.t) : Math.max(0, state.t);
         const y = Math.min(
           Math.abs(stepSize) * (slip.frac ?? 0.25),
           slip.maxSlip ?? 0.005,
@@ -456,54 +605,67 @@ export const useCameraStore = create((set, get) => ({
         totalStep = stepSize + y;
       }
 
-      const wps2 = s.waypoints;
-      const nSeg2 = Math.max(0, wps2.length - 1);
-      let t;
-      if (nSeg2 > 0) {
-        const EPS = 1e-6;
-        let ii = Math.floor(s.t * nSeg2);
-        ii = clamp(ii, 0, Math.max(0, nSeg2 - 1));
-        let tMin = ii / nSeg2;
-        let tMax = (ii + 1) / nSeg2;
-        if (dir > 0 && Math.abs(s.t - tMax) <= EPS && ii < nSeg2 - 0) {
-          const jj = Math.min(ii + 1, nSeg2 - 1);
-          tMin = jj / nSeg2;
-          tMax = (jj + 1) / nSeg2;
-        } else if (dir < 0 && Math.abs(s.t - tMin) <= EPS && ii > 0) {
-          const jj = Math.max(ii - 1, 0);
-          tMin = jj / nSeg2;
-          tMax = (jj + 1) / nSeg2;
-        }
-        const tTarget = s.t + dir * totalStep;
-        const tBound = clamp(tTarget, tMin, tMax);
-        t = clamp01(tBound);
-      } else {
-        t = clamp01(s.t + dir * totalStep);
-      }
-      return { t };
-    });
-  },
+      const dynamics = state.scrollDynamics ?? {};
+      const immediateRatio = clamp01(dynamics.immediateStepRatio ?? 0.3);
+      const inertiaRatio = 1 - immediateRatio;
 
-  // ---------- Derived selectors ----------
-  getPose: (t) => {
-    const waypoints = get().waypoints;
-    const baseT = t ?? get().t;
-    const tt = clamp01(baseT);
-    const { position, quaternion, fov, segmentIndex } = getPoseAt(
-      waypoints,
-      tt
-    );
-    return { position, quaternion, fov, segmentIndex };
-  },
-  getSegmentIndex: (t) => {
-    const wps = get().waypoints;
-    const { i } = segmentAt(t ?? get().t, wps.length);
-    return i;
-  },
-  getEffectiveSensitivity: (segmentIndex) => {
-    const g = get().globalSS ?? 1.0;
-    const p = get().localSSPercent?.[segmentIndex] ?? 0;
-    const eff = g * (1 + p / 100);
-    return Math.max(0, eff);
-  },
-}));
+      const immediateDelta = dir * totalStep * immediateRatio;
+      const baseT = clamp01(state.t + immediateDelta);
+      tDriver.value = baseT;
+      set({ t: baseT });
+
+      if (!isBrowser) return;
+
+      const impulse = dir * totalStep * inertiaRatio;
+      const velocityScale = dynamics.velocityScale ?? 6.5;
+      const maxVelocity = dynamics.maxVelocity ?? 0.22;
+
+      localScrollState.velocity += impulse * velocityScale;
+      localScrollState.velocity = clamp(
+        localScrollState.velocity,
+        -maxVelocity,
+        maxVelocity
+      );
+
+      if (velocityTween) {
+        velocityTween.kill();
+      }
+
+      const velocityDecay = dynamics.velocityDecay ?? 1.0;
+      velocityTween = gsap.to(localScrollState, {
+        velocity: 0,
+        duration: velocityDecay,
+        ease: dynamics.velocityEase ?? "power3.out",
+        overwrite: "auto",
+        onComplete: () => {
+          velocityTween = null;
+        },
+      });
+
+      ensureTicker();
+    },
+
+    // ---------- Derived selectors ----------
+    getPose: (t) => {
+      const waypoints = get().waypoints;
+      const baseT = t ?? get().t;
+      const tt = clamp01(baseT);
+      const { position, quaternion, fov, segmentIndex } = getPoseAt(
+        waypoints,
+        tt
+      );
+      return { position, quaternion, fov, segmentIndex };
+    },
+    getSegmentIndex: (t) => {
+      const wps = get().waypoints;
+      const { i } = segmentAt(t ?? get().t, wps.length);
+      return i;
+    },
+    getEffectiveSensitivity: (segmentIndex) => {
+      const g = get().globalSS ?? 1.0;
+      const p = get().localSSPercent?.[segmentIndex] ?? 0;
+      const eff = g * (1 + p / 100);
+      return Math.max(0, eff);
+    },
+  };
+});
