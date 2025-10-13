@@ -335,70 +335,6 @@ const seedWaypoints = [
     ease: { name: "sineInOut" },
     isAnchor: true,
   },
-  {
-    name: "seq-1",
-    position: [-1.42, -3.363, -2.194],
-    orientation: { yaw: (Math.PI * 137.3) / 180, pitch: (Math.PI * 8.0) / 180 },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-2",
-    position: [-2.429, -4.394, -1.081],
-    orientation: {
-      yaw: (Math.PI * 135.0) / 180,
-      pitch: (Math.PI * 31.2) / 180,
-    },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-2-3-mid",
-    position: [-5.2935, -3.9515, -1.083],
-    orientation: {
-      yaw: (Math.PI * 93.75) / 180,
-      pitch: (Math.PI * 15.1) / 180,
-    },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-3",
-    position: [-8.158, -3.509, -1.085],
-    orientation: { yaw: (Math.PI * 52.5) / 180, pitch: (Math.PI * -1.0) / 180 },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-3-4-mid",
-    position: [-8.735, -3.2895, -2.3175],
-    orientation: {
-      yaw: (Math.PI * 23.05) / 180,
-      pitch: (Math.PI * 11.25) / 180,
-    },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-4",
-    position: [-9.312, -3.07, -3.55],
-    orientation: { yaw: (Math.PI * -6.4) / 180, pitch: (Math.PI * 23.5) / 180 },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "seq-4-last-mid",
-    position: [-9.6, -2.95, -3.95],
-    orientation: {
-      yaw: (Math.PI * -13.2) / 180,
-      pitch: (Math.PI * 14.25) / 180,
-    },
-    ease: { name: "sineInOut" },
-  },
-  {
-    name: "last-stop",
-    position: [-9.45, -2.62, -4.45],
-    orientation: {
-      yaw: (Math.PI * -20.0) / 180,
-      pitch: (Math.PI * 15.0) / 180,
-    },
-    ease: { name: "sineInOut" },
-    isAnchor: true,
-  },
 ];
 
 // ---------------------- helpers ----------------------
@@ -408,6 +344,72 @@ const isBrowser = typeof window !== "undefined";
 
 const tDriver = { value: 0 };
 const scrollState = { velocity: 0 };
+
+// -------- Arch (post ring-close) helpers --------
+const deg = (d) => (Math.PI * d) / 180;
+function buildArchWaypoints(ringClose, cfg) {
+  const {
+    count = 5,
+    spacing = 1.2, // distance between points along the forward direction
+    height = 0.9, // peak height above ring-close.y
+    maxUpDeg = 45, // maximum upward pitch in degrees
+    peakAtIndex = 2, // 0..count-1 index where the height and pitch peak
+  } = cfg || {};
+
+  // Direction: use ring-close yaw to create a colinear forward axis
+  const yaw = ringClose.orientation?.yaw ?? deg(145.5);
+  // Use forward vector aligned with yaw. Flip sign so we move forward from ring-close (not backward)
+  const forwardSign = -1;
+  const dir = [Math.sin(yaw) * forwardSign, 0, Math.cos(yaw) * forwardSign];
+
+  // Side view arch: use a smooth arch profile (sine) peaking at peakAtIndex
+  const archHeights = Array.from({ length: count }, (_, i) => {
+    const t = count <= 1 ? 0 : i / (count - 1);
+    // remap peak position
+    const tPeak = peakAtIndex / Math.max(1, count - 1);
+    // Use two half-sines joined at the peak for adjustable peak position
+    if (t <= tPeak) {
+      const tt = tPeak > 0 ? t / tPeak : 0;
+      return Math.sin(tt * Math.PI * 0.5) * height;
+    } else {
+      const tt = tPeak < 1 ? (t - tPeak) / (1 - tPeak) : 0;
+      return Math.sin((1 - tt) * Math.PI * 0.5) * height;
+    }
+  });
+
+  // Pitch profile: ramp up to maxUpDeg at peak, then ramp down to ring-close pitch
+  const basePitch = ringClose.orientation?.pitch ?? deg(-2);
+  const maxPitch = deg(Math.min(85, Math.max(0, maxUpDeg))); // cap for safety
+  const pitches = Array.from({ length: count }, (_, i) => {
+    const t = count <= 1 ? 0 : i / (count - 1);
+    const tPeak = peakAtIndex / Math.max(1, count - 1);
+    const up =
+      t <= tPeak
+        ? tPeak > 0
+          ? t / tPeak
+          : 0
+        : tPeak < 1
+        ? 1 - (t - tPeak) / (1 - tPeak)
+        : 0;
+    const pitch = basePitch + (maxPitch - basePitch) * up;
+    return pitch;
+  });
+
+  // Build points colinear with ring-close
+  const seq = [];
+  for (let i = 0; i < count; i++) {
+    const x = ringClose.position[0] + dir[0] * spacing * (i + 1);
+    const y = ringClose.position[1] + archHeights[i];
+    const z = ringClose.position[2] + dir[2] * spacing * (i + 1);
+    seq.push({
+      name: `seq-arch-${i + 1}`,
+      position: [x, y, z],
+      orientation: { yaw, pitch: pitches[i] },
+      ease: { name: "sineInOut" },
+    });
+  }
+  return seq;
+}
 
 export const useCameraStore = create((set, get) => {
   const localScrollState = scrollState;
@@ -487,8 +489,27 @@ export const useCameraStore = create((set, get) => {
     gsap.ticker.add(tick);
   };
 
+  // Build initial arch after ring-close
+  const defaultArchConfig = {
+    count: 5,
+    spacing: 1.2,
+    height: 0.9,
+    maxUpDeg: 45,
+    peakAtIndex: 2,
+  };
+  const rcIndexSeed = seedWaypoints.findIndex((w) => w.name === "ring-close");
+  const initialWaypoints =
+    rcIndexSeed >= 0
+      ? seedWaypoints
+          .slice(0, rcIndexSeed + 1)
+          .concat(
+            buildArchWaypoints(seedWaypoints[rcIndexSeed], defaultArchConfig)
+          )
+      : seedWaypoints;
+
   return {
-    waypoints: seedWaypoints,
+    waypoints: initialWaypoints,
+    archConfig: defaultArchConfig,
 
     // normalized [0..1]
     t: 0,
@@ -553,6 +574,22 @@ export const useCameraStore = create((set, get) => {
 
     setScrollDynamics: (patch) =>
       set((s) => ({ scrollDynamics: { ...s.scrollDynamics, ...patch } })),
+
+    setArchConfig: (patch) =>
+      set((s) => ({ archConfig: { ...s.archConfig, ...patch } })),
+
+    rebuildArch: () => {
+      set((s) => {
+        const wps = s.waypoints.slice();
+        const rcIndex = wps.findIndex((w) => w.name === "ring-close");
+        if (rcIndex < 0) return {};
+        // Drop everything after ring-close
+        const head = wps.slice(0, rcIndex + 1);
+        const ringClose = wps[rcIndex];
+        const archSeq = buildArchWaypoints(ringClose, s.archConfig);
+        return { waypoints: head.concat(archSeq) };
+      });
+    },
 
     setGizmo: (name, v) =>
       set((s) => ({ gizmos: { ...s.gizmos, [name]: !!v } })),

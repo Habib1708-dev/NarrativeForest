@@ -42,6 +42,9 @@ import { useCameraStore } from "./state/useCameraStore";
 export default function Experience() {
   const { gl } = useThree();
   const enabled = useCameraStore((s) => s.enabled);
+  const archConfig = useCameraStore((s) => s.archConfig);
+  const setArchConfig = useCameraStore((s) => s.setArchConfig);
+  const rebuildArch = useCameraStore((s) => s.rebuildArch);
 
   // ==== REFS ====
   const cabinRef = useRef(null);
@@ -144,6 +147,34 @@ export default function Experience() {
       // Lightning controls moved to "Sky / Lightning" folder inside CustomSky
     }),
   });
+
+  // Arch controls
+  const archControls = useControls(
+    "Post Ring Arch",
+    {
+      spacing: { value: archConfig.spacing, min: 0.2, max: 5, step: 0.05 },
+      height: { value: archConfig.height, min: 0, max: 5, step: 0.01 },
+      maxUpDeg: { value: archConfig.maxUpDeg, min: 0, max: 85, step: 1 },
+      peakAtIndex: {
+        value: archConfig.peakAtIndex,
+        min: 0,
+        max: Math.max(0, (archConfig.count ?? 5) - 1),
+        step: 1,
+      },
+    },
+    { collapsed: true }
+  );
+
+  useEffect(() => {
+    setArchConfig(archControls);
+    rebuildArch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    archControls.spacing,
+    archControls.height,
+    archControls.maxUpDeg,
+    archControls.peakAtIndex,
+  ]);
 
   // Build occluders list (don’t include the lake)
   const occluders = useMemo(
