@@ -408,6 +408,19 @@ function buildArchWaypoints(ringClose, cfg) {
       ease: { name: "sineInOut" },
     });
   }
+  // Override final waypoint with user-specified camera pose
+  if (seq.length > 0) {
+    const last = seq.length - 1;
+    seq[last] = {
+      name: `seq-arch-${last + 1}`,
+      position: [-10.039, -2.816, 9.416],
+      orientation: {
+        yaw: (Math.PI * 145.5) / 180,
+        pitch: (Math.PI * 8.0) / 180,
+      },
+      ease: { name: "sineInOut" },
+    };
+  }
   return seq;
 }
 
@@ -492,9 +505,9 @@ export const useCameraStore = create((set, get) => {
   // Build initial arch after ring-close
   const defaultArchConfig = {
     count: 5,
-    spacing: 1.2,
-    height: 0.9,
-    maxUpDeg: 45,
+    spacing: 3.3,
+    height: 2.68,
+    maxUpDeg: 30,
     peakAtIndex: 2,
   };
   const rcIndexSeed = seedWaypoints.findIndex((w) => w.name === "ring-close");

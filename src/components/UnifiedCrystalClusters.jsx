@@ -706,10 +706,23 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     const nearestIdx = Math.round(t * nSeg);
     return nearestIdx;
   });
+  const stop15DownIndex = useCameraStore((state) => {
+    const wps = state.waypoints || [];
+    return wps.findIndex((w) => w?.name === "stop-15-down");
+  });
 
   // Determine if crystals should be built based on waypoint position
   useEffect(() => {
-    const stop15DownIndex = 21; // stop-15-down is at index 21 in the waypoints array
+    if (stop15DownIndex < 0) {
+      // If stop-15-down not found yet, keep dissolving out
+      if (shouldBuildRef.current !== false) {
+        shouldBuildRef.current = false;
+        console.warn(
+          "💎 stop-15-down not found in waypoints; crystals kept dissolved out."
+        );
+      }
+      return;
+    }
 
     // Build if at stop-15-down or beyond, dissolve if before stop-15-down
     const shouldBuild =
@@ -719,11 +732,11 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       shouldBuildRef.current = shouldBuild;
       console.log(
         shouldBuild
-          ? `💎 Camera at waypoint ${currentWaypointIndex} (>= stop-15-down): Building crystals...`
-          : `💎 Camera at waypoint ${currentWaypointIndex} (< stop-15-down): Dissolving crystals...`
+          ? `💎 Camera at waypoint ${currentWaypointIndex} (>= stop-15-down index ${stop15DownIndex}): Building crystals...`
+          : `💎 Camera at waypoint ${currentWaypointIndex} (< stop-15-down index ${stop15DownIndex}): Dissolving crystals...`
       );
     }
-  }, [currentWaypointIndex]);
+  }, [currentWaypointIndex, stop15DownIndex]);
 
   const materialA = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
   const materialB = useUnifiedCrystalMaterial(unified, dissolve, progressRef);

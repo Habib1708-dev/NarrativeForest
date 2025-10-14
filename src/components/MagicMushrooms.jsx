@@ -159,7 +159,7 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const progressRef = useRef(-0.2);
   const shouldBuildRef = useRef(false);
 
-  // Subscribe to camera store to detect stop-14 and beyond
+  // Subscribe to camera store to detect current nearest waypoint index and the index of stop-14
   const currentWaypointIndex = useCameraStore((state) => {
     const waypoints = state.waypoints || [];
     const t = state.t ?? 0;
@@ -169,10 +169,23 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     const nearestIdx = Math.round(t * nSeg);
     return nearestIdx;
   });
+  const stop14Index = useCameraStore((state) => {
+    const wps = state.waypoints || [];
+    return wps.findIndex((w) => w?.name === "stop-14");
+  });
 
   // Determine if mushrooms should be built based on waypoint position
   useEffect(() => {
-    const stop14Index = 20; // stop-14 is at index 20 in the waypoints array
+    if (stop14Index < 0) {
+      // If stop-14 not found yet, keep dissolving out
+      if (shouldBuildRef.current !== false) {
+        shouldBuildRef.current = false;
+        console.warn(
+          "🍄 stop-14 not found in waypoints; mushrooms kept dissolved out."
+        );
+      }
+      return;
+    }
 
     // Build if at stop-14 or beyond, dissolve if before stop-14
     const shouldBuild =
@@ -182,11 +195,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       shouldBuildRef.current = shouldBuild;
       console.log(
         shouldBuild
-          ? `🍄 Camera at waypoint ${currentWaypointIndex} (>= stop-14): Building mushrooms...`
-          : `🍄 Camera at waypoint ${currentWaypointIndex} (< stop-14): Dissolving mushrooms...`
+          ? `🍄 Camera at waypoint ${currentWaypointIndex} (>= stop-14 index ${stop14Index}): Building mushrooms...`
+          : `🍄 Camera at waypoint ${currentWaypointIndex} (< stop-14 index ${stop14Index}): Dissolving mushrooms...`
       );
     }
-  }, [currentWaypointIndex]);
+  }, [currentWaypointIndex, stop14Index]);
 
   const dissolveCtl = useControls({
     Mushrooms: folder(
