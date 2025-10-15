@@ -1,6 +1,7 @@
 // src/state/useCameraStore.js
 import { create } from "zustand";
 import { gsap } from "gsap";
+import * as THREE from "three";
 import { getPoseAt, segmentAt } from "../utils/cameraInterp";
 
 /**
@@ -345,6 +346,20 @@ const isBrowser = typeof window !== "undefined";
 const tDriver = { value: 0 };
 const scrollState = { velocity: 0 };
 
+const LAST_T_THRESHOLD = 0.999;
+const createFreeFlyState = () => ({
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+  fov: 50,
+  dragging: false,
+  lastPointer: null,
+  velocity: new THREE.Vector3(),
+  joystick: {
+    origin: null,
+    input: { x: 0, y: 0 },
+  },
+});
+
 // -------- Arch (post ring-close) helpers --------
 const deg = (d) => (Math.PI * d) / 180;
 function buildArchWaypoints(ringClose, cfg) {
@@ -441,7 +456,34 @@ export const useCameraStore = create((set, get) => {
       return;
     }
 
-    const { enabled, paused, locked, scrollDynamics } = get();
+    const state = get();
+    const { mode } = state;
+
+    if (mode === "freeFly") {
+      const freeFly = state.freeFly;
+      const deltaRatio = gsap.ticker.deltaRatio();
+      const dt = (deltaRatio / 60) * (state.freeFlyTimeScale ?? 1);
+      if (!freeFly || !freeFly.dragging) {
+        stopTicker();
+        return;
+      }
+      if (dt <= 0) return;
+      const velocity = freeFly.velocity ?? new THREE.Vector3();
+      if (velocity.lengthSq() <= 1e-6) {
+        stopTicker();
+        return;
+      }
+      const nextPos = freeFly.position.clone().addScaledVector(velocity, dt);
+      set({
+        freeFly: {
+          ...freeFly,
+          position: nextPos,
+        },
+      });
+      return;
+    }
+
+    const { enabled, paused, locked, scrollDynamics } = state;
     const dynamics = scrollDynamics ?? {};
 
     if (!enabled || paused || locked) {
@@ -485,6 +527,7 @@ export const useCameraStore = create((set, get) => {
     if (Math.abs(nextT - tDriver.value) > 1e-6) {
       tDriver.value = nextT;
       set({ t: nextT });
+      maybeActivateFreeFly(nextT);
     }
 
     if (
@@ -500,6 +543,35 @@ export const useCameraStore = create((set, get) => {
     if (tickerActive) return;
     tickerActive = true;
     gsap.ticker.add(tick);
+  };
+
+  const activateFreeFly = () => {
+    const state = get();
+    if (state.mode === "freeFly") return;
+    const pose = getPoseAt(state.waypoints, 1);
+    const nextFreeFly = createFreeFlyState();
+    nextFreeFly.position.copy(pose.position);
+    nextFreeFly.quaternion.copy(pose.quaternion);
+    nextFreeFly.fov = pose.fov;
+
+    localScrollState.velocity = 0;
+    if (velocityTween) {
+      velocityTween.kill();
+      velocityTween = null;
+    }
+    stopTicker();
+    tDriver.value = 1;
+    set({
+      mode: "freeFly",
+      freeFly: nextFreeFly,
+      t: 1,
+    });
+  };
+
+  const maybeActivateFreeFly = (tValue) => {
+    if (tValue >= LAST_T_THRESHOLD) {
+      activateFreeFly();
+    }
   };
 
   // Build initial arch after ring-close
@@ -526,6 +598,18 @@ export const useCameraStore = create((set, get) => {
 
     // normalized [0..1]
     t: 0,
+
+    mode: "path",
+    freeFly: createFreeFlyState(),
+    freeFlyDragScale: 0.02,
+    freeFlySpeed: 4.0,
+    freeFlyMinStrength: 0.3,
+    freeFlyTimeScale: 1,
+    freeFlyJoystickRadius: 120,
+    freeFlyJoystickInnerScale: 0.35,
+    freeFlyDeadZone: 0.05,
+    freeFlyStrengthPower: 0.85,
+    freeFlyStrengthScale: 1.0,
 
     // flags
     enabled: false,
@@ -556,6 +640,12 @@ export const useCameraStore = create((set, get) => {
       velocityDtScale: 1,
     },
 
+    // Scenic pause tuning around anchor stops (exposed via Leva)
+    scenic: false,
+    scenicDwellMs: 600,
+    scenicSnapRadius: 0.02,
+    scenicResist: 0.4,
+
     // overlays / gizmos (kept)
     gizmos: Object.fromEntries(
       seedWaypoints.map((w) => [w.name ?? "wp", false])
@@ -572,6 +662,7 @@ export const useCameraStore = create((set, get) => {
       stopTicker();
       tDriver.value = tt;
       set({ t: tt });
+      maybeActivateFreeFly(tt);
     },
     setEnabled: (v) => set({ enabled: !!v }),
     setPaused: (v) => set({ paused: !!v }),
@@ -588,6 +679,12 @@ export const useCameraStore = create((set, get) => {
     setScrollDynamics: (patch) =>
       set((s) => ({ scrollDynamics: { ...s.scrollDynamics, ...patch } })),
 
+    setScenic: (v) => set({ scenic: !!v }),
+    setScenicDwellMs: (v) => set({ scenicDwellMs: clamp(v ?? 0, 0, 2000) }),
+    setScenicSnapRadius: (v) =>
+      set({ scenicSnapRadius: clamp(v ?? 0, 0, 0.1) }),
+    setScenicResist: (v) => set({ scenicResist: clamp01(v ?? 0) }),
+
     setArchConfig: (patch) =>
       set((s) => ({ archConfig: { ...s.archConfig, ...patch } })),
 
@@ -602,6 +699,117 @@ export const useCameraStore = create((set, get) => {
         const archSeq = buildArchWaypoints(ringClose, s.archConfig);
         return { waypoints: head.concat(archSeq) };
       });
+    },
+
+    enterFreeFly: () => activateFreeFly(),
+    startFreeFlyDrag: (x, y) =>
+      set((s) => {
+        if (s.mode !== "freeFly") return {};
+        return {
+          freeFly: {
+            ...s.freeFly,
+            dragging: true,
+            lastPointer: { x, y },
+            joystick: {
+              origin: { x, y },
+              input: { x: 0, y: 0 },
+            },
+            velocity: new THREE.Vector3(),
+          },
+        };
+      }),
+    dragFreeFly: (x, y) => {
+      let shouldStartTicker = false;
+      set((s) => {
+        if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
+        const origin = s.freeFly.joystick?.origin;
+        const radius = Math.max(10, s.freeFlyJoystickRadius ?? 120);
+        const nextFreeFly = {
+          ...s.freeFly,
+          lastPointer: { x, y },
+        };
+        if (!origin) {
+          return { freeFly: nextFreeFly };
+        }
+
+        const rawX = x - origin.x;
+        const rawY = y - origin.y;
+        const vec2 = new THREE.Vector2(rawX, rawY);
+        const len = vec2.length();
+        if (len > radius) {
+          vec2.multiplyScalar(radius / len);
+        }
+        nextFreeFly.joystick = {
+          origin,
+          input: { x: vec2.x, y: vec2.y },
+        };
+
+        const norm = vec2.length() / radius;
+        const dead = s.freeFlyDeadZone ?? 0.05;
+        if (norm <= dead) {
+          nextFreeFly.velocity = new THREE.Vector3();
+          return { freeFly: nextFreeFly };
+        }
+
+        const quat = s.freeFly.quaternion;
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat).setY(0);
+        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+        right.normalize();
+        const forward = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(quat)
+          .setY(0);
+        if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+        forward.normalize();
+
+        const unitX = vec2.x / radius;
+        const unitY = vec2.y / radius;
+
+        const direction = new THREE.Vector3();
+        direction.addScaledVector(right, unitX);
+        direction.addScaledVector(forward, -unitY);
+
+        const dirLenSq = direction.lengthSq();
+        if (dirLenSq <= 1e-6) {
+          nextFreeFly.velocity = new THREE.Vector3();
+          return { freeFly: nextFreeFly };
+        }
+
+        direction.normalize();
+        const baseSpeed = s.freeFlySpeed ?? 4.0;
+        const minStrength = s.freeFlyMinStrength ?? 0.3;
+        const strengthPower = s.freeFlyStrengthPower ?? 0.85;
+        const strengthScale = s.freeFlyStrengthScale ?? 1.0;
+        const normalizedStrength = Math.pow(norm, strengthPower);
+        const strength =
+          Math.max(minStrength, normalizedStrength) * strengthScale;
+        const velocity = direction.multiplyScalar(baseSpeed * strength);
+        nextFreeFly.velocity = velocity;
+        shouldStartTicker = true;
+        return { freeFly: nextFreeFly };
+      });
+      if (shouldStartTicker) ensureTicker();
+    },
+    endFreeFlyDrag: () => {
+      let stopped = false;
+      set((s) => {
+        if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
+        stopped = true;
+        return {
+          freeFly: {
+            ...s.freeFly,
+            dragging: false,
+            lastPointer: null,
+            velocity: new THREE.Vector3(),
+            joystick: {
+              origin: null,
+              input: { x: 0, y: 0 },
+            },
+          },
+        };
+      });
+      if (stopped) {
+        stopTicker();
+      }
     },
 
     setGizmo: (name, v) =>
@@ -622,7 +830,13 @@ export const useCameraStore = create((set, get) => {
     // ---------- wheel input → direct step ----------
     applyWheel: (deltaY) => {
       const state = get();
-      if (!state.enabled || state.paused || state.locked || deltaY === 0)
+      if (
+        !state.enabled ||
+        state.paused ||
+        state.locked ||
+        deltaY === 0 ||
+        state.mode !== "path"
+      )
         return;
 
       const dir = deltaY < 0 ? +1 : -1;
@@ -663,6 +877,7 @@ export const useCameraStore = create((set, get) => {
       const baseT = clamp01(state.t + immediateDelta);
       tDriver.value = baseT;
       set({ t: baseT });
+      maybeActivateFreeFly(baseT);
 
       if (!isBrowser) return;
 
@@ -697,8 +912,18 @@ export const useCameraStore = create((set, get) => {
 
     // ---------- Derived selectors ----------
     getPose: (t) => {
-      const waypoints = get().waypoints;
-      const baseT = t ?? get().t;
+      const state = get();
+      if (state.mode === "freeFly") {
+        const { freeFly, waypoints } = state;
+        return {
+          position: freeFly.position.clone(),
+          quaternion: freeFly.quaternion.clone(),
+          fov: freeFly.fov,
+          segmentIndex: Math.max(0, waypoints.length - 2),
+        };
+      }
+      const waypoints = state.waypoints;
+      const baseT = t ?? state.t;
       const tt = clamp01(baseT);
       const { position, quaternion, fov, segmentIndex } = getPoseAt(
         waypoints,
@@ -707,8 +932,12 @@ export const useCameraStore = create((set, get) => {
       return { position, quaternion, fov, segmentIndex };
     },
     getSegmentIndex: (t) => {
-      const wps = get().waypoints;
-      const { i } = segmentAt(t ?? get().t, wps.length);
+      const state = get();
+      if (state.mode === "freeFly") {
+        return Math.max(0, state.waypoints.length - 2);
+      }
+      const wps = state.waypoints;
+      const { i } = segmentAt(t ?? state.t, wps.length);
       return i;
     },
     getEffectiveSensitivity: (segmentIndex) => {

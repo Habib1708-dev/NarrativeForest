@@ -59,6 +59,7 @@ export default function CameraControllerR3F() {
   const enabled = useCameraStore((s) => s.enabled);
   const locked = useCameraStore((s) => s.locked);
   const paused = useCameraStore((s) => s.paused);
+  const mode = useCameraStore((s) => s.mode);
   const waypoints = useCameraStore((s) => s.waypoints);
   const globalSS = useCameraStore((s) => s.globalSS);
   const getSegmentIndex = useCameraStore((s) => s.getSegmentIndex);
@@ -70,6 +71,9 @@ export default function CameraControllerR3F() {
   const scenicSnapRadius = useCameraStore((s) => s.scenicSnapRadius);
   const scenicResist = useCameraStore((s) => s.scenicResist);
   const applyWheel = useCameraStore((s) => s.applyWheel);
+  const startFreeFlyDrag = useCameraStore((s) => s.startFreeFlyDrag);
+  const dragFreeFly = useCameraStore((s) => s.dragFreeFly);
+  const endFreeFlyDrag = useCameraStore((s) => s.endFreeFlyDrag);
   const tRef = useRef(useCameraStore.getState().t ?? 0);
   const lastSegRef = useRef(-1);
 
@@ -267,14 +271,53 @@ export default function CameraControllerR3F() {
   // Scroll coupling: inertia model
   useEffect(() => {
     const onWheel = (e) => {
-      if (!useCameraStore.getState().enabled) return;
-      if (useCameraStore.getState().locked || useCameraStore.getState().paused)
-        return;
+      const store = useCameraStore.getState();
+      if (!store.enabled) return;
+      if (store.locked || store.paused) return;
+      if (store.mode !== "path") return;
       applyWheel(e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
   }, [applyWheel]);
+
+  useEffect(() => {
+    if (mode !== "freeFly") return;
+    let pointerActive = false;
+    const onPointerDown = (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
+      pointerActive = true;
+      e.preventDefault();
+      startFreeFlyDrag(e.clientX, e.clientY);
+    };
+    const onPointerMove = (e) => {
+      if (!pointerActive || !e.isPrimary) return;
+      e.preventDefault();
+      dragFreeFly(e.clientX, e.clientY);
+    };
+    const onPointerEnd = () => {
+      if (!pointerActive) return;
+      pointerActive = false;
+      endFreeFlyDrag();
+    };
+
+    window.addEventListener("pointerdown", onPointerDown, {
+      passive: false,
+    });
+    window.addEventListener("pointermove", onPointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+      endFreeFlyDrag();
+    };
+  }, [mode, startFreeFlyDrag, dragFreeFly, endFreeFlyDrag]);
 
   return (
     <>
