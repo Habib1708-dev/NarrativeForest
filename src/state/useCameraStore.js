@@ -2,7 +2,11 @@
 import { create } from "zustand";
 import { gsap } from "gsap";
 import * as THREE from "three";
-import { getPoseAt, segmentAt } from "../utils/cameraInterp";
+import {
+  getPoseAt,
+  segmentAt,
+  yawPitchFromQuaternion,
+} from "../utils/cameraInterp";
 
 /**
  * @typedef {Object} Waypoint
@@ -350,10 +354,17 @@ const LAST_T_THRESHOLD = 0.999;
 const createFreeFlyState = () => ({
   position: new THREE.Vector3(),
   quaternion: new THREE.Quaternion(),
+  yaw: 0,
+  pitch: 0,
   fov: 50,
+  speed: 0,
+  speedTarget: 0,
+  command: {
+    yawRate: 0,
+    pitchRate: 0,
+  },
   dragging: false,
   lastPointer: null,
-  velocity: new THREE.Vector3(),
   joystick: {
     origin: null,
     input: { x: 0, y: 0 },
@@ -463,23 +474,58 @@ export const useCameraStore = create((set, get) => {
       const freeFly = state.freeFly;
       const deltaRatio = gsap.ticker.deltaRatio();
       const dt = (deltaRatio / 60) * (state.freeFlyTimeScale ?? 1);
-      if (!freeFly || !freeFly.dragging) {
+      if (!freeFly) {
         stopTicker();
         return;
       }
       if (dt <= 0) return;
-      const velocity = freeFly.velocity ?? new THREE.Vector3();
-      if (velocity.lengthSq() <= 1e-6) {
+
+      const yawRate = freeFly.command?.yawRate ?? 0;
+      const pitchRate = freeFly.command?.pitchRate ?? 0;
+      const pitchMin = state.freeFlyPitchMin ?? deg(-80);
+      const pitchMax = state.freeFlyPitchMax ?? deg(80);
+      const speedResponse = state.freeFlySpeedResponse ?? 6.0;
+      const prevSpeed = freeFly.speed ?? 0;
+      const targetSpeed = Math.max(0, freeFly.speedTarget ?? 0);
+      const speed =
+        typeof THREE.MathUtils.damp === "function"
+          ? THREE.MathUtils.damp(prevSpeed, targetSpeed, speedResponse, dt)
+          : prevSpeed +
+            (targetSpeed - prevSpeed) * Math.min(1, speedResponse * dt);
+
+      let yaw = freeFly.yaw ?? 0;
+      let pitch = freeFly.pitch ?? 0;
+      yaw += yawRate * dt;
+      pitch = clamp(pitch + pitchRate * dt, pitchMin, pitchMax);
+
+      const quaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(pitch, yaw, 0, "YXZ")
+      );
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+      const nextPos = freeFly.position
+        .clone()
+        .addScaledVector(forward, speed * dt);
+
+      const nextFreeFly = {
+        ...freeFly,
+        position: nextPos,
+        quaternion,
+        yaw,
+        pitch,
+        speed,
+      };
+
+      set({ freeFly: nextFreeFly });
+
+      const moving =
+        speed > 1e-4 ||
+        Math.abs(yawRate) > 1e-4 ||
+        Math.abs(pitchRate) > 1e-4 ||
+        freeFly.dragging;
+
+      if (!moving) {
         stopTicker();
-        return;
       }
-      const nextPos = freeFly.position.clone().addScaledVector(velocity, dt);
-      set({
-        freeFly: {
-          ...freeFly,
-          position: nextPos,
-        },
-      });
       return;
     }
 
@@ -553,6 +599,9 @@ export const useCameraStore = create((set, get) => {
     nextFreeFly.position.copy(pose.position);
     nextFreeFly.quaternion.copy(pose.quaternion);
     nextFreeFly.fov = pose.fov;
+    const { yaw, pitch } = yawPitchFromQuaternion(pose.quaternion);
+    nextFreeFly.yaw = yaw;
+    nextFreeFly.pitch = pitch;
 
     localScrollState.velocity = 0;
     if (velocityTween) {
@@ -610,6 +659,11 @@ export const useCameraStore = create((set, get) => {
     freeFlyDeadZone: 0.05,
     freeFlyStrengthPower: 0.85,
     freeFlyStrengthScale: 1.0,
+    freeFlyYawRate: deg(85),
+    freeFlyPitchRate: deg(70),
+    freeFlyPitchMin: deg(-80),
+    freeFlyPitchMax: deg(80),
+    freeFlySpeedResponse: 6.0,
 
     // flags
     enabled: false,
@@ -714,7 +768,9 @@ export const useCameraStore = create((set, get) => {
               origin: { x, y },
               input: { x: 0, y: 0 },
             },
-            velocity: new THREE.Vector3(),
+            speed: 0,
+            command: { yawRate: 0, pitchRate: 0 },
+            speedTarget: 0,
           },
         };
       }),
@@ -746,60 +802,56 @@ export const useCameraStore = create((set, get) => {
 
         const norm = vec2.length() / radius;
         const dead = s.freeFlyDeadZone ?? 0.05;
-        if (norm <= dead) {
-          nextFreeFly.velocity = new THREE.Vector3();
-          return { freeFly: nextFreeFly };
-        }
-
-        const quat = s.freeFly.quaternion;
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat).setY(0);
-        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
-        right.normalize();
-        const forward = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(quat)
-          .setY(0);
-        if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
-        forward.normalize();
-
         const unitX = vec2.x / radius;
         const unitY = vec2.y / radius;
-
-        const direction = new THREE.Vector3();
-        direction.addScaledVector(right, unitX);
-        direction.addScaledVector(forward, -unitY);
-
-        const dirLenSq = direction.lengthSq();
-        if (dirLenSq <= 1e-6) {
-          nextFreeFly.velocity = new THREE.Vector3();
+        if (norm <= dead) {
+          nextFreeFly.command = { yawRate: 0, pitchRate: 0 };
+          nextFreeFly.speedTarget = 0;
+          shouldStartTicker = (s.freeFly.speed ?? 0) > 1e-4;
           return { freeFly: nextFreeFly };
         }
 
-        direction.normalize();
-        const baseSpeed = s.freeFlySpeed ?? 4.0;
         const minStrength = s.freeFlyMinStrength ?? 0.3;
         const strengthPower = s.freeFlyStrengthPower ?? 0.85;
         const strengthScale = s.freeFlyStrengthScale ?? 1.0;
-        const normalizedStrength = Math.pow(norm, strengthPower);
-        const strength =
-          Math.max(minStrength, normalizedStrength) * strengthScale;
-        const velocity = direction.multiplyScalar(baseSpeed * strength);
-        nextFreeFly.velocity = velocity;
-        shouldStartTicker = true;
+        const normalizedStrength = Math.pow(
+          norm,
+          Math.max(0.001, strengthPower)
+        );
+        const strength = clamp(
+          Math.max(minStrength, normalizedStrength) * strengthScale,
+          0,
+          1
+        );
+        const yawRateMax = s.freeFlyYawRate ?? deg(85);
+        const pitchRateMax = s.freeFlyPitchRate ?? deg(70);
+        const baseSpeed = s.freeFlySpeed ?? 4.0;
+
+        const yawRate = -yawRateMax * unitX * strength;
+        const pitchRate = -pitchRateMax * unitY * strength;
+        const speedTarget = baseSpeed * strength;
+
+        nextFreeFly.command = { yawRate, pitchRate };
+        nextFreeFly.speedTarget = speedTarget;
+
+        shouldStartTicker =
+          Math.abs(yawRate) > 1e-4 ||
+          Math.abs(pitchRate) > 1e-4 ||
+          speedTarget > 1e-4;
         return { freeFly: nextFreeFly };
       });
       if (shouldStartTicker) ensureTicker();
     },
     endFreeFlyDrag: () => {
-      let stopped = false;
       set((s) => {
         if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
-        stopped = true;
         return {
           freeFly: {
             ...s.freeFly,
             dragging: false,
             lastPointer: null,
-            velocity: new THREE.Vector3(),
+            command: { yawRate: 0, pitchRate: 0 },
+            speedTarget: 0,
             joystick: {
               origin: null,
               input: { x: 0, y: 0 },
@@ -807,9 +859,6 @@ export const useCameraStore = create((set, get) => {
           },
         };
       });
-      if (stopped) {
-        stopTicker();
-      }
     },
 
     setGizmo: (name, v) =>
