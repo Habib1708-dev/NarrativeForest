@@ -349,6 +349,9 @@ const isBrowser = typeof window !== "undefined";
 
 const tDriver = { value: 0 };
 const scrollState = { velocity: 0 };
+const terrainRaycaster = new THREE.Raycaster();
+terrainRaycaster.firstHitOnly = true;
+const terrainRayOrigin = new THREE.Vector3();
 
 const LAST_T_THRESHOLD = 0.999;
 const createFreeFlyState = () => ({
@@ -362,6 +365,10 @@ const createFreeFlyState = () => ({
   command: {
     yawRate: 0,
     pitchRate: 0,
+  },
+  turnRate: {
+    yaw: 0,
+    pitch: 0,
   },
   dragging: false,
   lastPointer: null,
@@ -480,8 +487,26 @@ export const useCameraStore = create((set, get) => {
       }
       if (dt <= 0) return;
 
-      const yawRate = freeFly.command?.yawRate ?? 0;
-      const pitchRate = freeFly.command?.pitchRate ?? 0;
+      const commandYawRate = freeFly.command?.yawRate ?? 0;
+      const commandPitchRate = freeFly.command?.pitchRate ?? 0;
+      const prevYawRate = freeFly.turnRate?.yaw ?? 0;
+      const prevPitchRate = freeFly.turnRate?.pitch ?? 0;
+      const turnResponse = state.freeFlyTurnResponse ?? 5.0;
+      const yawRate =
+        typeof THREE.MathUtils.damp === "function"
+          ? THREE.MathUtils.damp(prevYawRate, commandYawRate, turnResponse, dt)
+          : prevYawRate +
+            (commandYawRate - prevYawRate) * Math.min(1, turnResponse * dt);
+      const pitchRate =
+        typeof THREE.MathUtils.damp === "function"
+          ? THREE.MathUtils.damp(
+              prevPitchRate,
+              commandPitchRate,
+              turnResponse,
+              dt
+            )
+          : prevPitchRate +
+            (commandPitchRate - prevPitchRate) * Math.min(1, turnResponse * dt);
       const pitchMin = state.freeFlyPitchMin ?? deg(-80);
       const pitchMax = state.freeFlyPitchMax ?? deg(80);
       const speedResponse = state.freeFlySpeedResponse ?? 6.0;
@@ -498,6 +523,16 @@ export const useCameraStore = create((set, get) => {
       yaw += yawRate * dt;
       pitch = clamp(pitch + pitchRate * dt, pitchMin, pitchMax);
 
+      const fixedPitch = state.freeFlyFixedPitch;
+      if (typeof fixedPitch === "number" && Number.isFinite(fixedPitch)) {
+        const constrainedTarget = clamp(fixedPitch, pitchMin, pitchMax);
+        pitch =
+          typeof THREE.MathUtils.damp === "function"
+            ? THREE.MathUtils.damp(pitch, constrainedTarget, turnResponse, dt)
+            : pitch +
+              (constrainedTarget - pitch) * Math.min(1, turnResponse * dt);
+      }
+
       const quaternion = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(pitch, yaw, 0, "YXZ")
       );
@@ -506,6 +541,30 @@ export const useCameraStore = create((set, get) => {
         .clone()
         .addScaledVector(forward, speed * dt);
 
+      const terrain = state.terrainCollider;
+      if (terrain) {
+        const rayHeight = state.freeFlyTerrainRayHeight ?? 12.0;
+        const rayFar = state.freeFlyTerrainRayFar ?? 200;
+        const altitudeResponse = state.freeFlyAltitudeResponse ?? 3.2;
+        const offset = state.freeFlyTerrainOffset ?? 1.4;
+        const prevY = freeFly.position.y;
+        const startY = Math.max(prevY, nextPos.y) + rayHeight;
+        terrainRayOrigin.set(nextPos.x, startY, nextPos.z);
+        terrainRaycaster.ray.origin.copy(terrainRayOrigin);
+        terrainRaycaster.ray.direction.set(0, -1, 0);
+        terrainRaycaster.near = 0;
+        terrainRaycaster.far = rayFar;
+        const hits = terrainRaycaster.intersectObject(terrain, true);
+        if (hits.length > 0) {
+          const groundY = hits[0].point.y;
+          const desiredY = groundY + offset;
+          const nextY =
+            typeof THREE.MathUtils.damp === "function"
+              ? THREE.MathUtils.damp(prevY, desiredY, altitudeResponse, dt)
+              : prevY + (desiredY - prevY) * Math.min(1, altitudeResponse * dt);
+          nextPos.y = nextY;
+        }
+      }
       const nextFreeFly = {
         ...freeFly,
         position: nextPos,
@@ -513,12 +572,13 @@ export const useCameraStore = create((set, get) => {
         yaw,
         pitch,
         speed,
+        turnRate: { yaw: yawRate, pitch: pitchRate },
       };
 
       set({ freeFly: nextFreeFly });
 
       const moving =
-        speed > 1e-4 ||
+        Math.abs(speed) > 1e-4 ||
         Math.abs(yawRate) > 1e-4 ||
         Math.abs(pitchRate) > 1e-4 ||
         freeFly.dragging;
@@ -651,19 +711,29 @@ export const useCameraStore = create((set, get) => {
     mode: "path",
     freeFly: createFreeFlyState(),
     freeFlyDragScale: 0.02,
-    freeFlySpeed: 4.0,
-    freeFlyMinStrength: 0.3,
+    freeFlySpeed: 2.7,
+    freeFlyMinStrength: 0.25,
     freeFlyTimeScale: 1,
     freeFlyJoystickRadius: 120,
     freeFlyJoystickInnerScale: 0.35,
     freeFlyDeadZone: 0.05,
     freeFlyStrengthPower: 0.85,
     freeFlyStrengthScale: 1.0,
-    freeFlyYawRate: deg(85),
-    freeFlyPitchRate: deg(70),
+    freeFlyYawRate: deg(52),
+    freeFlyPitchRate: deg(47),
     freeFlyPitchMin: deg(-80),
     freeFlyPitchMax: deg(80),
-    freeFlySpeedResponse: 6.0,
+    freeFlySpeedResponse: 3.5,
+    freeFlyTerrainOffset: 1.4,
+    freeFlyAltitudeResponse: 3.2,
+    freeFlyTerrainRayHeight: 12.0,
+    freeFlyTerrainRayFar: 200,
+    freeFlyTurnResponse: 4.0,
+    freeFlyForwardBias: 0.24,
+    freeFlyNeutralBand: 0.12,
+    freeFlyIdleThrust: 0,
+    freeFlyFixedPitch: deg(-10),
+    terrainCollider: null,
 
     // flags
     enabled: false,
@@ -739,6 +809,9 @@ export const useCameraStore = create((set, get) => {
       set({ scenicSnapRadius: clamp(v ?? 0, 0, 0.1) }),
     setScenicResist: (v) => set({ scenicResist: clamp01(v ?? 0) }),
 
+    setTerrainCollider: (collider) =>
+      set({ terrainCollider: collider ?? null }),
+
     setArchConfig: (patch) =>
       set((s) => ({ archConfig: { ...s.archConfig, ...patch } })),
 
@@ -771,6 +844,7 @@ export const useCameraStore = create((set, get) => {
             speed: 0,
             command: { yawRate: 0, pitchRate: 0 },
             speedTarget: 0,
+            turnRate: { yaw: 0, pitch: 0 },
           },
         };
       }),
@@ -804,10 +878,13 @@ export const useCameraStore = create((set, get) => {
         const dead = s.freeFlyDeadZone ?? 0.05;
         const unitX = vec2.x / radius;
         const unitY = vec2.y / radius;
+        const baseSpeed = s.freeFlySpeed ?? 4.0;
         if (norm <= dead) {
+          const idleThrust = s.freeFlyIdleThrust ?? 0.15;
+          const idleSpeed = baseSpeed * idleThrust;
           nextFreeFly.command = { yawRate: 0, pitchRate: 0 };
-          nextFreeFly.speedTarget = 0;
-          shouldStartTicker = (s.freeFly.speed ?? 0) > 1e-4;
+          nextFreeFly.speedTarget = idleSpeed;
+          shouldStartTicker = idleSpeed > 1e-4 || (s.freeFly.speed ?? 0) > 1e-4;
           return { freeFly: nextFreeFly };
         }
 
@@ -824,12 +901,16 @@ export const useCameraStore = create((set, get) => {
           1
         );
         const yawRateMax = s.freeFlyYawRate ?? deg(85);
-        const pitchRateMax = s.freeFlyPitchRate ?? deg(70);
-        const baseSpeed = s.freeFlySpeed ?? 4.0;
+        const neutralBand = s.freeFlyNeutralBand ?? 0.12;
+        const forwardBias = s.freeFlyForwardBias ?? 0.24;
+        let thrust = clamp(-unitY, -1, 1);
+        if (thrust > -neutralBand && thrust < neutralBand) {
+          thrust = forwardBias;
+        }
 
         const yawRate = -yawRateMax * unitX * strength;
-        const pitchRate = -pitchRateMax * unitY * strength;
-        const speedTarget = baseSpeed * strength;
+        const pitchRate = 0;
+        const speedTarget = baseSpeed * strength * thrust;
 
         nextFreeFly.command = { yawRate, pitchRate };
         nextFreeFly.speedTarget = speedTarget;
@@ -837,7 +918,7 @@ export const useCameraStore = create((set, get) => {
         shouldStartTicker =
           Math.abs(yawRate) > 1e-4 ||
           Math.abs(pitchRate) > 1e-4 ||
-          speedTarget > 1e-4;
+          Math.abs(speedTarget) > 1e-4;
         return { freeFly: nextFreeFly };
       });
       if (shouldStartTicker) ensureTicker();

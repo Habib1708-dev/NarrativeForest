@@ -45,6 +45,7 @@ export default function Experience() {
   const archConfig = useCameraStore((s) => s.archConfig);
   const setArchConfig = useCameraStore((s) => s.setArchConfig);
   const rebuildArch = useCameraStore((s) => s.rebuildArch);
+  const setTerrainCollider = useCameraStore((s) => s.setTerrainCollider);
 
   // ==== REFS ====
   const cabinRef = useRef(null);
@@ -175,6 +176,24 @@ export default function Experience() {
     archControls.maxUpDeg,
     archControls.peakAtIndex,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const assign = () => {
+      if (cancelled) return;
+      const terrain = terrainRef.current;
+      if (terrain) {
+        setTerrainCollider(terrain);
+        return;
+      }
+      requestAnimationFrame(assign);
+    };
+    assign();
+    return () => {
+      cancelled = true;
+      setTerrainCollider(null);
+    };
+  }, [setTerrainCollider]);
 
   // Build occluders list (don’t include the lake)
   const occluders = useMemo(
