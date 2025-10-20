@@ -13,7 +13,7 @@ import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 
 /**
- * ForestDynamic — two rings (NEAR + MID) with BVH raycasts and instancing.
+ * ForestDynamic — two rings (NEAR + MID) with optional FAR extension via BVH raycasts and instancing.
  * Publishes occluders (trees/rocks instancedMeshes) via onOccludersChange.
  */
 export default function ForestDynamic({
@@ -49,6 +49,7 @@ export default function ForestDynamic({
 
     // Rendering toggles
     renderMidTrees,
+    renderExtraChunks,
 
     // Optional tint
     treeTint,
@@ -92,6 +93,13 @@ export default function ForestDynamic({
       value: false,
       label: "Render mid trees (built either way)",
     },
+    renderExtraChunks: {
+      value: 3,
+      min: 0,
+      max: 12,
+      step: 1,
+      label: "Render radius extra (chunks)",
+    },
 
     // Optional tint
     treeTint: { value: "#000000" },
@@ -114,6 +122,11 @@ export default function ForestDynamic({
   // Effective radii (ensure mid >= near, both within tile extent)
   const NEAR_R = Math.max(1, Math.min(nearRingChunks | 0, maxRFromTiles));
   const MID_R = Math.max(NEAR_R, Math.min(midRingChunks | 0, maxRFromTiles));
+  const RENDER_EXTRA = Math.max(0, Math.floor(renderExtraChunks ?? 0));
+  const RENDER_R = Math.max(
+    MID_R,
+    Math.min(maxRFromTiles, MID_R + RENDER_EXTRA)
+  );
 
   // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
@@ -195,6 +208,10 @@ export default function ForestDynamic({
   const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
   const camXZ = useRef(new THREE.Vector3());
 
+  useEffect(() => {
+    lastCellRef.current = { cx: 1e9, cz: 1e9 };
+  }, [NEAR_R, MID_R, RENDER_R]);
+
   // Chunk cache
   const cacheRef = useRef(new Map());
   const buildQueueRef = useRef([]);
@@ -251,12 +268,18 @@ export default function ForestDynamic({
 
   const computeModes = (cx, cz) => {
     const next = {};
-    for (const [x, z] of neighborhood(cx, cz, NEAR_R))
-      next[chunkKey(x, z)] = "high";
-    for (const [x, z] of neighborhood(cx, cz, MID_R))
-      next[chunkKey(x, z)] ??= "med";
-    const viewSet = new Set(Object.keys(next)); // near+mid only
-    return { next, viewSet };
+    const assign = (coords, mode) => {
+      for (const [x, z] of coords) {
+        const key = chunkKey(x, z);
+        if (!next[key]) next[key] = mode;
+      }
+    };
+
+    assign(neighborhood(cx, cz, RENDER_R), "far");
+    assign(neighborhood(cx, cz, MID_R), "med");
+    assign(neighborhood(cx, cz, NEAR_R), "high");
+
+    return { next, viewSet: new Set(Object.keys(next)) };
   };
 
   // Recompute when entering a new chunk
@@ -382,6 +405,7 @@ export default function ForestDynamic({
 
     const nearTrees = []; // always rendered
     const midTrees = []; // rendered only if renderMidTrees = true
+    const farTrees = []; // outer ring
     const rocksByPart = rockParts.map(() => []);
 
     for (const [key, mode] of Object.entries(modesRef.current)) {
@@ -390,13 +414,20 @@ export default function ForestDynamic({
 
       if (mode === "high") {
         nearTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr)); // rocks near only
+        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
       } else if (mode === "med") {
         midTrees.push(...rec.trees);
+        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+      } else if (mode === "far") {
+        farTrees.push(...rec.trees);
+        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
       }
     }
 
-    const allTrees = renderMidTrees ? nearTrees.concat(midTrees) : nearTrees;
+    const includeMidTrees = renderMidTrees || RENDER_EXTRA > 0;
+    const allTrees = nearTrees
+      .concat(includeMidTrees ? midTrees : [])
+      .concat(farTrees);
 
     // Trees (HIGH LOD)
     treeHighRefs.current.forEach((ref) => {

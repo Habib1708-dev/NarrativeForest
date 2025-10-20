@@ -13,6 +13,7 @@ import { useControls } from "leva";
  *    • saturation control — expands or contracts color intensity
  *    • tint control — blends the sky toward an art-directed color (optional haze tie-in)
  *    • haze gradient controls — extend or soften how fog mixes into the sky band
+ *    • hue shift — rotates the sky color wheel without affecting luminance
  *
  * Defaults for sky params match Experience.jsx so swapping is seamless.
  */
@@ -60,6 +61,7 @@ export default function CustomSky({
   tintColor = "#ffffff",
   tintStrength = 0.0,
   colorAffectsHaze = false,
+  hueShift = 0.0,
 
   // --- New: Height-based haze (fog color blend) ---
   // Fade the sky to a fog color below a world-space Y band.
@@ -169,6 +171,7 @@ export default function CustomSky({
     tintStrength: ctrlTintStrength,
     tintColor: ctrlTintColor,
     colorAffectsHaze: ctrlColorAffectsHaze,
+    hueShift: ctrlHueShift,
   } = useControls("Sky / Color", {
     saturation: { value: saturation, min: 0.0, max: 2.5, step: 0.01 },
     tintStrength: { value: tintStrength, min: 0.0, max: 1.0, step: 0.01 },
@@ -180,6 +183,13 @@ export default function CustomSky({
     colorAffectsHaze: {
       value: colorAffectsHaze,
       label: "Color Controls Affect Haze",
+    },
+    hueShift: {
+      value: hueShift,
+      min: -180,
+      max: 180,
+      step: 0.5,
+      label: "Hue Shift (deg)",
     },
   });
 
@@ -240,6 +250,7 @@ export default function CustomSky({
         `uniform vec3  uSkyTintColor;\n` +
         `uniform float uSkyTintStrength;\n` +
         `uniform float uSkyColorAffectsHaze;\n` +
+  `uniform float uSkyHueShift;\n` +
         `uniform float uHazeBlendSpread;\n` +
         `uniform float uHazeBlendStrength;\n` +
         `uniform float uHazeEnabled;\n` +
@@ -289,6 +300,25 @@ export default function CustomSky({
               `
               // narrative-forest: apply saturation/tint before optional haze blend
               vec3 nfBaseColor = gl_FragColor.rgb;
+              if (abs(uSkyHueShift) > 0.0001) {
+                mat3 nfRGB2YIQ = mat3(
+                  0.299, 0.587, 0.114,
+                  0.596, -0.274, -0.322,
+                  0.211, -0.523, 0.312
+                );
+                mat3 nfYIQ2RGB = mat3(
+                  1.0, 0.956, 0.621,
+                  1.0, -0.272, -0.647,
+                  1.0, -1.107, 1.704
+                );
+                vec3 nfYIQ = nfRGB2YIQ * nfBaseColor;
+                float nfHue = radians(uSkyHueShift);
+                float nfCh = cos(nfHue);
+                float nfSh = sin(nfHue);
+                mat2 nfRot = mat2(nfCh, -nfSh, nfSh, nfCh);
+                nfYIQ.yz = nfRot * nfYIQ.yz;
+                nfBaseColor = nfYIQ2RGB * nfYIQ;
+              }
               float nfSat = max(0.0, uSkySaturation);
               float nfLumBase = dot(nfBaseColor, vec3(0.2126, 0.7152, 0.0722));
               vec3 nfGrayBase = vec3(nfLumBase);
@@ -351,6 +381,9 @@ export default function CustomSky({
       shader.uniforms.uSkyColorAffectsHaze = {
         value: ctrlColorAffectsHaze ? 1 : 0,
       };
+      shader.uniforms.uSkyHueShift = {
+        value: ctrlHueShift,
+      };
       shader.uniforms.uHazeBlendSpread = {
         value: Math.max(0.0, ctrlHazeBlendSpread),
       };
@@ -371,6 +404,7 @@ export default function CustomSky({
       mat.userData.uSkyTintColor = shader.uniforms.uSkyTintColor;
       mat.userData.uSkyTintStrength = shader.uniforms.uSkyTintStrength;
       mat.userData.uSkyColorAffectsHaze = shader.uniforms.uSkyColorAffectsHaze;
+  mat.userData.uSkyHueShift = shader.uniforms.uSkyHueShift;
       mat.userData.uHazeBlendSpread = shader.uniforms.uHazeBlendSpread;
       mat.userData.uHazeBlendStrength = shader.uniforms.uHazeBlendStrength;
       mat.userData.uHazeEnabled = shader.uniforms.uHazeEnabled;
@@ -404,6 +438,7 @@ export default function CustomSky({
     ctrlColorAffectsHaze,
     ctrlHazeBlendSpread,
     ctrlHazeBlendStrength,
+    ctrlHueShift,
   ]);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -564,6 +599,8 @@ export default function CustomSky({
       skyRef.current?.material?.userData?.uSkyColorAffectsHaze;
     if (uColorAffectsHaze)
       uColorAffectsHaze.value = ctrlColorAffectsHaze ? 1 : 0;
+    const uHueShift = skyRef.current?.material?.userData?.uSkyHueShift;
+    if (uHueShift) uHueShift.value = ctrlHueShift;
     const uHazeBlendSpread =
       skyRef.current?.material?.userData?.uHazeBlendSpread;
     if (uHazeBlendSpread)
