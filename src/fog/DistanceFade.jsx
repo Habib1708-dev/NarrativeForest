@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { useControls, folder, button } from "leva";
+import { DISTANCE_FADE_TILE_READY_EVENT } from "../utils/distanceFadeEvents";
 
 /**
  * DistanceFade — bulletproof patcher with on-the-fly Leva controls.
@@ -332,8 +333,29 @@ df_vViewDist = length(mvPosition.xyz);
   // Warm-up: patch for a short window to catch late-mounting assets (GLTF/Suspense)
   const warmupFramesRef = useRef(120); // ~2s at 60fps
   const throttleRef = useRef(0);
+  const tileEventPendingRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleTileReady = () => {
+      if (!effEnabled) return;
+      tileEventPendingRef.current = true;
+      warmupFramesRef.current = Math.max(warmupFramesRef.current, 90);
+    };
+    window.addEventListener(DISTANCE_FADE_TILE_READY_EVENT, handleTileReady);
+    return () => {
+      window.removeEventListener(
+        DISTANCE_FADE_TILE_READY_EVENT,
+        handleTileReady
+      );
+    };
+  }, [effEnabled]);
   useFrame(() => {
     if (!effEnabled) return;
+    if (tileEventPendingRef.current) {
+      tileEventPendingRef.current = false;
+      runPatchPass();
+    }
     if (warmupFramesRef.current > 0) {
       runPatchPass();
       warmupFramesRef.current -= 1;

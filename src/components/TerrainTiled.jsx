@@ -9,6 +9,7 @@ import React, {
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { useInfiniteTiles } from "../hooks/useInfiniteTiles";
+import { emitDistanceFadeTileReady } from "../utils/distanceFadeEvents";
 
 /**
  * TerrainTiled — forwardRef so other systems (Forest/Fog) can raycast recursively.
@@ -174,6 +175,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     rec.mesh = mesh;
     rec.state = "ready";
     rec.lastTouched = performance.now();
+    emitDistanceFadeTileReady({ mesh, key: rec.key });
   });
 
   return <group ref={groupRef} name="TerrainTiled" />;

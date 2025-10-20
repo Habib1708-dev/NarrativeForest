@@ -358,7 +358,7 @@ export default function Experience() {
         debugTint={false}
       />
 
-      <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+      {/* <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
         <Bloom
           intensity={1.35}
           luminanceThreshold={0.7}
@@ -366,9 +366,8 @@ export default function Experience() {
           kernelSize={KernelSize.LARGE}
           mipmapBlur
         />
-        {/* Apply a global darkening pass; brightness expects [-1, 1], so use negative values to darken */}
         <BrightnessContrast brightness={-globalDarken} contrast={0} />
-      </EffectComposer>
+      </EffectComposer> */}
 
       {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
       <CameraControllerR3F />
