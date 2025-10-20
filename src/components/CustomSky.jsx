@@ -10,6 +10,9 @@ import { useControls } from "leva";
  * - Supports:
  *    • darken  [0..1] — multiplies sky RGB by (1 - darken)
  *    • lightning pulses (random or manual trigger) — multiplies by flashGain (>1)
+ *    • saturation control — expands or contracts color intensity
+ *    • tint control — blends the sky toward an art-directed color (optional haze tie-in)
+ *    • haze gradient controls — extend or soften how fog mixes into the sky band
  *
  * Defaults for sky params match Experience.jsx so swapping is seamless.
  */
@@ -52,6 +55,12 @@ export default function CustomSky({
   mieCoefficient = 0.0,
   mieDirectionalG = 0.0,
 
+  // --- New: direct saturation controls ---
+  saturation = 1.0,
+  tintColor = "#ffffff",
+  tintStrength = 0.0,
+  colorAffectsHaze = false,
+
   // --- New: Height-based haze (fog color blend) ---
   // Fade the sky to a fog color below a world-space Y band.
   // Example for terrain at y=-5:
@@ -61,7 +70,9 @@ export default function CustomSky({
   hazeTopY = 87.0,
   hazeColor = "#585858", // separate haze color for sky blending (independent of scene fog)
   hazePower = 1.0, // curve shaping (>=0.0001)
-  hazeFeather = 0.75, // extra softening width (world units)
+  hazeFeather = 10.0, // extra softening width (world units)
+  hazeBlendSpread = 0.59, // extends haze ↔ sky blend range
+  hazeBlendStrength = 0.74, // mixes expanded blend back into final mix
 
   // You can pass any other <Sky/> props via ...rest
   ...rest
@@ -71,6 +82,7 @@ export default function CustomSky({
 
   // Resolve haze color (initial seed; can be overridden via Leva control)
   const hazeColorRef = useRef(new THREE.Color());
+  const tintColorRef = useRef(new THREE.Color(tintColor));
   useEffect(() => {
     if (hazeColor) {
       hazeColorRef.current.set(hazeColor);
@@ -83,6 +95,12 @@ export default function CustomSky({
     }
   }, [hazeColor, scene]);
 
+  useEffect(() => {
+    if (tintColor) {
+      tintColorRef.current.set(tintColor);
+    }
+  }, [tintColor]);
+
   const {
     hazeEnabled: ctrlHazeEnabled,
     hazeBottomY: ctrlHazeBottomY,
@@ -90,6 +108,8 @@ export default function CustomSky({
     hazeFeather: ctrlHazeFeather,
     hazePower: ctrlHazePower,
     hazeColor: ctrlHazeColor,
+    hazeBlendSpread: ctrlHazeBlendSpread,
+    hazeBlendStrength: ctrlHazeBlendStrength,
   } = useControls("Sky / Haze", {
     hazeEnabled: { value: hazeEnabled },
     hazeBottomY: { value: hazeBottomY, min: -200, max: 200, step: 0.1 },
@@ -102,6 +122,14 @@ export default function CustomSky({
         : scene?.fog?.color
         ? `#${scene.fog.color.getHexString()}`
         : "#223140",
+    },
+    hazeBlendSpread: { value: hazeBlendSpread, min: 0.0, max: 2.0, step: 0.01 },
+    hazeBlendStrength: {
+      value: hazeBlendStrength,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Haze Gradient Strength",
     },
   });
 
@@ -135,6 +163,31 @@ export default function CustomSky({
     // Flash peak is now the MAX value; min assumed ~1.0
     flashPeakGain: { value: flashPeakGain, min: 1.0, max: 10.0, step: 0.05 },
   });
+
+  const {
+    saturation: ctrlSaturation,
+    tintStrength: ctrlTintStrength,
+    tintColor: ctrlTintColor,
+    colorAffectsHaze: ctrlColorAffectsHaze,
+  } = useControls("Sky / Color", {
+    saturation: { value: saturation, min: 0.0, max: 2.5, step: 0.01 },
+    tintStrength: { value: tintStrength, min: 0.0, max: 1.0, step: 0.01 },
+    tintColor: {
+      value: tintColor
+        ? new THREE.Color(tintColor).getStyle()
+        : tintColorRef.current.getStyle(),
+    },
+    colorAffectsHaze: {
+      value: colorAffectsHaze,
+      label: "Color Controls Affect Haze",
+    },
+  });
+
+  useEffect(() => {
+    if (ctrlTintColor) {
+      tintColorRef.current.set(ctrlTintColor);
+    }
+  }, [ctrlTintColor]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Shader patch (adds uSkyDarken and uSkyFlashGain to fragment shader)
@@ -183,6 +236,12 @@ export default function CustomSky({
       shader.fragmentShader =
         `uniform float uSkyDarken;\n` +
         `uniform float uSkyFlashGain;\n` +
+        `uniform float uSkySaturation;\n` +
+        `uniform vec3  uSkyTintColor;\n` +
+        `uniform float uSkyTintStrength;\n` +
+        `uniform float uSkyColorAffectsHaze;\n` +
+        `uniform float uHazeBlendSpread;\n` +
+        `uniform float uHazeBlendStrength;\n` +
         `uniform float uHazeEnabled;\n` +
         `uniform float uHazeBottomY;\n` +
         `uniform float uHazeTopY;\n` +
@@ -195,45 +254,17 @@ export default function CustomSky({
       // 2) Rewrite final assignment → multiply with darken & flash
       // Pattern A: gl_FragColor = vec4( COLOR , ALPHA );
       let fs = shader.fragmentShader;
-      const mult = ` * ( 1.0 - clamp(uSkyDarken, 0.0, 1.0) ) * max(uSkyFlashGain, 0.0)`;
       const patA =
         /gl_FragColor\s*=\s*vec4\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\s*;/m;
       if (patA.test(fs)) {
-        fs = fs.replace(patA, `gl_FragColor = vec4( ( $1 )${mult}, $2 );`);
+        fs = fs.replace(patA, `gl_FragColor = vec4( ( $1 ), $2 );`);
       } else {
         // Pattern B: gl_FragColor = vec4( VEC4 );
         const patB = /gl_FragColor\s*=\s*vec4\s*\(\s*([^)]+)\s*\)\s*;/m;
         if (patB.test(fs)) {
-          fs = fs.replace(
-            patB,
-            `gl_FragColor = vec4( ( $1 ).rgb${mult}, ( $1 ).a );`
-          );
+          fs = fs.replace(patB, `gl_FragColor = vec4( ( $1 ).rgb, ( $1 ).a );`);
         } else {
-          // Fallback: inject just before end of main()
-          const mainOpen = fs.indexOf("void main()");
-          if (mainOpen >= 0) {
-            const braceOpen = fs.indexOf("{", mainOpen);
-            let depth = 0,
-              i = braceOpen;
-            for (; i < fs.length; i++) {
-              const ch = fs[i];
-              if (ch === "{") depth++;
-              else if (ch === "}") {
-                depth--;
-                if (depth === 0) break;
-              }
-            }
-            if (i > braceOpen) {
-              fs =
-                fs.slice(0, i) +
-                `
-                // Darken + flash multiplier
-                gl_FragColor.rgb *= ( 1.0 - clamp(uSkyDarken, 0.0, 1.0) );
-                gl_FragColor.rgb *= max(uSkyFlashGain, 0.0);
-                ` +
-                fs.slice(i);
-            }
-          }
+          // Fallback: no direct assignment found; final adjustments handled later
         }
       }
 
@@ -256,15 +287,49 @@ export default function CustomSky({
             fs =
               fs.slice(0, i) +
               `
-              // narrative-forest: blend sky with fog color by world-space height
+              // narrative-forest: apply saturation/tint before optional haze blend
+              vec3 nfBaseColor = gl_FragColor.rgb;
+              float nfSat = max(0.0, uSkySaturation);
+              float nfLumBase = dot(nfBaseColor, vec3(0.2126, 0.7152, 0.0722));
+              vec3 nfGrayBase = vec3(nfLumBase);
+              vec3 nfSatColor = nfGrayBase + (nfBaseColor - nfGrayBase) * nfSat;
+              float nfTintStrength = clamp(uSkyTintStrength, 0.0, 1.0);
+              vec3 nfTinted = mix(nfSatColor, uSkyTintColor, nfTintStrength);
+              vec3 nfFinalColor = nfTinted;
+
               if (uHazeEnabled > 0.5) {
-                // Feather widens the blend range for a smoother transition
                 float y0 = min(uHazeBottomY, uHazeTopY);
                 float y1 = max(uHazeBottomY, uHazeTopY);
                 float t = smoothstep(y0 - uHazeFeather, y1 + uHazeFeather, vNF_WorldY);
                 t = pow(t, max(0.0001, uHazePower));
-                gl_FragColor.rgb = mix(uHazeColor, gl_FragColor.rgb, t);
+
+                vec3 nfHazeColor = uHazeColor;
+                if (uSkyColorAffectsHaze > 0.5) {
+                  float nfLumHaze = dot(nfHazeColor, vec3(0.2126, 0.7152, 0.0722));
+                  vec3 nfGrayHaze = vec3(nfLumHaze);
+                  vec3 nfHazeSat = nfGrayHaze + (nfHazeColor - nfGrayHaze) * nfSat;
+                  nfHazeColor = mix(nfHazeSat, uSkyTintColor, nfTintStrength);
+                }
+
+                float nfBlend = clamp(t, 0.0, 1.0);
+                float nfSpread = max(0.0, uHazeBlendSpread);
+                float nfStrength = clamp(uHazeBlendStrength, 0.0, 1.0);
+                float nfExpanded = nfBlend;
+                if (nfStrength > 0.0001) {
+                  if (nfSpread > 0.0001) {
+                    nfExpanded = smoothstep(-nfSpread, 1.0 + nfSpread, nfBlend);
+                  } else {
+                    nfExpanded = smoothstep(0.0, 1.0, nfBlend);
+                  }
+                  nfBlend = mix(nfBlend, nfExpanded, nfStrength);
+                }
+
+                nfFinalColor = mix(nfHazeColor, nfTinted, clamp(nfBlend, 0.0, 1.0));
               }
+
+              gl_FragColor.rgb = nfFinalColor;
+      gl_FragColor.rgb *= ( 1.0 - clamp(uSkyDarken, 0.0, 1.0) );
+      gl_FragColor.rgb *= max(uSkyFlashGain, 0.0);
               ` +
               fs.slice(i);
           }
@@ -276,6 +341,22 @@ export default function CustomSky({
       // Keep uniforms reachable from React
       shader.uniforms.uSkyDarken = { value: darken };
       shader.uniforms.uSkyFlashGain = { value: 1.0 };
+      shader.uniforms.uSkySaturation = { value: Math.max(0.0, ctrlSaturation) };
+      shader.uniforms.uSkyTintColor = {
+        value: new THREE.Color().copy(tintColorRef.current),
+      };
+      shader.uniforms.uSkyTintStrength = {
+        value: Math.max(0.0, Math.min(1.0, ctrlTintStrength)),
+      };
+      shader.uniforms.uSkyColorAffectsHaze = {
+        value: ctrlColorAffectsHaze ? 1 : 0,
+      };
+      shader.uniforms.uHazeBlendSpread = {
+        value: Math.max(0.0, ctrlHazeBlendSpread),
+      };
+      shader.uniforms.uHazeBlendStrength = {
+        value: Math.max(0.0, Math.min(1.0, ctrlHazeBlendStrength)),
+      };
       shader.uniforms.uHazeEnabled = { value: ctrlHazeEnabled ? 1 : 0 };
       shader.uniforms.uHazeBottomY = { value: ctrlHazeBottomY };
       shader.uniforms.uHazeTopY = { value: ctrlHazeTopY };
@@ -286,6 +367,12 @@ export default function CustomSky({
       };
       mat.userData.uSkyDarken = shader.uniforms.uSkyDarken;
       mat.userData.uSkyFlashGain = shader.uniforms.uSkyFlashGain;
+      mat.userData.uSkySaturation = shader.uniforms.uSkySaturation;
+      mat.userData.uSkyTintColor = shader.uniforms.uSkyTintColor;
+      mat.userData.uSkyTintStrength = shader.uniforms.uSkyTintStrength;
+      mat.userData.uSkyColorAffectsHaze = shader.uniforms.uSkyColorAffectsHaze;
+      mat.userData.uHazeBlendSpread = shader.uniforms.uHazeBlendSpread;
+      mat.userData.uHazeBlendStrength = shader.uniforms.uHazeBlendStrength;
       mat.userData.uHazeEnabled = shader.uniforms.uHazeEnabled;
       mat.userData.uHazeBottomY = shader.uniforms.uHazeBottomY;
       mat.userData.uHazeTopY = shader.uniforms.uHazeTopY;
@@ -312,6 +399,11 @@ export default function CustomSky({
     ctrlHazeTopY,
     ctrlHazePower,
     ctrlHazeFeather,
+    ctrlSaturation,
+    ctrlTintStrength,
+    ctrlColorAffectsHaze,
+    ctrlHazeBlendSpread,
+    ctrlHazeBlendStrength,
   ]);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -461,6 +553,28 @@ export default function CustomSky({
     // Update darken uniform every frame
     const uDark = skyRef.current?.material?.userData?.uSkyDarken;
     if (uDark) uDark.value = darken;
+    const uSat = skyRef.current?.material?.userData?.uSkySaturation;
+    if (uSat) uSat.value = Math.max(0.0, ctrlSaturation);
+    const uTintStrength = skyRef.current?.material?.userData?.uSkyTintStrength;
+    if (uTintStrength)
+      uTintStrength.value = Math.max(0.0, Math.min(1.0, ctrlTintStrength));
+    const uTintColor = skyRef.current?.material?.userData?.uSkyTintColor;
+    if (uTintColor) uTintColor.value.copy(tintColorRef.current);
+    const uColorAffectsHaze =
+      skyRef.current?.material?.userData?.uSkyColorAffectsHaze;
+    if (uColorAffectsHaze)
+      uColorAffectsHaze.value = ctrlColorAffectsHaze ? 1 : 0;
+    const uHazeBlendSpread =
+      skyRef.current?.material?.userData?.uHazeBlendSpread;
+    if (uHazeBlendSpread)
+      uHazeBlendSpread.value = Math.max(0.0, ctrlHazeBlendSpread);
+    const uHazeBlendStrength =
+      skyRef.current?.material?.userData?.uHazeBlendStrength;
+    if (uHazeBlendStrength)
+      uHazeBlendStrength.value = Math.max(
+        0.0,
+        Math.min(1.0, ctrlHazeBlendStrength)
+      );
 
     // Lightning logic
     let flashGain = 1.0;
