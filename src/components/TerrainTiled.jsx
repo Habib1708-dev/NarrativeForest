@@ -170,6 +170,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.frustumCulled = true;
+    mesh.visible = false; // stay hidden until DistanceFade patches fade logic
 
     groupRef.current?.add(mesh);
     rec.mesh = mesh;

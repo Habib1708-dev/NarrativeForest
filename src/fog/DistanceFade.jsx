@@ -298,6 +298,13 @@ df_vViewDist = length(mvPosition.xyz);
     stats.current.byType.set(t, (stats.current.byType.get(t) || 0) + 1);
   };
 
+  const patchMesh = (mesh) => {
+    if (!mesh?.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) patchMaterial(m, mesh);
+    mesh.visible = true;
+  };
+
   // Patch pass helper
   const runPatchPass = () => {
     if (!effEnabled) return;
@@ -334,13 +341,19 @@ df_vViewDist = length(mvPosition.xyz);
   const warmupFramesRef = useRef(120); // ~2s at 60fps
   const throttleRef = useRef(0);
   const tileEventPendingRef = useRef(false);
+  const pendingMeshesRef = useRef([]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const handleTileReady = () => {
-      if (!effEnabled) return;
+    const handleTileReady = (event) => {
+      const mesh = event?.detail?.mesh;
+      if (!effEnabled) {
+        if (mesh) mesh.visible = true;
+        return;
+      }
       tileEventPendingRef.current = true;
       warmupFramesRef.current = Math.max(warmupFramesRef.current, 90);
+      if (mesh) pendingMeshesRef.current.push(mesh);
     };
     window.addEventListener(DISTANCE_FADE_TILE_READY_EVENT, handleTileReady);
     return () => {
@@ -355,6 +368,11 @@ df_vViewDist = length(mvPosition.xyz);
     if (tileEventPendingRef.current) {
       tileEventPendingRef.current = false;
       runPatchPass();
+    }
+    const pending = pendingMeshesRef.current;
+    if (pending.length) {
+      const meshes = pending.splice(0, pending.length);
+      for (const mesh of meshes) patchMesh(mesh);
     }
     if (warmupFramesRef.current > 0) {
       runPatchPass();
