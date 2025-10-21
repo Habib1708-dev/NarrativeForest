@@ -12,6 +12,8 @@ import {
   BrightnessContrast,
 } from "@react-three/postprocessing";
 import { KernelSize } from "postprocessing";
+import { NoiseJitterEffect } from "./post/NoiseJitterEffect";
+import { DistanceBlurEffect } from "./post/DistanceBlurEffect";
 
 // Scene pieces
 import Cabin from "./components/Cabin";
@@ -40,7 +42,7 @@ import CameraControllerR3F from "./components/CameraControllerR3F";
 import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
-  const { gl } = useThree();
+  const { gl, camera } = useThree();
   const enabled = useCameraStore((s) => s.enabled);
   const archConfig = useCameraStore((s) => s.archConfig);
   const setArchConfig = useCameraStore((s) => s.setArchConfig);
@@ -95,6 +97,13 @@ export default function Experience() {
     fAnisotropy,
     fSkyRadius,
     globalDarken,
+    grainEnabled,
+    grainStrength,
+    grainSize,
+    blurEnabled,
+    blurFocusDistance,
+    blurFocusRange,
+    blurStrength,
   } = useControls({
     Scene: folder({
       globalDarken: {
@@ -103,6 +112,53 @@ export default function Experience() {
         max: 1.0,
         step: 0.01,
         label: "Global Darken",
+      },
+    }),
+    "Post / Film Grain": folder({
+      grainEnabled: {
+        value: false,
+        label: "Enable Film Grain",
+      },
+      grainStrength: {
+        value: 0.02,
+        min: 0.0,
+        max: 0.5,
+        step: 0.01,
+        label: "Grain Strength",
+      },
+      grainSize: {
+        value: 0.5,
+        min: 0.5,
+        max: 5.0,
+        step: 0.1,
+        label: "Grain Size",
+      },
+    }),
+    "Post / Distance Blur": folder({
+      blurEnabled: {
+        value: false,
+        label: "Enable Distance Blur",
+      },
+      blurFocusDistance: {
+        value: 1.5,
+        min: 0.1,
+        max: 50.0,
+        step: 0.1,
+        label: "Focus Distance",
+      },
+      blurFocusRange: {
+        value: 2.0,
+        min: 0.5,
+        max: 20.0,
+        step: 0.1,
+        label: "Focus Range",
+      },
+      blurStrength: {
+        value: 5.0,
+        min: 0.0,
+        max: 20.0,
+        step: 0.1,
+        label: "Blur Strength",
       },
     }),
     Atmosphere: folder({
@@ -358,7 +414,11 @@ export default function Experience() {
         debugTint={false}
       />
 
-      <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+      <EffectComposer
+        multisampling={0}
+        frameBufferType={THREE.HalfFloatType}
+        depthBuffer={true}
+      >
         <Bloom
           intensity={1.35}
           luminanceThreshold={0.7}
@@ -367,6 +427,21 @@ export default function Experience() {
           mipmapBlur
         />
         <BrightnessContrast brightness={-globalDarken} contrast={0} />
+        {blurEnabled && (
+          <DistanceBlurEffect
+            focusDistance={blurFocusDistance}
+            focusRange={blurFocusRange}
+            blurStrength={blurStrength}
+            cameraNear={camera.near}
+            cameraFar={camera.far}
+          />
+        )}
+        {grainEnabled && (
+          <NoiseJitterEffect
+            grainStrength={grainStrength}
+            grainSize={grainSize}
+          />
+        )}
       </EffectComposer>
 
       {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
