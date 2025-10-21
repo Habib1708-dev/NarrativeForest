@@ -250,7 +250,7 @@ export default function CustomSky({
         `uniform vec3  uSkyTintColor;\n` +
         `uniform float uSkyTintStrength;\n` +
         `uniform float uSkyColorAffectsHaze;\n` +
-  `uniform float uSkyHueShift;\n` +
+        `uniform float uSkyHueShift;\n` +
         `uniform float uHazeBlendSpread;\n` +
         `uniform float uHazeBlendStrength;\n` +
         `uniform float uHazeEnabled;\n` +
@@ -404,7 +404,7 @@ export default function CustomSky({
       mat.userData.uSkyTintColor = shader.uniforms.uSkyTintColor;
       mat.userData.uSkyTintStrength = shader.uniforms.uSkyTintStrength;
       mat.userData.uSkyColorAffectsHaze = shader.uniforms.uSkyColorAffectsHaze;
-  mat.userData.uSkyHueShift = shader.uniforms.uSkyHueShift;
+      mat.userData.uSkyHueShift = shader.uniforms.uSkyHueShift;
       mat.userData.uHazeBlendSpread = shader.uniforms.uHazeBlendSpread;
       mat.userData.uHazeBlendStrength = shader.uniforms.uHazeBlendStrength;
       mat.userData.uHazeEnabled = shader.uniforms.uHazeEnabled;
