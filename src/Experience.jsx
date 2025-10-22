@@ -202,7 +202,13 @@ export default function Experience() {
     }),
     "Sky / Lightning": folder({
       lightningEnabled: { value: false, label: "Enable Lightning" },
-      flashPeakGain: { value: 4.5, min: 1.0, max: 30.0, step: 0.1, label: "Peak Gain" },
+      flashPeakGain: {
+        value: 4.5,
+        min: 1.0,
+        max: 30.0,
+        step: 0.1,
+        label: "Peak Gain",
+      },
     }),
   });
 

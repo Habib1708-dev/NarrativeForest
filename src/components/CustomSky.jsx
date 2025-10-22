@@ -134,7 +134,7 @@ export default function CustomSky({
   // lightningEnabled and flashPeakGain now come from Experience.jsx (presets)
   const ctrlLightningEnabled = lightningEnabled;
   const ctrlFlashPeakGain = flashPeakGain;
-  
+
   const {
     flashMinDelay: ctrlFlashMinDelay,
     flashMaxDelay: ctrlFlashMaxDelay,
