@@ -1,7 +1,8 @@
 // src/Experience.jsx
+// r3f-perf
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
-import { useControls, folder } from "leva";
+import { useControls, folder, button } from "leva";
 import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
@@ -23,6 +24,10 @@ import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
 import DistanceFade from "./fog/DistanceFade";
+
+// Preset system
+import { PRESETS, PRESET_NAMES } from "./utils/presets";
+import { usePresetTransition } from "./hooks/usePresetTransition";
 
 // Tiled terrain and heightfield
 import TerrainTiled from "./components/TerrainTiled";
@@ -65,46 +70,23 @@ export default function Experience() {
   const [lakeExclusion, setLakeExclusion] = useState(null);
   const prevExclRef = useRef(null);
 
-  const {
-    fogColor,
-    fogNear,
-    fogFar,
-    fogMode,
-    fogDensity,
+  // Preset control
+  const presetControl = useControls("Presets", {
+    preset: {
+      value: "Default",
+      options: PRESET_NAMES,
+      label: "Select Preset",
+    },
+    transitionDuration: {
+      value: 2.0,
+      min: 0.1,
+      max: 10.0,
+      step: 0.1,
+      label: "Transition Duration (s)",
+    },
+  });
 
-    sunPosition,
-    rayleigh,
-    turbidity,
-    mieCoefficient,
-    mieDirectionalG,
-    skyDarken,
-
-    dirLightIntensity,
-
-    fEnabled,
-    fColor,
-    fDensity,
-    fExtinction,
-    fFogHeight,
-    fFadeStart,
-    fFadeEnd,
-    fDistStart,
-    fDistEnd,
-    fLightDirX,
-    fLightDirY,
-    fLightDirZ,
-    fLightIntensity,
-    fAnisotropy,
-    fSkyRadius,
-    globalDarken,
-    grainEnabled,
-    grainStrength,
-    grainSize,
-    blurEnabled,
-    blurFocusDistance,
-    blurFocusRange,
-    blurStrength,
-  } = useControls({
+  const controls = useControls({
     Scene: folder({
       globalDarken: {
         value: 0.0,
@@ -203,7 +185,219 @@ export default function Experience() {
       },
       // Lightning controls moved to "Sky / Lightning" folder inside CustomSky
     }),
+    "Sky / Haze": folder({
+      hazeColor: { value: "#585858", label: "Haze Color" },
+    }),
+    "Sky / Color": folder({
+      saturation: { value: 1.0, min: 0.0, max: 2.5, step: 0.01 },
+      tintStrength: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
+      tintColor: { value: "#ffffff", label: "Tint Color" },
+      hueShift: {
+        value: 0,
+        min: -180,
+        max: 180,
+        step: 0.5,
+        label: "Hue Shift",
+      },
+    }),
   });
+
+  // State for transition overrides
+  const [transitionOverrides, setTransitionOverrides] = useState({});
+
+  // Track when user manually changes controls to clear specific overrides
+  const prevControlsRef = useRef(controls);
+  useEffect(() => {
+    const prev = prevControlsRef.current;
+    const current = controls;
+
+    // Check if any control was manually changed (not during transition)
+    if (!transitionRef.current.isTransitioning) {
+      const changedKeys = Object.keys(current).filter((key) => {
+        const prevVal = prev[key];
+        const currVal = current[key];
+        if (Array.isArray(prevVal) && Array.isArray(currVal)) {
+          return JSON.stringify(prevVal) !== JSON.stringify(currVal);
+        }
+        return prevVal !== currVal;
+      });
+
+      if (changedKeys.length > 0) {
+        // User manually changed a control, clear those overrides
+        setTransitionOverrides((prev) => {
+          const newOverrides = { ...prev };
+          changedKeys.forEach((key) => delete newOverrides[key]);
+          return newOverrides;
+        });
+      }
+    }
+
+    prevControlsRef.current = current;
+  }, [controls]);
+
+  // Merge controls with transition overrides
+  const activeValues = { ...controls, ...transitionOverrides };
+
+  // Destructure for easier use (using activeValues instead of controls)
+  const {
+    fogColor,
+    fogNear,
+    fogFar,
+    fogMode,
+    fogDensity,
+    sunPosition,
+    rayleigh,
+    turbidity,
+    mieCoefficient,
+    mieDirectionalG,
+    skyDarken,
+    dirLightIntensity,
+    fEnabled,
+    fColor,
+    fDensity,
+    fExtinction,
+    fFogHeight,
+    fFadeStart,
+    fFadeEnd,
+    fDistStart,
+    fDistEnd,
+    fLightDirX,
+    fLightDirY,
+    fLightDirZ,
+    fLightIntensity,
+    fAnisotropy,
+    fSkyRadius,
+    globalDarken,
+    grainEnabled,
+    grainStrength,
+    grainSize,
+    blurEnabled,
+    blurFocusDistance,
+    blurFocusRange,
+    blurStrength,
+    // Sky / Haze & Sky / Color values (from presets)
+    hazeColor,
+    saturation,
+    tintColor,
+    tintStrength,
+    hueShift,
+  } = activeValues;
+
+  // Setup preset transition system with ref to track values
+  const controlValuesRef = useRef(controls);
+  useEffect(() => {
+    controlValuesRef.current = controls;
+  }, [controls]);
+
+  // Transition state
+  const transitionRef = useRef({
+    isTransitioning: false,
+    startValues: {},
+    targetValues: {},
+    startTime: 0,
+    duration: 2.0,
+  });
+
+  // Interpolation helpers
+  const lerpColor = (colorA, colorB, t) => {
+    const c1 = new THREE.Color(colorA);
+    const c2 = new THREE.Color(colorB);
+    return "#" + c1.lerp(c2, t).getHexString();
+  };
+
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  const lerpArray = (arrA, arrB, t) => {
+    return arrA.map((val, idx) => lerp(val, arrB[idx], t));
+  };
+
+  const easeInOutCubic = (t) => {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  };
+
+  // Handle preset transition animation
+  useFrame(() => {
+    const transition = transitionRef.current;
+    if (!transition.isTransitioning) return;
+
+    const currentTime = performance.now() / 1000;
+    const elapsed = currentTime - transition.startTime;
+    const rawProgress = Math.min(elapsed / transition.duration, 1.0);
+    const progress = easeInOutCubic(rawProgress);
+
+    // Sun position moves 1/3 slower (needs 33% more time to complete)
+    // Adjust its progress to be proportionally behind
+    const sunRawProgress = Math.min(
+      (elapsed / transition.duration) * 0.75,
+      1.0
+    );
+    const sunProgress = easeInOutCubic(sunRawProgress);
+
+    const { startValues, targetValues } = transition;
+
+    const updates = {};
+
+    // Interpolate each property
+    Object.keys(targetValues).forEach((key) => {
+      const startVal = startValues[key];
+      const targetVal = targetValues[key];
+
+      if (startVal === undefined || targetVal === undefined) return;
+
+      // Use slower progress for sunPosition
+      const currentProgress = key === "sunPosition" ? sunProgress : progress;
+
+      let newValue;
+      if (typeof startVal === "string" && startVal.startsWith("#")) {
+        newValue = lerpColor(startVal, targetVal, currentProgress);
+      } else if (Array.isArray(startVal)) {
+        newValue = lerpArray(startVal, targetVal, currentProgress);
+      } else if (typeof startVal === "number") {
+        newValue = lerp(startVal, targetVal, currentProgress);
+      } else {
+        newValue = targetVal;
+      }
+
+      updates[key] = newValue;
+    });
+
+    // Apply all updates as overrides
+    setTransitionOverrides(updates);
+
+    // Complete transition - keep the overrides permanently as the new values
+    if (rawProgress >= 1.0) {
+      transition.isTransitioning = false;
+      console.log("✅ Transition complete!");
+      console.log("🎯 Final values actually applied:");
+      console.table(updates);
+      console.log("========================================\n");
+      // Don't clear overrides - they become the permanent values
+      // This way the scene stays at the preset values
+    }
+  });
+
+  // Watch for preset changes and trigger transition
+  const prevPresetRef = useRef(presetControl.preset);
+  useEffect(() => {
+    if (presetControl.preset !== prevPresetRef.current) {
+      prevPresetRef.current = presetControl.preset;
+      const targetPreset = PRESETS[presetControl.preset];
+      if (targetPreset) {
+        console.log(`\n🎨 ======== PRESET: ${presetControl.preset} ========`);
+        console.log("📋 Target values that will be applied:");
+        console.table(targetPreset);
+        console.log("🔄 Starting transition...\n");
+        // Use activeValues (current displayed values) as start
+        transitionRef.current = {
+          isTransitioning: true,
+          startValues: { ...activeValues },
+          targetValues: targetPreset,
+          startTime: performance.now() / 1000,
+          duration: presetControl.transitionDuration,
+        };
+      }
+    }
+  }, [presetControl.preset, presetControl.transitionDuration, activeValues]);
 
   // Arch controls
   const archControls = useControls(
@@ -314,6 +508,11 @@ export default function Experience() {
         mieCoefficient={mieCoefficient}
         mieDirectionalG={mieDirectionalG}
         darken={skyDarken}
+        hazeColor={hazeColor}
+        saturation={saturation}
+        tintColor={tintColor}
+        tintStrength={tintStrength}
+        hueShift={hueShift}
         // Lightning controls are now managed inside CustomSky's "Sky / Lightning" folder
       />
       <Stars />

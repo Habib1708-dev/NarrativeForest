@@ -109,7 +109,6 @@ export default function CustomSky({
     hazeTopY: ctrlHazeTopY,
     hazeFeather: ctrlHazeFeather,
     hazePower: ctrlHazePower,
-    hazeColor: ctrlHazeColor,
     hazeBlendSpread: ctrlHazeBlendSpread,
     hazeBlendStrength: ctrlHazeBlendStrength,
   } = useControls("Sky / Haze", {
@@ -118,13 +117,6 @@ export default function CustomSky({
     hazeTopY: { value: hazeTopY, min: -200, max: 200, step: 0.1 },
     hazeFeather: { value: hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
     hazePower: { value: hazePower, min: 0.25, max: 4.0, step: 0.05 },
-    hazeColor: {
-      value: hazeColor
-        ? new THREE.Color(hazeColor).getStyle()
-        : scene?.fog?.color
-        ? `#${scene.fog.color.getHexString()}`
-        : "#223140",
-    },
     hazeBlendSpread: { value: hazeBlendSpread, min: 0.0, max: 2.0, step: 0.01 },
     hazeBlendStrength: {
       value: hazeBlendStrength,
@@ -135,12 +127,8 @@ export default function CustomSky({
     },
   });
 
-  // Keep shader haze color in sync with the Leva color
-  useEffect(() => {
-    if (ctrlHazeColor) {
-      hazeColorRef.current.set(ctrlHazeColor);
-    }
-  }, [ctrlHazeColor]);
+  // Use hazeColor prop directly (controlled from Experience.jsx presets)
+  const ctrlHazeColor = hazeColor;
 
   // Leva controls for Lightning frequency/durations
   const {
@@ -166,32 +154,12 @@ export default function CustomSky({
     flashPeakGain: { value: flashPeakGain, min: 1.0, max: 10.0, step: 0.05 },
   });
 
-  const {
-    saturation: ctrlSaturation,
-    tintStrength: ctrlTintStrength,
-    tintColor: ctrlTintColor,
-    colorAffectsHaze: ctrlColorAffectsHaze,
-    hueShift: ctrlHueShift,
-  } = useControls("Sky / Color", {
-    saturation: { value: saturation, min: 0.0, max: 2.5, step: 0.01 },
-    tintStrength: { value: tintStrength, min: 0.0, max: 1.0, step: 0.01 },
-    tintColor: {
-      value: tintColor
-        ? new THREE.Color(tintColor).getStyle()
-        : tintColorRef.current.getStyle(),
-    },
-    colorAffectsHaze: {
-      value: colorAffectsHaze,
-      label: "Color Controls Affect Haze",
-    },
-    hueShift: {
-      value: hueShift,
-      min: -180,
-      max: 180,
-      step: 0.5,
-      label: "Hue Shift (deg)",
-    },
-  });
+  // Use Sky / Color props directly (controlled from Experience.jsx presets)
+  const ctrlSaturation = saturation;
+  const ctrlTintStrength = tintStrength;
+  const ctrlTintColor = tintColor;
+  const ctrlColorAffectsHaze = colorAffectsHaze;
+  const ctrlHueShift = hueShift;
 
   useEffect(() => {
     if (ctrlTintColor) {
