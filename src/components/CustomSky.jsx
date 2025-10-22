@@ -131,8 +131,11 @@ export default function CustomSky({
   const ctrlHazeColor = hazeColor;
 
   // Leva controls for Lightning frequency/durations
+  // lightningEnabled and flashPeakGain now come from Experience.jsx (presets)
+  const ctrlLightningEnabled = lightningEnabled;
+  const ctrlFlashPeakGain = flashPeakGain;
+  
   const {
-    lightningEnabled: ctrlLightningEnabled,
     flashMinDelay: ctrlFlashMinDelay,
     flashMaxDelay: ctrlFlashMaxDelay,
     flashSpreadBias: ctrlFlashSpreadBias,
@@ -140,9 +143,7 @@ export default function CustomSky({
     mainFlashMs: ctrlMainFlashMs,
     tailMs: ctrlTailMs,
     doubleFlashChance: ctrlDoubleFlashChance,
-    flashPeakGain: ctrlFlashPeakGain,
   } = useControls("Sky / Lightning", {
-    lightningEnabled: { value: lightningEnabled, label: "Enable Lightning" },
     flashMinDelay: { value: flashMinDelay, min: 0.2, max: 20, step: 0.1 },
     flashMaxDelay: { value: flashMaxDelay, min: 0.2, max: 30, step: 0.1 },
     flashSpreadBias: { value: flashSpreadBias, min: 0.2, max: 3.0, step: 0.05 },
@@ -150,8 +151,6 @@ export default function CustomSky({
     mainFlashMs: { value: mainFlashMs, min: 40, max: 600, step: 10 },
     tailMs: { value: tailMs, min: 40, max: 2000, step: 10 },
     doubleFlashChance: { value: doubleFlashChance, min: 0, max: 1, step: 0.01 },
-    // Flash peak is now the MAX value; min assumed ~1.0
-    flashPeakGain: { value: flashPeakGain, min: 1.0, max: 10.0, step: 0.05 },
   });
 
   // Use Sky / Color props directly (controlled from Experience.jsx presets)

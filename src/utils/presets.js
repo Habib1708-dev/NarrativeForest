@@ -49,6 +49,20 @@ export const PRESETS = {
     hazeColor: "#585858",
   },
 
+  "Stormy Night": {
+    globalDarken: 0.15,
+    fogColor: "#4d4d4d",
+    sunPosition: [5.0, -1.0, 30.0],
+    rayleigh: 0.01,
+    turbidity: 1.1,
+    mieCoefficient: 0,
+    mieDirectionalG: 0,
+    skyDarken: 0.15,
+    hazeColor: "#585858",
+    lightningEnabled: true,
+    flashPeakGain: 25.0,
+  },
+
   Dawn: {
     globalDarken: 0.15,
     fogColor: "#4d4d4d",

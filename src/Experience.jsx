@@ -200,6 +200,10 @@ export default function Experience() {
         label: "Hue Shift",
       },
     }),
+    "Sky / Lightning": folder({
+      lightningEnabled: { value: false, label: "Enable Lightning" },
+      flashPeakGain: { value: 4.5, min: 1.0, max: 30.0, step: 0.1, label: "Peak Gain" },
+    }),
   });
 
   // State for transition overrides
@@ -281,6 +285,9 @@ export default function Experience() {
     tintColor,
     tintStrength,
     hueShift,
+    // Sky / Lightning values (from presets)
+    lightningEnabled,
+    flashPeakGain,
   } = activeValues;
 
   // Setup preset transition system with ref to track values
@@ -513,7 +520,8 @@ export default function Experience() {
         tintColor={tintColor}
         tintStrength={tintStrength}
         hueShift={hueShift}
-        // Lightning controls are now managed inside CustomSky's "Sky / Lightning" folder
+        lightningEnabled={lightningEnabled}
+        flashPeakGain={flashPeakGain}
       />
       <Stars />
 
