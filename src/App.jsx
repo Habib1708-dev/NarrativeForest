@@ -3,11 +3,40 @@ import { Canvas } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import Experience from "./Experience";
 import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
+import DebugModeIndicator from "./components/DebugModeIndicator";
+import { useDebugStore } from "./state/useDebugStore";
 
 export default function App() {
+  const isDebugMode = useDebugStore((state) => state.isDebugMode);
+  const toggleDebugMode = useDebugStore((state) => state.toggleDebugMode);
   const audioRef = useRef(null);
   const rainAudioRef = useRef(null);
   const [currentPreset, setCurrentPreset] = useState("Default");
+
+  // Toggle body class based on debug mode (for hiding Leva controls)
+  useEffect(() => {
+    if (isDebugMode) {
+      document.body.classList.remove("user-mode");
+      document.body.classList.add("debug-mode");
+    } else {
+      document.body.classList.remove("debug-mode");
+      document.body.classList.add("user-mode");
+    }
+  }, [isDebugMode]);
+
+  // Keyboard shortcut to toggle debug mode (Ctrl+D)
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Check for Ctrl+D (or Cmd+D on Mac)
+      if ((event.ctrlKey || event.metaKey) && event.key === "d") {
+        event.preventDefault(); // Prevent browser bookmark dialog
+        toggleDebugMode();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleDebugMode]);
 
   // Listen for preset changes from Experience
   useEffect(() => {
@@ -113,6 +142,10 @@ export default function App() {
         loop
         preload="auto"
       />
+
+      {/* Debug mode indicator badge */}
+      <DebugModeIndicator />
+
       <Canvas
         // World camera (OrbitControls drives this)
         camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
@@ -122,6 +155,8 @@ export default function App() {
       >
         <Experience />
       </Canvas>
+
+      {/* Joystick overlay - always visible for user navigation */}
       <FreeFlyJoystickOverlay />
     </>
   );

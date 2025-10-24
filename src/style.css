@@ -85,3 +85,9 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Hide Leva controls in user mode */
+body.user-mode .leva-c_lvVpT_,
+body.user-mode [class*="leva-"] {
+  display: none !important;
+}

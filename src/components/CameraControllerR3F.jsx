@@ -3,6 +3,7 @@ import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useControls, folder } from "leva";
 import { useCameraStore } from "../state/useCameraStore";
+import { useDebugStore } from "../state/useDebugStore";
 import { yawPitchFromQuaternion } from "../utils/cameraInterp";
 
 // Minimal gizmos: spheres at waypoint positions and optional lines to lookAt targets
@@ -54,9 +55,11 @@ function CameraWaypointGizmos() {
 export default function CameraControllerR3F() {
   // Keep current camera behavior unless enabled is true
   const { camera } = useThree();
+  const isDebugMode = useDebugStore((state) => state.isDebugMode);
   const setT = useCameraStore((s) => s.setT);
   const getPose = useCameraStore((s) => s.getPose);
   const enabled = useCameraStore((s) => s.enabled);
+  const setEnabled = useCameraStore((s) => s.setEnabled);
   const locked = useCameraStore((s) => s.locked);
   const paused = useCameraStore((s) => s.paused);
   const mode = useCameraStore((s) => s.mode);
@@ -77,7 +80,7 @@ export default function CameraControllerR3F() {
   const tRef = useRef(useCameraStore.getState().t ?? 0);
   const lastSegRef = useRef(-1);
 
-  // Leva controls
+  // Leva controls (only visible in debug mode)
   const waypointNames = useMemo(
     () => waypoints.map((w, i) => w.name ?? `wp-${i}`),
     [waypoints]
@@ -86,7 +89,7 @@ export default function CameraControllerR3F() {
     "Narrative/Camera",
     {
       enabled: {
-        value: useCameraStore.getState().enabled,
+        value: true, // Start enabled by default
         onChange: (v) => useCameraStore.getState().setEnabled(v),
       },
       GlobalSS: {
@@ -200,7 +203,7 @@ export default function CameraControllerR3F() {
         },
       }),
     },
-    { collapsed: false }
+    { collapsed: false, hidden: !isDebugMode }
   );
 
   const lastLogRef = useRef({ pos: new THREE.Vector3(), yaw: 0, pitch: 0 });

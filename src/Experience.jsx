@@ -6,6 +6,7 @@ import { useControls, folder, button } from "leva";
 import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { useDebugStore } from "./state/useDebugStore";
 
 import {
   EffectComposer,
@@ -48,6 +49,7 @@ import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
   const { gl, camera } = useThree();
+  const isDebugMode = useDebugStore((state) => state.isDebugMode);
   const enabled = useCameraStore((s) => s.enabled);
   const archConfig = useCameraStore((s) => s.archConfig);
   const setArchConfig = useCameraStore((s) => s.setArchConfig);
@@ -70,147 +72,163 @@ export default function Experience() {
   const [lakeExclusion, setLakeExclusion] = useState(null);
   const prevExclRef = useRef(null);
 
-  // Preset control
-  const presetControl = useControls("Presets", {
-    preset: {
-      value: "Default",
-      options: PRESET_NAMES,
-      label: "Select Preset",
-    },
-    transitionDuration: {
-      value: 2.0,
-      min: 0.1,
-      max: 10.0,
-      step: 0.1,
-      label: "Transition Duration (s)",
-    },
-  });
-
-  const controls = useControls({
-    Scene: folder({
-      globalDarken: {
-        value: 0.0,
-        min: 0.0,
-        max: 1.0,
-        step: 0.01,
-        label: "Global Darken",
+  // Preset control (only visible in debug mode)
+  const presetControl = useControls(
+    "Presets",
+    {
+      preset: {
+        value: "Default",
+        options: PRESET_NAMES,
+        label: "Select Preset",
       },
-    }),
-    "Post / Film Grain": folder({
-      grainEnabled: {
-        value: false,
-        label: "Enable Film Grain",
-      },
-      grainStrength: {
-        value: 0.02,
-        min: 0.0,
-        max: 0.5,
-        step: 0.01,
-        label: "Grain Strength",
-      },
-      grainSize: {
-        value: 0.5,
-        min: 0.5,
-        max: 5.0,
-        step: 0.1,
-        label: "Grain Size",
-      },
-    }),
-    "Post / Distance Blur": folder({
-      blurEnabled: {
-        value: false,
-        label: "Enable Distance Blur",
-      },
-      blurFocusDistance: {
-        value: 1.5,
-        min: 0.1,
-        max: 50.0,
-        step: 0.1,
-        label: "Focus Distance",
-      },
-      blurFocusRange: {
+      transitionDuration: {
         value: 2.0,
-        min: 0.5,
-        max: 20.0,
+        min: 0.1,
+        max: 10.0,
         step: 0.1,
-        label: "Focus Range",
+        label: "Transition Duration (s)",
       },
-      blurStrength: {
-        value: 5.0,
-        min: 0.0,
-        max: 20.0,
-        step: 0.1,
-        label: "Blur Strength",
-      },
-    }),
-    Atmosphere: folder({
-      fogColor: { value: "#585858" },
-      fogMode: { value: "exp2", options: ["linear", "exp2"] },
-      fogNear: { value: 4, min: 0, max: 50, step: 1 },
-      fogFar: { value: 10, min: 3, max: 30, step: 3 },
-      fogDensity: { value: 0.4, min: 0.0, max: 0.8, step: 0.001 },
-    }),
-    Lights: folder({
-      dirLightIntensity: { value: 0.0, min: 0, max: 5, step: 0.01 },
-    }),
-    "Unified Fog": folder({
-      fEnabled: { value: true },
-      fColor: { value: "#98a0a5" },
-      fDensity: { value: 1.96, min: 0.0, max: 3.0, step: 0.01 },
-      fExtinction: { value: 0.1, min: 0.1, max: 5.0, step: 0.01 },
-      fFogHeight: { value: -12.7, min: -20.0, max: 40.0, step: 0.1 },
-      fFadeStart: { value: 0, min: 0.0, max: 200.0, step: 0.1 },
-      fFadeEnd: { value: 51.8, min: 0.0, max: 300.0, step: 0.1 },
-      fDistStart: { value: 6.0, min: 0.0, max: 500.0, step: 0.1 },
-      fDistEnd: { value: 9.0, min: 0.0, max: 1000.0, step: 0.1 },
-      fLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
-      fLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
-      fLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
-      fLightIntensity: { value: 0.0, min: 0.0, max: 2.0, step: 0.01 },
-      fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
-      fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
-    }),
-    Sky: folder({
-      sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
-      rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
-      turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
-      mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
-      mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
-      skyDarken: {
-        value: 0.0,
-        min: 0.0,
-        max: 1.0,
-        step: 0.01,
-        label: "Darken",
-      },
-      // Lightning controls moved to "Sky / Lightning" folder inside CustomSky
-    }),
-    "Sky / Haze": folder({
-      hazeColor: { value: "#585858", label: "Haze Color" },
-    }),
-    "Sky / Color": folder({
-      saturation: { value: 1.0, min: 0.0, max: 2.5, step: 0.01 },
-      tintStrength: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
-      tintColor: { value: "#ffffff", label: "Tint Color" },
-      hueShift: {
-        value: 0,
-        min: -180,
-        max: 180,
-        step: 0.5,
-        label: "Hue Shift",
-      },
-    }),
-    "Sky / Lightning": folder({
-      lightningEnabled: { value: false, label: "Enable Lightning" },
-      flashPeakGain: {
-        value: 4.5,
-        min: 1.0,
-        max: 30.0,
-        step: 0.1,
-        label: "Peak Gain",
-      },
-    }),
-  });
+    },
+    { hidden: !isDebugMode }
+  );
+
+  const controls = useControls(
+    {
+      Scene: folder(
+        {
+          globalDarken: {
+            value: 0.0,
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            label: "Global Darken",
+          },
+        },
+        { collapsed: true }
+      ),
+      "Post / Film Grain": folder({
+        grainEnabled: {
+          value: false,
+          label: "Enable Film Grain",
+        },
+        grainStrength: {
+          value: 0.02,
+          min: 0.0,
+          max: 0.5,
+          step: 0.01,
+          label: "Grain Strength",
+        },
+        grainSize: {
+          value: 0.5,
+          min: 0.5,
+          max: 5.0,
+          step: 0.1,
+          label: "Grain Size",
+        },
+      }),
+      "Post / Distance Blur": folder({
+        blurEnabled: {
+          value: false,
+          label: "Enable Distance Blur",
+        },
+        blurFocusDistance: {
+          value: 1.5,
+          min: 0.1,
+          max: 50.0,
+          step: 0.1,
+          label: "Focus Distance",
+        },
+        blurFocusRange: {
+          value: 2.0,
+          min: 0.5,
+          max: 20.0,
+          step: 0.1,
+          label: "Focus Range",
+        },
+        blurStrength: {
+          value: 5.0,
+          min: 0.0,
+          max: 20.0,
+          step: 0.1,
+          label: "Blur Strength",
+        },
+      }),
+      Atmosphere: folder({
+        fogColor: { value: "#585858" },
+        fogMode: { value: "exp2", options: ["linear", "exp2"] },
+        fogNear: { value: 4, min: 0, max: 50, step: 1 },
+        fogFar: { value: 10, min: 3, max: 30, step: 3 },
+        fogDensity: { value: 0.4, min: 0.0, max: 0.8, step: 0.001 },
+      }),
+      Lights: folder({
+        dirLightIntensity: { value: 0.0, min: 0, max: 5, step: 0.01 },
+      }),
+      "Unified Fog": folder({
+        fEnabled: { value: true },
+        fColor: { value: "#98a0a5" },
+        fDensity: { value: 1.96, min: 0.0, max: 3.0, step: 0.01 },
+        fExtinction: { value: 0.1, min: 0.1, max: 5.0, step: 0.01 },
+        fFogHeight: { value: -12.7, min: -20.0, max: 40.0, step: 0.1 },
+        fFadeStart: { value: 0, min: 0.0, max: 200.0, step: 0.1 },
+        fFadeEnd: { value: 51.8, min: 0.0, max: 300.0, step: 0.1 },
+        fDistStart: { value: 6.0, min: 0.0, max: 500.0, step: 0.1 },
+        fDistEnd: { value: 9.0, min: 0.0, max: 1000.0, step: 0.1 },
+        fLightDirX: { value: -0.5, min: -1, max: 1, step: 0.01 },
+        fLightDirY: { value: 0.8, min: -1, max: 1, step: 0.01 },
+        fLightDirZ: { value: -0.4, min: -1, max: 1, step: 0.01 },
+        fLightIntensity: { value: 0.0, min: 0.0, max: 2.0, step: 0.01 },
+        fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
+        fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
+      }),
+      Sky: folder(
+        {
+          sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
+          rayleigh: { value: 0.01, min: 0, max: 4, step: 0.01 },
+          turbidity: { value: 1.1, min: 0, max: 20, step: 0.01 },
+          mieCoefficient: { value: 0, min: 0, max: 0.1, step: 0.001 },
+          mieDirectionalG: { value: 0, min: 0, max: 1, step: 0.01 },
+          skyDarken: {
+            value: 0.0,
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            label: "Darken",
+          },
+          // Lightning controls moved to "Sky / Lightning" folder inside CustomSky
+        },
+        { collapsed: true }
+      ),
+      "Sky / Haze": folder({
+        hazeColor: { value: "#585858", label: "Haze Color" },
+      }),
+      "Sky / Color": folder({
+        saturation: { value: 1.0, min: 0.0, max: 2.5, step: 0.01 },
+        tintStrength: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
+        tintColor: { value: "#ffffff", label: "Tint Color" },
+        hueShift: {
+          value: 0,
+          min: -180,
+          max: 180,
+          step: 0.5,
+          label: "Hue Shift",
+        },
+      }),
+      "Sky / Lightning": folder(
+        {
+          lightningEnabled: { value: false, label: "Enable Lightning" },
+          flashPeakGain: {
+            value: 4.5,
+            min: 1.0,
+            max: 30.0,
+            step: 0.1,
+            label: "Peak Gain",
+          },
+        },
+        { collapsed: true }
+      ),
+    },
+    { hidden: !isDebugMode }
+  );
 
   // State for transition overrides
   const [transitionOverrides, setTransitionOverrides] = useState({});
@@ -420,7 +438,7 @@ export default function Experience() {
     }
   }, [presetControl.preset, presetControl.transitionDuration, activeValues]);
 
-  // Arch controls
+  // Arch controls (only visible in debug mode)
   const archControls = useControls(
     "Post Ring Arch",
     {
@@ -434,7 +452,7 @@ export default function Experience() {
         step: 1,
       },
     },
-    { collapsed: true }
+    { collapsed: true, hidden: !isDebugMode }
   );
 
   useEffect(() => {
@@ -514,7 +532,8 @@ export default function Experience() {
 
   return (
     <>
-      <Perf position="top-left" />
+      {/* Performance monitor - only visible in debug mode */}
+      {isDebugMode && <Perf position="top-left" />}
 
       {fogMode === "exp2" ? (
         <fogExp2 attach="fog" args={[fogColor, fogDensity]} />
@@ -539,19 +558,21 @@ export default function Experience() {
       />
       <Stars />
 
+      {/* OrbitControls - only active in debug mode when narrative camera is disabled */}
       <OrbitControls
-        makeDefault
+        makeDefault={isDebugMode && !enabled}
         minDistance={0.05}
         maxDistance={600}
         target={[-1.25, -4.45, -2.9]}
         enableDamping
         dampingFactor={0.05}
-        enablePan
+        enablePan={isDebugMode && !enabled}
         panSpeed={1.0}
-        enableZoom={!enabled}
+        enableZoom={isDebugMode && !enabled}
         zoomSpeed={1.2}
         screenSpacePanning
         rotateSpeed={0.6}
+        enabled={isDebugMode && !enabled}
       />
 
       <ambientLight intensity={0} />

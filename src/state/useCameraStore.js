@@ -736,7 +736,7 @@ export const useCameraStore = create((set, get) => {
     terrainCollider: null,
 
     // flags
-    enabled: false,
+    enabled: true, // Start with narrative camera enabled by default (user mode)
     paused: false,
     locked: false,
 
