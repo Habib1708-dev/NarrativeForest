@@ -695,6 +695,25 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   const progressRef = useRef(-0.2); // dissolve gate (-0.2..1.1)
   const coolMixRef = useRef(0.0); // 0..1 glow/heat
   const shouldBuildRef = useRef(false);
+  const crystalAudioRef = useRef(null);
+  const isPlayingCrystalSoundRef = useRef(false);
+
+  // Initialize crystal audio
+  useEffect(() => {
+    const audio = new Audio(
+      "/audio/animated_sound_effects_of_crysta-2-329362.mp3"
+    );
+    audio.preload = "auto";
+    audio.volume = 0.6; // Set a reasonable volume
+    crystalAudioRef.current = audio;
+
+    return () => {
+      if (crystalAudioRef.current) {
+        crystalAudioRef.current.pause();
+        crystalAudioRef.current = null;
+      }
+    };
+  }, []);
 
   // Subscribe to camera store to detect stop-15-down and beyond
   const currentWaypointIndex = useCameraStore((state) => {
@@ -735,6 +754,24 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
           ? `💎 Camera at waypoint ${currentWaypointIndex} (>= stop-15-down index ${stop15DownIndex}): Building crystals...`
           : `💎 Camera at waypoint ${currentWaypointIndex} (< stop-15-down index ${stop15DownIndex}): Dissolving crystals...`
       );
+
+      // Play crystal sound when building starts
+      if (
+        shouldBuild &&
+        crystalAudioRef.current &&
+        !isPlayingCrystalSoundRef.current
+      ) {
+        crystalAudioRef.current.currentTime = 0;
+        crystalAudioRef.current.play().catch((error) => {
+          console.log("Crystal audio play failed:", error);
+        });
+        isPlayingCrystalSoundRef.current = true;
+
+        // Reset the playing flag when audio ends
+        crystalAudioRef.current.onended = () => {
+          isPlayingCrystalSoundRef.current = false;
+        };
+      }
     }
   }, [currentWaypointIndex, stop15DownIndex]);
 

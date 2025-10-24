@@ -394,6 +394,14 @@ export default function Experience() {
   useEffect(() => {
     if (presetControl.preset !== prevPresetRef.current) {
       prevPresetRef.current = presetControl.preset;
+
+      // Dispatch preset change event for external listeners (e.g., rain audio in App.jsx)
+      window.dispatchEvent(
+        new CustomEvent("presetChanged", {
+          detail: { preset: presetControl.preset },
+        })
+      );
+
       const targetPreset = PRESETS[presetControl.preset];
       if (targetPreset) {
         console.log(`\n🎨 ======== PRESET: ${presetControl.preset} ========`);

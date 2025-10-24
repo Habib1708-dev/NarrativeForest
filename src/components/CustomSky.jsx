@@ -23,14 +23,14 @@ export default function CustomSky({
 
   // --- ⚡ Lightning: behavior controls (all optional) ---
   lightningEnabled = false, // master toggle
-  flashMinDelay = 2.0, // seconds between pulses (min)
-  flashMaxDelay = 2.4, // seconds between pulses (max)
-  flashPeakGain = 4.5, // peak multiplier on sky (1.0 = none)
-  preFlashMs = 60, // small ramp before main flash
-  mainFlashMs = 200, // bright punch (longer)
-  tailMs = 420, // decay window (longer)
+  flashMinDelay = 4.0, // seconds between pulses (min) - increased for longer quiet periods
+  flashMaxDelay = 8.0, // seconds between pulses (max) - increased to match user's request
+  flashPeakGain = 8.0, // peak multiplier on sky (1.0 = none) - increased for brighter strikes
+  preFlashMs = 40, // small ramp before main flash - reduced for quicker onset
+  mainFlashMs = 120, // bright punch - reduced for shorter, more natural streak
+  tailMs = 250, // decay window - reduced for shorter tail
   flickers = 2, // little spikes in the tail
-  flickerDepth = 0.45, // amplitude of the first tail spike (0..1)
+  flickerDepth = 0.35, // amplitude of the first tail spike (0..1) - reduced slightly
   doubleFlashChance = 0.25, // chance of a second pulse ~120ms later
 
   // --- New realism controls (optional) ---
@@ -414,6 +414,18 @@ export default function CustomSky({
   const timeRef = useRef(0);
   const nextFireAtRef = useRef(0);
   const activeRef = useRef(null); // holds current envelope timeline or null
+  const activeThunderSoundsRef = useRef([]); // array of currently playing thunder sounds
+
+  // Cleanup function for thunder sounds
+  useEffect(() => {
+    return () => {
+      // Stop all active thunder sounds on unmount
+      activeThunderSoundsRef.current.forEach((audio) => {
+        audio.pause();
+      });
+      activeThunderSoundsRef.current = [];
+    };
+  }, []);
 
   // Helper to schedule the next lightning start time
   const randRange = (a, b) => a + Math.random() * (b - a);
@@ -593,6 +605,35 @@ export default function CustomSky({
           const env = makeEnvelope();
           const duration = env.reduce((a, s) => a + s.dur, 0);
           activeRef.current = { t0: now, env, duration };
+
+          // Play thunder sound with volume based on lightning peak intensity
+          // Create a NEW audio instance for each strike so they can overlap
+          const thunderAudio = new Audio("/audio/loud-thunder-192165.mp3");
+          const peak = env._peak ?? flashPeakGain;
+          // Normalize peak to 0-1 range (assuming peak range is 1-10)
+          const normalizedPeak = Math.min(1, Math.max(0, (peak - 1) / 9));
+          // Set volume (0.3 to 1.0 based on intensity)
+          const volume = 0.3 + normalizedPeak * 0.7;
+          thunderAudio.volume = volume;
+
+          // Add to active sounds array
+          activeThunderSoundsRef.current.push(thunderAudio);
+
+          // Remove from array when finished
+          thunderAudio.addEventListener("ended", () => {
+            const index = activeThunderSoundsRef.current.indexOf(thunderAudio);
+            if (index > -1) {
+              activeThunderSoundsRef.current.splice(index, 1);
+            }
+          });
+
+          thunderAudio.play().catch(() => {
+            // Audio play failed (autoplay policy), remove from active array
+            const index = activeThunderSoundsRef.current.indexOf(thunderAudio);
+            if (index > -1) {
+              activeThunderSoundsRef.current.splice(index, 1);
+            }
+          });
         }
       }
 
