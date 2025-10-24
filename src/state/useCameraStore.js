@@ -714,7 +714,7 @@ export const useCameraStore = create((set, get) => {
     freeFlySpeed: 2.7,
     freeFlyMinStrength: 0.25,
     freeFlyTimeScale: 1,
-    freeFlyJoystickRadius: 120,
+    freeFlyJoystickRadius: 80, // Reduced from 120 to 80
     freeFlyJoystickInnerScale: 0.35,
     freeFlyDeadZone: 0.05,
     freeFlyStrengthPower: 0.85,
@@ -853,7 +853,17 @@ export const useCameraStore = create((set, get) => {
       set((s) => {
         if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
         const origin = s.freeFly.joystick?.origin;
-        const radius = Math.max(10, s.freeFlyJoystickRadius ?? 120);
+
+        // Calculate responsive radius based on screen width
+        let baseRadius = s.freeFlyJoystickRadius ?? 80;
+        const width = typeof window !== "undefined" ? window.innerWidth : 1920;
+        if (width < 480) {
+          baseRadius *= 0.65; // 65% on small phones
+        } else if (width < 768) {
+          baseRadius *= 0.8; // 80% on tablets/large phones
+        }
+        const radius = Math.max(10, baseRadius);
+
         const nextFreeFly = {
           ...s.freeFly,
           lastPointer: { x, y },

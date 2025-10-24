@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Experience from "./Experience";
 import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "./components/DebugModeIndicator";
+import ClickAndDragHint from "./components/ClickAndDragHint";
 import { useDebugStore } from "./state/useDebugStore";
 
 export default function App() {
@@ -145,6 +146,9 @@ export default function App() {
 
       {/* Debug mode indicator badge */}
       <DebugModeIndicator />
+
+      {/* Click and drag hint overlay for free-fly mode */}
+      <ClickAndDragHint />
 
       <Canvas
         // World camera (OrbitControls drives this)

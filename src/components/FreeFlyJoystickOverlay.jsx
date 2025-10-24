@@ -4,8 +4,29 @@ import { useCameraStore } from "../state/useCameraStore";
 export default function FreeFlyJoystickOverlay() {
   const mode = useCameraStore((s) => s.mode);
   const freeFly = useCameraStore((s) => s.freeFly);
-  const radius = useCameraStore((s) => s.freeFlyJoystickRadius ?? 120);
+  const baseRadius = useCameraStore((s) => s.freeFlyJoystickRadius ?? 80);
   const innerScale = useCameraStore((s) => s.freeFlyJoystickInnerScale ?? 0.35);
+
+  // Calculate responsive radius based on screen size
+  const [radius, setRadius] = useState(baseRadius);
+
+  useEffect(() => {
+    const updateRadius = () => {
+      const width = window.innerWidth;
+      // Scale down on smaller screens
+      if (width < 480) {
+        setRadius(baseRadius * 0.65); // 65% on small phones
+      } else if (width < 768) {
+        setRadius(baseRadius * 0.8); // 80% on tablets/large phones
+      } else {
+        setRadius(baseRadius); // Full size on desktop
+      }
+    };
+
+    updateRadius();
+    window.addEventListener("resize", updateRadius);
+    return () => window.removeEventListener("resize", updateRadius);
+  }, [baseRadius]);
 
   const styles = useMemo(() => {
     if (!freeFly?.joystick?.origin) return null;
@@ -89,25 +110,31 @@ export default function FreeFlyJoystickOverlay() {
 
   const outerStyle = {
     ...activeStyles.outer,
-    border: "1px solid rgba(255,255,255,0.22)",
+    border: "1px solid rgba(255, 255, 255, 0.18)",
     background:
-      "linear-gradient(140deg, rgba(28,32,44,0.62), rgba(16,20,30,0.4))",
-    boxShadow: "0 18px 44px rgba(14,18,32,0.38)",
-    backdropFilter: "blur(14px)",
+      "linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))",
+    boxShadow:
+      "0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 0 rgba(255, 255, 255, 0.1)",
+    backdropFilter: "blur(20px) saturate(180%)",
+    WebkitBackdropFilter: "blur(20px) saturate(180%)",
     opacity: visible ? 1 : 0,
     transform: visible ? "scale(1)" : "scale(0.9)",
-    transition: `opacity ${FADE_MS}ms ease, transform ${FADE_MS}ms ease`,
+    transition: `opacity ${FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1), transform ${FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`,
   };
 
   const baseInnerTransform = activeStyles.inner.transform ?? "translateZ(0)";
   const innerStyle = {
     ...activeStyles.inner,
-    background: "rgba(255,255,255,0.92)",
-    border: "1px solid rgba(255,255,255,0.55)",
-    boxShadow: "0 12px 32px rgba(18,24,46,0.35)",
+    background:
+      "linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.45))",
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    boxShadow:
+      "0 4px 16px rgba(255, 255, 255, 0.2), 0 8px 24px rgba(0, 0, 0, 0.15)",
+    backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
     opacity: visible ? 1 : 0,
     transform: `${baseInnerTransform} ${visible ? "scale(1)" : "scale(0.82)"}`,
-    transition: `opacity ${FADE_MS}ms ease, transform ${FADE_MS}ms ease`,
+    transition: `opacity ${FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1), transform ${FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`,
   };
 
   return (
