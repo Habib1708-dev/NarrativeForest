@@ -5,7 +5,9 @@ import Experience from "./Experience";
 import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "./components/DebugModeIndicator";
 import ClickAndDragHint from "./components/ClickAndDragHint";
+import PresetSelector from "./components/PresetSelector";
 import { useDebugStore } from "./state/useDebugStore";
+import { PRESET_NAMES } from "./utils/presets";
 
 export default function App() {
   const isDebugMode = useDebugStore((state) => state.isDebugMode);
@@ -50,6 +52,17 @@ export default function App() {
       window.removeEventListener("presetChanged", handlePresetChange);
     };
   }, []);
+
+  // Handle preset change from PresetSelector
+  const handlePresetChange = (presetName) => {
+    setCurrentPreset(presetName);
+    // Dispatch event to Experience component
+    window.dispatchEvent(
+      new CustomEvent("userPresetChange", {
+        detail: { preset: presetName },
+      })
+    );
+  };
 
   // Handle rain audio based on preset
   useEffect(() => {
@@ -149,6 +162,13 @@ export default function App() {
 
       {/* Click and drag hint overlay for free-fly mode */}
       <ClickAndDragHint />
+
+      {/* Preset selector for free-fly mode */}
+      <PresetSelector
+        presets={PRESET_NAMES}
+        currentPreset={currentPreset}
+        onPresetChange={handlePresetChange}
+      />
 
       <Canvas
         // World camera (OrbitControls drives this)

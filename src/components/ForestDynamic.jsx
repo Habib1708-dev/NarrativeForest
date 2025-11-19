@@ -1,11 +1,5 @@
 // src/components/ForestDynamic.jsx
-import React, {
-  useMemo,
-  useRef,
-  useEffect,
-  useCallback,
-  useState,
-} from "react";
+import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useControls } from "leva";
@@ -204,9 +198,29 @@ export default function ForestDynamic({
 
   // ---------------- Chunk windows & modes (NEAR + MID only) ----------------
   const modesRef = useRef({});
-  const [, setModes] = useState({});
   const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
   const camXZ = useRef(new THREE.Vector3());
+  const prevChildrenCountRef = useRef(-1);
+
+  const terrainBoundsRef = useRef(null);
+  const ensureTerrainBounds = useCallback(() => {
+    if (!terrainGroup) return;
+    try {
+      terrainGroup.updateMatrixWorld?.(true);
+    } catch (err) {
+      // terrainGroup might be mid-disposal; ignore and retry next frame
+    }
+    const box = new THREE.Box3().setFromObject(terrainGroup);
+    terrainBoundsRef.current = {
+      minY: box.min.y,
+      maxY: box.max.y,
+    };
+  }, [terrainGroup]);
+
+  useEffect(() => {
+    if (!terrainGroup) return;
+    ensureTerrainBounds();
+  }, [terrainGroup, ensureTerrainBounds]);
 
   useEffect(() => {
     lastCellRef.current = { cx: 1e9, cz: 1e9 };
@@ -214,10 +228,16 @@ export default function ForestDynamic({
 
   // Chunk cache
   const cacheRef = useRef(new Map());
+  const coldCacheRef = useRef(new Map());
   const buildQueueRef = useRef([]);
   const dropTimesRef = useRef(new Map());
   const raycasterRef = useRef(new THREE.Raycaster());
   raycasterRef.current.firstHitOnly = true;
+
+  const needsRefreshRef = useRef(false);
+  const scheduleRefresh = () => {
+    needsRefreshRef.current = true;
+  };
 
   // Capacities
   const TREE_CAP = 6000;
@@ -251,6 +271,14 @@ export default function ForestDynamic({
     publishOccluders();
     return () => onOccludersChange?.([]); // clear on unmount
   }, [publishOccluders, highParts.length, rockParts.length, onOccludersChange]);
+
+  useEffect(() => {
+    scheduleRefresh();
+  }, []);
+
+  useEffect(() => {
+    scheduleRefresh();
+  }, [renderMidTrees, RENDER_EXTRA]);
   // ------------------------------------------------------------------------
 
   const chunkKey = (cx, cz) => `${cx},${cz}`;
@@ -286,6 +314,17 @@ export default function ForestDynamic({
   useFrame(() => {
     if (!terrainGroup) return;
 
+    const childrenCount = terrainGroup.children?.length ?? 0;
+    if (childrenCount !== prevChildrenCountRef.current) {
+      prevChildrenCountRef.current = childrenCount;
+      ensureTerrainBounds();
+      scheduleRefresh();
+    }
+
+    if (!terrainBoundsRef.current) {
+      ensureTerrainBounds();
+    }
+
     camXZ.current.set(camera.position.x, 0, camera.position.z);
     const [ccx, ccz] = worldToChunk(camXZ.current.x, camXZ.current.z);
     if (ccx === lastCellRef.current.cx && ccz === lastCellRef.current.cz)
@@ -298,20 +337,25 @@ export default function ForestDynamic({
     const now = performance.now();
     for (const k of viewSet) {
       if (!cacheRef.current.has(k)) {
-        const [x, z] = k.split(",").map((n) => parseInt(n, 10));
-        buildQueueRef.current.push({ key: k, cx: x, cz: z, enqueuedAt: now });
+        const restored = coldCacheRef.current.get(k);
+        if (restored) {
+          cacheRef.current.set(k, restored);
+          coldCacheRef.current.delete(k);
+          scheduleRefresh();
+        } else {
+          const [x, z] = k.split(",").map((n) => parseInt(n, 10));
+          buildQueueRef.current.push({ key: k, cx: x, cz: z, enqueuedAt: now });
+        }
       }
       dropTimesRef.current.delete(k);
     }
 
     // Update modes & schedule drop
     modesRef.current = next;
-    setModes(next);
     for (const k of cacheRef.current.keys())
       if (!viewSet.has(k)) dropTimesRef.current.set(k, performance.now());
 
-    // Reflect new rings immediately
-    refreshInstancing();
+    scheduleRefresh();
   });
 
   // Drop chunks outside retention window after cooldown
@@ -321,7 +365,12 @@ export default function ForestDynamic({
     const cooldown = retentionSeconds * 1000;
     dropTimesRef.current.forEach((t0, key) => {
       if (now - t0 >= cooldown) {
-        cacheRef.current.delete(key);
+        const rec = cacheRef.current.get(key);
+        if (rec) {
+          coldCacheRef.current.set(key, rec);
+          cacheRef.current.delete(key);
+          scheduleRefresh();
+        }
         dropTimesRef.current.delete(key);
       }
     });
@@ -333,6 +382,10 @@ export default function ForestDynamic({
 
     const raycaster = raycasterRef.current;
     let raysLeft = raysPerFrame;
+
+    if (!terrainBoundsRef.current) {
+      ensureTerrainBounds();
+    }
 
     while (raysLeft > 0 && buildQueueRef.current.length) {
       const job = buildQueueRef.current.shift();
@@ -354,6 +407,7 @@ export default function ForestDynamic({
         treeBaseMinY,
         rockBottomPerPart,
         insideExclusion,
+        terrainBounds: terrainBoundsRef.current,
       });
 
       raysLeft -= result.raysUsed;
@@ -363,9 +417,9 @@ export default function ForestDynamic({
         rocksByPart: result.rockMatricesByPart,
         built: true,
       });
+      coldCacheRef.current.delete(job.key);
+      scheduleRefresh();
     }
-
-    refreshInstancing();
   });
 
   // Rebuild overlapping chunks immediately when exclusion changes (instant cleanup)
@@ -386,21 +440,26 @@ export default function ForestDynamic({
     for (let cz = minCz; cz <= maxCz; cz++) {
       for (let cx = minCx; cx <= maxCx; cx++) {
         const key = chunkKey(cx, cz);
+        let removed = false;
         if (cacheRef.current.has(key)) {
           cacheRef.current.delete(key);
-          // If currently in view, enqueue rebuild
-          if (modesRef.current[key]) {
-            buildQueueRef.current.push({ key, cx, cz, enqueuedAt: now });
-          }
+          removed = true;
+        }
+        if (coldCacheRef.current.has(key)) {
+          coldCacheRef.current.delete(key);
+          removed = true;
+        }
+        if (removed && modesRef.current[key]) {
+          buildQueueRef.current.push({ key, cx, cz, enqueuedAt: now });
         }
       }
     }
-    refreshInstancing();
+    scheduleRefresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exclusion, chunkSize]);
 
   // Aggregate matrices from active chunks → upload to instanced meshes
-  const refreshInstancing = () => {
+  function applyInstancing() {
     if (!Object.keys(modesRef.current).length) return;
 
     const nearTrees = []; // always rendered
@@ -449,7 +508,13 @@ export default function ForestDynamic({
       m.count = N;
       m.instanceMatrix.needsUpdate = true;
     });
-  };
+  }
+
+  useFrame(() => {
+    if (!needsRefreshRef.current) return;
+    needsRefreshRef.current = false;
+    applyInstancing();
+  }, 1);
 
   if (!highParts.length || !rockParts.length) return null;
 
@@ -500,6 +565,7 @@ function buildChunk(cx, cz, rayBudget, opts) {
     treeBaseMinY,
     rockBottomPerPart,
     insideExclusion,
+    terrainBounds,
   } = opts;
 
   const rng = mulberry32(
@@ -512,9 +578,8 @@ function buildChunk(cx, cz, rayBudget, opts) {
   const maxX = minX + chunkSize;
   const maxZ = minZ + chunkSize;
 
-  // Terrain top bound for ray origin
-  const bb = new THREE.Box3().setFromObject(terrainGroup);
-  const originY = (bb.max.y || 0) + 5;
+  // Terrain top bound for ray origin (cached bounds keep placement unchanged)
+  const originY = (terrainBounds?.maxY ?? 0) + 5;
   const down = new THREE.Vector3(0, -1, 0);
 
   // Occupancy hashes (grid cell ~ half the spacing)

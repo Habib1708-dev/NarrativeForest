@@ -438,6 +438,36 @@ export default function Experience() {
     }
   }, [presetControl.preset, presetControl.transitionDuration, activeValues]);
 
+  // Listen for user preset changes from PresetSelector
+  useEffect(() => {
+    const handleUserPresetChange = (event) => {
+      const presetName = event.detail.preset;
+      const targetPreset = PRESETS[presetName];
+
+      if (targetPreset) {
+        console.log(
+          `\n🎨 ======== USER SELECTED PRESET: ${presetName} ========`
+        );
+        console.log("📋 Target values that will be applied:");
+        console.table(targetPreset);
+        console.log("🔄 Starting transition...\n");
+
+        // Trigger transition
+        transitionRef.current = {
+          isTransitioning: true,
+          startValues: { ...activeValues },
+          targetValues: targetPreset,
+          startTime: performance.now() / 1000,
+          duration: presetControl.transitionDuration,
+        };
+      }
+    };
+
+    window.addEventListener("userPresetChange", handleUserPresetChange);
+    return () =>
+      window.removeEventListener("userPresetChange", handleUserPresetChange);
+  }, [activeValues, presetControl.transitionDuration]);
+
   // Arch controls (only visible in debug mode)
   const archControls = useControls(
     "Post Ring Arch",

@@ -22,5 +22,6 @@ export default defineConfig({
   server: {
     host: true, // LAN access
     open: true, // auto-open browser
+    allowedHosts: true, // allow tunneling domains like ngrok
   },
 });
