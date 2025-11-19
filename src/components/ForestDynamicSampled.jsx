@@ -2,10 +2,50 @@
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
-import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 import { heightAt as defaultHeightSampler } from "../proc/heightfield";
+
+const DEFAULT_FOREST_PARAMS = Object.freeze({
+  seed: 6,
+  chunkSize: 2,
+  nearRingChunks: 3,
+  midRingChunks: 4,
+  raysPerFrame: 150,
+  retentionSeconds: 2,
+  treeMinSpacing: 0.7,
+  rockMinSpacing: 0.35,
+  treeTargetPerChunk: 14,
+  rockTargetPerChunk: 12,
+  treeScaleMin: 0.03,
+  treeScaleMax: 0.06,
+  rockScaleMin: 0.36,
+  rockScaleMax: 0.48,
+  renderMidTrees: false,
+  renderExtraChunks: 3,
+  treeTint: "#000000",
+  treeTintIntensity: 1,
+  rockTint: "#444444",
+  rockTintIntensity: 1,
+});
+
+// Reuse transform helpers + matrix instances to reduce per-chunk GC pressure
+const MATRIX_POOL = [];
+const TMP_POS = new THREE.Vector3();
+const TMP_SCALE = new THREE.Vector3();
+const TMP_QUAT = new THREE.Quaternion();
+const TMP_EULER = new THREE.Euler();
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+function acquireMatrix() {
+  return MATRIX_POOL.length ? MATRIX_POOL.pop() : new THREE.Matrix4();
+}
+
+function releaseMatrix(m) {
+  if (!m) return;
+  m.identity();
+  MATRIX_POOL.push(m);
+}
 
 /**
  * ForestDynamicSampled — mirrors ForestDynamic, but uses deterministic height sampling
@@ -20,10 +60,14 @@ export default function ForestDynamicSampled({
   refRockRefs, // OPTIONAL: external array/refs for the rocks instancedMeshes
   onOccludersChange = () => {}, // OPTIONAL: callback(occ[]) for fog prepass, etc.
   sampleHeight = defaultHeightSampler, // height sampler replacing raycasts
+  config,
 }) {
   const { camera } = useThree();
+  const settings = useMemo(() => {
+    if (!config) return DEFAULT_FOREST_PARAMS;
+    return { ...DEFAULT_FOREST_PARAMS, ...config };
+  }, [config]);
 
-  // ---------------- Controls ----------------
   const {
     seed,
     chunkSize,
@@ -31,79 +75,21 @@ export default function ForestDynamicSampled({
     midRingChunks,
     raysPerFrame,
     retentionSeconds,
-
-    // Scatter & spacing
     treeMinSpacing,
     rockMinSpacing,
     treeTargetPerChunk,
     rockTargetPerChunk,
-
-    // Explicit scale ranges
     treeScaleMin,
     treeScaleMax,
     rockScaleMin,
     rockScaleMax,
-
-    // Rendering toggles
     renderMidTrees,
     renderExtraChunks,
-
-    // Optional tint
     treeTint,
     treeTintIntensity,
     rockTint,
     rockTintIntensity,
-  } = useControls("Forest (Dynamic)", {
-    seed: { value: 6, min: 0, max: 2 ** 31 - 1, step: 1 },
-    chunkSize: { value: 2, min: 1, max: 8, step: 1 },
-    nearRingChunks: {
-      value: 3,
-      min: 1,
-      max: 12,
-      step: 1,
-      label: "Near radius (chunks)",
-    },
-    midRingChunks: {
-      value: 4,
-      min: 1,
-      max: 16,
-      step: 1,
-      label: "Mid radius (chunks)",
-    },
-    raysPerFrame: { value: 150, min: 50, max: 400, step: 5 },
-    retentionSeconds: { value: 2.0, min: 0.5, max: 10, step: 0.5 },
-
-    // Spacing & density
-    treeMinSpacing: { value: 0.7, min: 0.3, max: 2.0, step: 0.05 },
-    rockMinSpacing: { value: 0.35, min: 0.15, max: 1.5, step: 0.05 },
-    treeTargetPerChunk: { value: 14, min: 2, max: 60, step: 1 },
-    rockTargetPerChunk: { value: 12, min: 0, max: 60, step: 1 },
-
-    // Scales
-    treeScaleMin: { value: 0.03, min: 0.005, max: 0.2, step: 0.001 },
-    treeScaleMax: { value: 0.06, min: 0.006, max: 0.3, step: 0.001 },
-    rockScaleMin: { value: 0.36, min: 0.02, max: 0.5, step: 0.001 },
-    rockScaleMax: { value: 0.48, min: 0.03, max: 0.8, step: 0.001 },
-
-    // Rendering toggles
-    renderMidTrees: {
-      value: false,
-      label: "Render mid trees (built either way)",
-    },
-    renderExtraChunks: {
-      value: 3,
-      min: 0,
-      max: 12,
-      step: 1,
-      label: "Render radius extra (chunks)",
-    },
-
-    // Optional tint
-    treeTint: { value: "#000000" },
-    treeTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
-    rockTint: { value: "#444444" },
-    rockTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
-  });
+  } = settings;
 
   // Terrain half-extent clamp so forest never outruns loaded tiles
   const tileHalfExtent = useMemo(
@@ -258,12 +244,24 @@ export default function ForestDynamicSampled({
   }, [renderMidTrees, RENDER_EXTRA, sampleHeight]);
 
   useEffect(() => {
-    cacheRef.current.clear();
-    coldCacheRef.current.clear();
+    releaseCacheMap(cacheRef.current);
+    releaseCacheMap(coldCacheRef.current);
     buildQueueRef.current.length = 0;
     dropTimesRef.current.clear();
     scheduleRefresh();
-  }, [seed, chunkSize, treeMinSpacing, rockMinSpacing, sampleHeight]);
+  }, [
+    seed,
+    chunkSize,
+    treeMinSpacing,
+    rockMinSpacing,
+    treeTargetPerChunk,
+    rockTargetPerChunk,
+    treeScaleMin,
+    treeScaleMax,
+    rockScaleMin,
+    rockScaleMax,
+    sampleHeight,
+  ]);
   // ------------------------------------------------------------------------
 
   const chunkKey = (cx, cz) => `${cx},${cz}`;
@@ -336,6 +334,15 @@ export default function ForestDynamicSampled({
     scheduleRefresh();
   });
 
+  useEffect(() => {
+    return () => {
+      releaseCacheMap(cacheRef.current);
+      releaseCacheMap(coldCacheRef.current);
+      buildQueueRef.current.length = 0;
+      dropTimesRef.current.clear();
+    };
+  }, []);
+
   // Drop chunks outside retention window after cooldown
   useFrame(() => {
     if (!Object.keys(modesRef.current).length) return;
@@ -363,9 +370,16 @@ export default function ForestDynamicSampled({
 
     while (budget > 0 && buildQueueRef.current.length) {
       const job = buildQueueRef.current.shift();
-      if (cacheRef.current.has(job.key)) continue;
+      const { key, cx, cz } = job;
+      if (cacheRef.current.has(key)) continue;
 
-      const result = buildChunkSampled(job.cx, job.cz, {
+      const staleCold = coldCacheRef.current.get(key);
+      if (staleCold) {
+        releaseChunkRecord(staleCold);
+        coldCacheRef.current.delete(key);
+      }
+
+      const result = buildChunkSampled(cx, cz, {
         chunkSize,
         treeMinSpacing,
         rockMinSpacing,
@@ -384,12 +398,11 @@ export default function ForestDynamicSampled({
 
       budget -= Math.max(1, result.cost);
 
-      cacheRef.current.set(job.key, {
+      cacheRef.current.set(key, {
         trees: result.treeMatrices,
         rocksByPart: result.rockMatricesByPart,
         built: true,
       });
-      coldCacheRef.current.delete(job.key);
       scheduleRefresh();
     }
   });
@@ -413,11 +426,15 @@ export default function ForestDynamicSampled({
       for (let cx = minCx; cx <= maxCx; cx++) {
         const key = chunkKey(cx, cz);
         let removed = false;
-        if (cacheRef.current.has(key)) {
+        const warm = cacheRef.current.get(key);
+        if (warm) {
+          releaseChunkRecord(warm);
           cacheRef.current.delete(key);
           removed = true;
         }
-        if (coldCacheRef.current.has(key)) {
+        const cold = coldCacheRef.current.get(key);
+        if (cold) {
+          releaseChunkRecord(cold);
           coldCacheRef.current.delete(key);
           removed = true;
         }
@@ -580,13 +597,11 @@ function buildChunkSampled(cx, cz, opts) {
 
       const rotY = rng() * Math.PI * 2;
 
-      const m4 = new THREE.Matrix4();
-      const p = new THREE.Vector3(x, y, z);
-      const q = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, rotY, 0)
-      );
-      const s = new THREE.Vector3(scale, scale, scale);
-      m4.compose(p, q, s);
+      const m4 = acquireMatrix();
+      TMP_POS.set(x, y, z);
+      TMP_QUAT.setFromAxisAngle(Y_AXIS, rotY);
+      TMP_SCALE.setScalar(scale);
+      m4.compose(TMP_POS, TMP_QUAT, TMP_SCALE);
       trees.push(m4);
 
       occTrees.add(x, z, rTree);
@@ -623,11 +638,12 @@ function buildChunkSampled(cx, cz, opts) {
       const rx = (rng() - 0.5) * 0.2;
       const ry = rng() * Math.PI * 2;
 
-      const m4 = new THREE.Matrix4();
-      const p = new THREE.Vector3(x, y, z);
-      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, 0));
-      const s = new THREE.Vector3(scale, scale, scale);
-      m4.compose(p, q, s);
+      const m4 = acquireMatrix();
+      TMP_POS.set(x, y, z);
+      TMP_EULER.set(rx, ry, 0);
+      TMP_QUAT.setFromEuler(TMP_EULER);
+      TMP_SCALE.setScalar(scale);
+      m4.compose(TMP_POS, TMP_QUAT, TMP_SCALE);
       rockByPart[pick].push(m4);
 
       occRocks.add(x, z, rRock);
@@ -680,4 +696,24 @@ function mulberry32(seed) {
     z = (z + Math.imul(z ^ (z >>> 7), 61 | z)) ^ z;
     return ((z ^ (z >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function releaseChunkRecord(rec) {
+  if (!rec) return;
+  if (rec.trees) {
+    rec.trees.forEach(releaseMatrix);
+    rec.trees.length = 0;
+  }
+  if (rec.rocksByPart) {
+    rec.rocksByPart.forEach((arr) => {
+      arr.forEach(releaseMatrix);
+      arr.length = 0;
+    });
+  }
+}
+
+function releaseCacheMap(map) {
+  if (!map) return;
+  for (const rec of map.values()) releaseChunkRecord(rec);
+  map.clear();
 }

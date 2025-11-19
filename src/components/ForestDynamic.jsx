@@ -2,9 +2,31 @@
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
-import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
+
+const DEFAULT_FOREST_PARAMS = Object.freeze({
+  seed: 6,
+  chunkSize: 2,
+  nearRingChunks: 3,
+  midRingChunks: 4,
+  raysPerFrame: 150,
+  retentionSeconds: 2,
+  treeMinSpacing: 0.7,
+  rockMinSpacing: 0.35,
+  treeTargetPerChunk: 14,
+  rockTargetPerChunk: 12,
+  treeScaleMin: 0.03,
+  treeScaleMax: 0.06,
+  rockScaleMin: 0.36,
+  rockScaleMax: 0.48,
+  renderMidTrees: false,
+  renderExtraChunks: 3,
+  treeTint: "#000000",
+  treeTintIntensity: 1,
+  rockTint: "#444444",
+  rockTintIntensity: 1,
+});
 
 /**
  * ForestDynamic — two rings (NEAR + MID) with optional FAR extension via BVH raycasts and instancing.
@@ -17,10 +39,14 @@ export default function ForestDynamic({
   exclusion = null,
   refRockRefs, // OPTIONAL: external array/refs for the rocks instancedMeshes
   onOccludersChange = () => {}, // OPTIONAL: callback(occ[]) for fog prepass, etc.
+  config,
 }) {
   const { camera } = useThree();
+  const settings = useMemo(() => {
+    if (!config) return DEFAULT_FOREST_PARAMS;
+    return { ...DEFAULT_FOREST_PARAMS, ...config };
+  }, [config]);
 
-  // ---------------- Controls ----------------
   const {
     seed,
     chunkSize,
@@ -28,79 +54,21 @@ export default function ForestDynamic({
     midRingChunks,
     raysPerFrame,
     retentionSeconds,
-
-    // Scatter & spacing
     treeMinSpacing,
     rockMinSpacing,
     treeTargetPerChunk,
     rockTargetPerChunk,
-
-    // Explicit scale ranges
     treeScaleMin,
     treeScaleMax,
     rockScaleMin,
     rockScaleMax,
-
-    // Rendering toggles
     renderMidTrees,
     renderExtraChunks,
-
-    // Optional tint
     treeTint,
     treeTintIntensity,
     rockTint,
     rockTintIntensity,
-  } = useControls("Forest (Dynamic)", {
-    seed: { value: 6, min: 0, max: 2 ** 31 - 1, step: 1 },
-    chunkSize: { value: 2, min: 1, max: 8, step: 1 },
-    nearRingChunks: {
-      value: 3,
-      min: 1,
-      max: 12,
-      step: 1,
-      label: "Near radius (chunks)",
-    },
-    midRingChunks: {
-      value: 4,
-      min: 1,
-      max: 16,
-      step: 1,
-      label: "Mid radius (chunks)",
-    },
-    raysPerFrame: { value: 150, min: 50, max: 400, step: 5 },
-    retentionSeconds: { value: 2.0, min: 0.5, max: 10, step: 0.5 },
-
-    // Spacing & density
-    treeMinSpacing: { value: 0.7, min: 0.3, max: 2.0, step: 0.05 },
-    rockMinSpacing: { value: 0.35, min: 0.15, max: 1.5, step: 0.05 },
-    treeTargetPerChunk: { value: 14, min: 2, max: 60, step: 1 },
-    rockTargetPerChunk: { value: 12, min: 0, max: 60, step: 1 },
-
-    // Scales
-    treeScaleMin: { value: 0.03, min: 0.005, max: 0.2, step: 0.001 },
-    treeScaleMax: { value: 0.06, min: 0.006, max: 0.3, step: 0.001 },
-    rockScaleMin: { value: 0.36, min: 0.02, max: 0.5, step: 0.001 },
-    rockScaleMax: { value: 0.48, min: 0.03, max: 0.8, step: 0.001 },
-
-    // Rendering toggles
-    renderMidTrees: {
-      value: false,
-      label: "Render mid trees (built either way)",
-    },
-    renderExtraChunks: {
-      value: 3,
-      min: 0,
-      max: 12,
-      step: 1,
-      label: "Render radius extra (chunks)",
-    },
-
-    // Optional tint
-    treeTint: { value: "#000000" },
-    treeTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
-    rockTint: { value: "#444444" },
-    rockTintIntensity: { value: 1.0, min: 0, max: 1, step: 0.01 },
-  });
+  } = settings;
 
   // Terrain half-extent clamp so forest never outruns loaded tiles
   const tileHalfExtent = useMemo(
@@ -279,6 +247,25 @@ export default function ForestDynamic({
   useEffect(() => {
     scheduleRefresh();
   }, [renderMidTrees, RENDER_EXTRA]);
+
+  useEffect(() => {
+    cacheRef.current.clear();
+    coldCacheRef.current.clear();
+    buildQueueRef.current.length = 0;
+    dropTimesRef.current.clear();
+    scheduleRefresh();
+  }, [
+    seed,
+    chunkSize,
+    treeMinSpacing,
+    rockMinSpacing,
+    treeTargetPerChunk,
+    rockTargetPerChunk,
+    treeScaleMin,
+    treeScaleMax,
+    rockScaleMin,
+    rockScaleMax,
+  ]);
   // ------------------------------------------------------------------------
 
   const chunkKey = (cx, cz) => `${cx},${cz}`;

@@ -8,14 +8,28 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { computeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
-import { useControls } from "leva";
+import { setTerrainParams } from "../proc/heightfield";
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-// Simplex noise implementation for JavaScript
+const DEFAULT_TERRAIN_PARAMS = Object.freeze({
+  elevation: 7,
+  frequency: 0.004,
+  octaves: 8,
+  seed: 2.2,
+  scale: 5,
+  color: "#0a0a0a",
+  plateauHeight: 0,
+  plateauSmoothing: 0,
+  segments: 128,
+  size: 20,
+  baseHeight: 5,
+  worldYOffset: -10,
+});
+
 function permute(x) {
-  return ((x * 34.0 + 1.0) * x) % 289.0;
+  return ((x * 34 + 1) * x) % 289;
 }
 
 function simplexNoise(x, y) {
@@ -29,38 +43,38 @@ function simplexNoise(x, y) {
   let x0 = x - i + (i + j) * C[0];
   let y0 = y - j + (i + j) * C[0];
 
-  let i1 = x0 > y0 ? 1.0 : 0.0;
-  let j1 = x0 > y0 ? 0.0 : 1.0;
+  let i1 = x0 > y0 ? 1 : 0;
+  let j1 = x0 > y0 ? 0 : 1;
 
   let x1 = x0 - i1 + C[0];
   let y1 = y0 - j1 + C[0];
-  let x2 = x0 - 1.0 + 2.0 * C[0];
-  let y2 = y0 - 1.0 + 2.0 * C[0];
+  let x2 = x0 - 1 + 2 * C[0];
+  let y2 = y0 - 1 + 2 * C[0];
 
-  i %= 289.0;
-  j %= 289.0;
+  i %= 289;
+  j %= 289;
 
   const p0 = permute(permute(j) + i);
   const p1 = permute(permute(j + j1) + i + i1);
-  const p2 = permute(permute(j + 1.0) + i + 1.0);
+  const p2 = permute(permute(j + 1) + i + 1);
 
-  let m0 = Math.max(0.5 - x0 * x0 - y0 * y0, 0.0);
-  let m1 = Math.max(0.5 - x1 * x1 - y1 * y1, 0.0);
-  let m2 = Math.max(0.5 - x2 * x2 - y2 * y2, 0.0);
+  let m0 = Math.max(0.5 - x0 * x0 - y0 * y0, 0);
+  let m1 = Math.max(0.5 - x1 * x1 - y1 * y1, 0);
+  let m2 = Math.max(0.5 - x2 * x2 - y2 * y2, 0);
 
-  m0 = m0 ** 4;
-  m1 = m1 ** 4;
-  m2 = m2 ** 4;
+  m0 **= 4;
+  m1 **= 4;
+  m2 **= 4;
 
-  const px0 = 2.0 * ((p0 * C[3]) % 1.0) - 1.0;
+  const px0 = 2 * ((p0 * C[3]) % 1) - 1;
   const py0 = Math.abs(px0) - 0.5;
   const ax0 = px0 - Math.floor(px0 + 0.5);
 
-  const px1 = 2.0 * ((p1 * C[3]) % 1.0) - 1.0;
+  const px1 = 2 * ((p1 * C[3]) % 1) - 1;
   const py1 = Math.abs(px1) - 0.5;
   const ax1 = px1 - Math.floor(px1 + 0.5);
 
-  const px2 = 2.0 * ((p2 * C[3]) % 1.0) - 1.0;
+  const px2 = 2 * ((p2 * C[3]) % 1) - 1;
   const py2 = Math.abs(px2) - 0.5;
   const ax2 = px2 - Math.floor(px2 + 0.5);
 
@@ -72,12 +86,11 @@ function simplexNoise(x, y) {
   const g1 = ax1 * x1 + py1 * y1;
   const g2 = ax2 * x2 + py2 * y2;
 
-  return 130.0 * (m0 * g0 + m1 * g1 + m2 * g2);
+  return 130 * (m0 * g0 + m1 * g1 + m2 * g2);
 }
 
-// Fractional Brownian Motion (fBm)
 function fbm(x, y, frequency, octaves, seed, scale) {
-  let value = 0.0;
+  let value = 0;
   let amplitude = 0.5;
   let freq = frequency;
 
@@ -95,11 +108,11 @@ function fbm(x, y, frequency, octaves, seed, scale) {
   return value;
 }
 
-// Plateau smoothing
 function smoothstep(edge0, edge1, x) {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
+
 function plateauize(h, threshold, smoothing) {
   const low = Math.max(0, threshold - smoothing);
   const high = Math.min(1, threshold + smoothing);
@@ -108,25 +121,14 @@ function plateauize(h, threshold, smoothing) {
   return low + (h - low) * smoothstep(0, 1, n);
 }
 
-export default forwardRef(function Terrain(props, ref) {
+export default forwardRef(function Terrain({ config, ...props }, ref) {
   const meshRef = useRef();
 
-  // 1) Leva controls
-  const terrainParams = useControls("Terrain", {
-    elevation: { value: 7, min: 0, max: 150, step: 1 },
-    frequency: { value: 0.004, min: 0.001, max: 0.05, step: 0.001 },
-    octaves: { value: 8, min: 1, max: 8, step: 1 },
-    seed: { value: 2.2, min: 0.1, max: 10, step: 0.1 },
-    scale: { value: 5, min: 0.1, max: 5, step: 0.1 },
-    color: { value: "#0a0a0a" },
-    plateauHeight: { value: 0, min: 0, max: 1, step: 0.01 },
-    plateauSmoothing: { value: 0.0, min: 0, max: 1, step: 0.01 },
-    segments: { value: 128, min: 32, max: 512, step: 32 },
-    size: { value: 20, min: 10, max: 100, step: 5 },
-    baseHeight: { value: 5, min: 0, max: 20, step: 1 },
-  });
+  const terrainParams = useMemo(() => {
+    if (!config) return DEFAULT_TERRAIN_PARAMS;
+    return { ...DEFAULT_TERRAIN_PARAMS, ...config };
+  }, [config]);
 
-  // 2) Build & displace the plane, then accelerate it
   const terrainGeometry = useMemo(() => {
     const {
       size,
@@ -146,7 +148,6 @@ export default forwardRef(function Terrain(props, ref) {
     const segs = segments;
     const count = segs + 1;
 
-    // Directly displace each vertex
     for (let i = 0; i < count; i++) {
       for (let j = 0; j < count; j++) {
         const idx = 3 * (i * count + j);
@@ -164,25 +165,27 @@ export default forwardRef(function Terrain(props, ref) {
     geom.attributes.position.needsUpdate = true;
     geom.computeVertexNormals();
     geom.attributes.normal.needsUpdate = true;
-
-    //Build the BVH for accelerated raycasting
     geom.computeBoundsTree();
-
     geom.computeBoundingBox();
     geom.computeBoundingSphere();
     return geom;
   }, [terrainParams]);
 
-  // 3) Expose the mesh instance to parent via ref
   useImperativeHandle(ref, () => meshRef.current, []);
 
-  // 4) Render with Standard material
+  useEffect(() => {
+    setTerrainParams(terrainParams);
+  }, [terrainParams]);
+
+  useEffect(() => () => terrainGeometry.dispose(), [terrainGeometry]);
+
   return (
     <mesh
       ref={meshRef}
       rotation={[-Math.PI / 2, 0, 0]}
       geometry={terrainGeometry}
-      position={[0, -10, 0]}
+      position={[0, DEFAULT_TERRAIN_PARAMS.worldYOffset, 0]}
+      {...props}
     >
       <meshStandardMaterial color={terrainParams.color} flatShading={false} />
     </mesh>

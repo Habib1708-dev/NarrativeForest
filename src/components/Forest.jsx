@@ -1,120 +1,72 @@
 import React, { useMemo, useEffect, useRef, useState, forwardRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useControls } from "leva";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 
-const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
-  // ---------------------------
-  // Controls
-  // ---------------------------
+const DEFAULT_FOREST_SETTINGS = Object.freeze({
+  size: 20,
+  seed: 6,
+  treeCount: 900,
+  chunkSize: 5,
+  nearRadius: 1.2,
+  midRadius: 2,
+  viewRadius: 5,
+  plantRadius: 12,
+  exclusion: Object.freeze({
+    centerX: -1.4,
+    centerZ: -2.7,
+    width: 1.1,
+    depth: 1.1,
+  }),
+  treeTintColor: "#000000ff",
+  treeTintIntensity: 1,
+  rockCount: 1000,
+  rockScaleMin: 3.0,
+  rockScaleMax: 4.0,
+  rockTintColor: "#444444",
+  rockTintIntensity: 1,
+});
+
+const Forest = forwardRef(function Forest({ terrainMesh, config }, ref) {
+  const settings = useMemo(() => {
+    if (!config) return DEFAULT_FOREST_SETTINGS;
+    const merged = {
+      ...DEFAULT_FOREST_SETTINGS,
+      ...config,
+      exclusion: {
+        ...DEFAULT_FOREST_SETTINGS.exclusion,
+        ...(config?.exclusion || {}),
+      },
+    };
+    return merged;
+  }, [config]);
+
   const {
     size,
     seed,
-    count, // trees
+    treeCount,
     chunkSize,
     nearRadius,
     midRadius,
     viewRadius,
     plantRadius,
-  } = useControls("Forest", {
-    size: { value: 20, min: 10, max: 200, step: 5 },
-    seed: { value: 6, min: 0, max: 100, step: 1 },
-    count: { value: 900, min: 10, max: 20000, step: 10, label: "Tree Count" },
-    chunkSize: { value: 5, min: 2, max: 20, step: 1, label: "Chunk Size (m)" },
-    nearRadius: {
-      value: 1.2,
-      min: 0.01,
-      max: 10,
-      step: 0.01,
-      label: "High LOD radius (chunks)",
-    },
-    midRadius: {
-      value: 2,
-      min: 1,
-      max: 60,
-      step: 1,
-      label: "Low LOD radius (chunks)",
-    },
-    viewRadius: {
-      value: 5,
-      min: 2,
-      max: 80,
-      step: 1,
-      label: "Cull radius (chunks)",
-    },
-    plantRadius: {
-      value: 12,
-      min: 2,
-      max: 100,
-      step: 1,
-      label: "Plant radius (m)",
-    },
-  });
+    exclusion,
+    treeTintColor,
+    treeTintIntensity,
+    rockCount,
+    rockScaleMin,
+    rockScaleMax,
+    rockTintColor,
+    rockTintIntensity,
+  } = settings;
 
-  // Exclusion (XZ)
-  const { exCenterX, exCenterZ, exWidth, exDepth } = useControls(
-    "Exclusion Zone",
-    {
-      exCenterX: { value: -1.4, step: 0.01, label: "Center X (m)" },
-      exCenterZ: { value: -2.7, step: 0.01, label: "Center Z (m)" },
-      exWidth: {
-        value: 1.1,
-        min: 0,
-        max: 20,
-        step: 0.01,
-        label: "Box width X (m)",
-      },
-      exDepth: {
-        value: 1.1,
-        min: 0,
-        max: 20,
-        step: 0.01,
-        label: "Box depth Z (m)",
-      },
-    }
-  );
-
-  const { tintColor, tintIntensity } = useControls("Tree Tint", {
-    tintColor: { value: "#000000ff", label: "Tint Color" },
-    tintIntensity: {
-      value: 1.0,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      label: "Intensity",
-    },
-  });
-
-  const { rockCount, rockScaleMin, rockScaleMax } = useControls("Rocks", {
-    rockCount: { value: 1000, min: 0, max: 10000, step: 10, label: "Count" },
-    rockScaleMin: {
-      value: 3.0,
-      min: 0.03,
-      max: 4,
-      step: 0.001,
-      label: "Scale Min",
-    },
-    rockScaleMax: {
-      value: 4.0,
-      min: 0.03,
-      max: 6,
-      step: 0.001,
-      label: "Scale Max",
-    },
-  });
-
-  const { rockTintColor, rockTintIntensity } = useControls("Rock Tint", {
-    rockTintColor: { value: "#444444", label: "Tint Color" },
-    rockTintIntensity: {
-      value: 1.0,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      label: "Intensity",
-    },
-  });
+  const {
+    centerX: exCenterX,
+    centerZ: exCenterZ,
+    width: exWidth,
+    depth: exDepth,
+  } = exclusion;
 
   // ---------------------------
   // Assets
@@ -127,13 +79,13 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
   // Materials tint
   // ---------------------------
   useEffect(() => {
-    const target = new THREE.Color(tintColor);
+    const target = new THREE.Color(treeTintColor);
     const tint = (parts) => {
       parts.forEach((p) => {
         const m = p.material;
         if (!m || !m.color) return;
         if (!m.userData._origColor) m.userData._origColor = m.color.clone();
-        m.color.copy(m.userData._origColor).lerp(target, tintIntensity);
+        m.color.copy(m.userData._origColor).lerp(target, treeTintIntensity);
         if (typeof m.metalness === "number") m.metalness = 0.0;
         if (typeof m.roughness === "number")
           m.roughness = Math.min(1, Math.max(0.8, m.roughness));
@@ -142,7 +94,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     };
     if (highParts.length) tint(highParts);
     if (lowParts.length) tint(lowParts);
-  }, [highParts, lowParts, tintColor, tintIntensity]);
+  }, [highParts, lowParts, treeTintColor, treeTintIntensity]);
 
   useEffect(() => {
     const target = new THREE.Color(rockTintColor);
@@ -236,10 +188,10 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     let radiusPerScale = 30.0;
     let placed = 0,
       attempts = 0;
-    const maxAttempts = count * 30;
+    const maxAttempts = treeCount * 30;
     let relaxes = 0;
 
-    while (placed < count && attempts < maxAttempts) {
+    while (placed < treeCount && attempts < maxAttempts) {
       attempts++;
 
       const r = Math.sqrt(treeRng()) * R;
@@ -279,8 +231,8 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       placed++;
 
       if (
-        attempts % (count * 4) === 0 &&
-        placed < (attempts / (count * 4)) * (count * 0.6) &&
+        attempts % (treeCount * 4) === 0 &&
+        placed < (attempts / (treeCount * 4)) * (treeCount * 0.6) &&
         relaxes < 3
       ) {
         radiusPerScale *= 0.9;
@@ -288,9 +240,11 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
       }
     }
 
-    if (attempts >= maxAttempts && placed < count) {
+    if (attempts >= maxAttempts && placed < treeCount) {
       if (process.env.NODE_ENV !== "production") {
-        console.warn(`[Forest] Tree placement saturated: ${placed}/${count}.`);
+        console.warn(
+          `[Forest] Tree placement saturated: ${placed}/${treeCount}.`
+        );
       }
     }
     return arr;
@@ -298,7 +252,7 @@ const Forest = forwardRef(function Forest({ terrainMesh }, ref) {
     terrainMesh,
     seed,
     size,
-    count,
+    treeCount,
     plantRadius,
     treeBaseMinY,
     treeRng,
