@@ -35,7 +35,8 @@ import TerrainTiled from "./components/TerrainTiled";
 import { heightAt as sampleHeight } from "./proc/heightfield";
 
 // NEW
-import ForestDynamic from "./components/ForestDynamic";
+// import ForestDynamic from "./components/ForestDynamic";
+import ForestDynamicSampled from "./components/ForestDynamicSampled";
 import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
 import Fireflies from "./components/Fireflies";
@@ -662,7 +663,14 @@ export default function Experience() {
         /> */}
 
         {/* Forest — publish instanced meshes for fog occlusion */}
-        <ForestDynamic
+        {/* <ForestDynamic
+          terrainGroup={terrainRef.current}
+          tileSize={TERRAIN_TILE_SIZE}
+          terrainLoadRadius={TERRAIN_LOAD_RADIUS}
+          exclusion={lakeExclusion}
+          onOccludersChange={setForestOccluders}
+        /> */}
+        <ForestDynamicSampled
           terrainGroup={terrainRef.current}
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
