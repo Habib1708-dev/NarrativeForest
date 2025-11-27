@@ -129,16 +129,21 @@ export default function App() {
       document.removeEventListener("click", handleInteraction);
       document.removeEventListener("keydown", handleInteraction);
       document.removeEventListener("touchstart", handleInteraction);
+      document.removeEventListener("pointerdown", handleInteraction);
     };
 
     document.addEventListener("click", handleInteraction);
     document.addEventListener("keydown", handleInteraction);
     document.addEventListener("touchstart", handleInteraction);
+    document.addEventListener("pointerdown", handleInteraction, {
+      passive: true,
+    });
 
     return () => {
       document.removeEventListener("click", handleInteraction);
       document.removeEventListener("keydown", handleInteraction);
       document.removeEventListener("touchstart", handleInteraction);
+      document.removeEventListener("pointerdown", handleInteraction);
     };
   }, []);
 

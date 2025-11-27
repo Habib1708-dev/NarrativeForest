@@ -278,7 +278,7 @@ export default function CameraControllerR3F() {
       if (!store.enabled) return;
       if (store.locked || store.paused) return;
       if (store.mode !== "path") return;
-      applyWheel(e.deltaY);
+      applyWheel(-e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
@@ -321,6 +321,86 @@ export default function CameraControllerR3F() {
       endFreeFlyDrag();
     };
   }, [mode, startFreeFlyDrag, dragFreeFly, endFreeFlyDrag]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.PointerEvent) {
+      return undefined;
+    }
+
+    const TOUCH_DELTA_MULTIPLIER = 12;
+    const MIN_TOUCH_DELTA = 0.5;
+    const interactiveSelector =
+      "button, input, textarea, select, a, [role='button'], [role='link'], [role='textbox'], [data-touch-scroll='ignore']";
+
+    const shouldProcess = () => {
+      const {
+        enabled: storeEnabled,
+        locked: storeLocked,
+        paused: storePaused,
+        mode: storeMode,
+      } = useCameraStore.getState();
+      return (
+        storeEnabled && !storeLocked && !storePaused && storeMode === "path"
+      );
+    };
+
+    const isInteractiveTarget = (target) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(target.closest(interactiveSelector));
+    };
+
+    let activePointerId = null;
+    let lastY = 0;
+
+    const detachPointerListeners = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    const onPointerMove = (event) => {
+      if (event.pointerId !== activePointerId) return;
+      if (!shouldProcess()) {
+        onPointerUp(event);
+        return;
+      }
+
+      const dy = event.clientY - lastY;
+      if (Math.abs(dy) < MIN_TOUCH_DELTA) return;
+
+      lastY = event.clientY;
+      const deltaY = -dy * TOUCH_DELTA_MULTIPLIER;
+      applyWheel(-deltaY);
+      event.preventDefault();
+    };
+
+    const onPointerUp = (event) => {
+      if (event.pointerId !== activePointerId) return;
+      activePointerId = null;
+      detachPointerListeners();
+    };
+
+    const onPointerDown = (event) => {
+      if (event.pointerType !== "touch" || !event.isPrimary) return;
+      if (activePointerId !== null) return;
+      if (!shouldProcess()) return;
+      if (isInteractiveTarget(event.target)) return;
+
+      activePointerId = event.pointerId;
+      lastY = event.clientY;
+      window.addEventListener("pointermove", onPointerMove, { passive: false });
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerUp);
+      event.preventDefault();
+    };
+
+    window.addEventListener("pointerdown", onPointerDown, { passive: false });
+
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      detachPointerListeners();
+    };
+  }, [applyWheel]);
 
   return (
     <>

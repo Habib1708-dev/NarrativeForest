@@ -91,7 +91,7 @@ export default function ForestDynamic({
   );
 
   // ---------------- Assets ----------------
-  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
+  const highParts = useInstancedTree("/models/tree/Spruce1LOD.glb");
   const rockParts = useInstancedRocks("/models/cabin/MateriallessRock.glb");
 
   // Instanced refs

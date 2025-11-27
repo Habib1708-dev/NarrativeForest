@@ -71,7 +71,7 @@ const Forest = forwardRef(function Forest({ terrainMesh, config }, ref) {
   // ---------------------------
   // Assets
   // ---------------------------
-  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
+  const highParts = useInstancedTree("/models/tree/Spruce1LOD.glb");
   const lowParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
   const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
 

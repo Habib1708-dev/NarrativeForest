@@ -57,6 +57,16 @@ export default function Experience() {
   const rebuildArch = useCameraStore((s) => s.rebuildArch);
   const setTerrainCollider = useCameraStore((s) => s.setTerrainCollider);
 
+  useEffect(() => {
+    const canvas = gl?.domElement;
+    if (!canvas) return undefined;
+    const previous = canvas.style.touchAction;
+    canvas.style.touchAction = isDebugMode && !enabled ? "none" : "pan-y";
+    return () => {
+      canvas.style.touchAction = previous;
+    };
+  }, [gl, isDebugMode, enabled]);
+
   // ==== REFS ====
   const cabinRef = useRef(null);
   const manRef = useRef(null);
@@ -590,21 +600,22 @@ export default function Experience() {
       <Stars />
 
       {/* OrbitControls - only active in debug mode when narrative camera is disabled */}
-      <OrbitControls
-        makeDefault={isDebugMode && !enabled}
-        minDistance={0.05}
-        maxDistance={600}
-        target={[-1.25, -4.45, -2.9]}
-        enableDamping
-        dampingFactor={0.05}
-        enablePan={isDebugMode && !enabled}
-        panSpeed={1.0}
-        enableZoom={isDebugMode && !enabled}
-        zoomSpeed={1.2}
-        screenSpacePanning
-        rotateSpeed={0.6}
-        enabled={isDebugMode && !enabled}
-      />
+      {isDebugMode && !enabled && (
+        <OrbitControls
+          makeDefault
+          minDistance={0.05}
+          maxDistance={600}
+          target={[-1.25, -4.45, -2.9]}
+          enableDamping
+          dampingFactor={0.05}
+          enablePan
+          panSpeed={1.0}
+          enableZoom
+          zoomSpeed={1.2}
+          screenSpacePanning
+          rotateSpeed={0.6}
+        />
+      )}
 
       <ambientLight intensity={0} />
       <directionalLight
