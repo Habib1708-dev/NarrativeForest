@@ -23,5 +23,7 @@ export default defineConfig({
     host: true, // LAN access
     open: true, // auto-open browser
     allowedHosts: true, // allow tunneling domains like ngrok
+    port: 5173, // keep a deterministic port so Vite does not hop and break HMR fetches
+    strictPort: true, // fail fast instead of switching ports (prevents ERR_NETWORK_CHANGED spam)
   },
 });

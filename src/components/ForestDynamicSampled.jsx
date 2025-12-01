@@ -11,6 +11,7 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   chunkSize: 2,
   nearRingChunks: 3,
   midRingChunks: 4,
+  nearImmediateFraction: 0.3,
   raysPerFrame: 150,
   retentionSeconds: 2,
   treeMinSpacing: 0.7,
@@ -73,6 +74,7 @@ export default function ForestDynamicSampled({
     chunkSize,
     nearRingChunks,
     midRingChunks,
+    nearImmediateFraction,
     raysPerFrame,
     retentionSeconds,
     treeMinSpacing,
@@ -110,13 +112,19 @@ export default function ForestDynamicSampled({
     MID_R,
     Math.min(maxRFromTiles, MID_R + RENDER_EXTRA)
   );
+  const immediateChunkFraction = useMemo(() => {
+    if (!Number.isFinite(nearImmediateFraction)) return 0.3;
+    return Math.min(0.9, Math.max(0.1, nearImmediateFraction));
+  }, [nearImmediateFraction]);
 
   // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
+  const lodParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1LOD.glb");
   const rockParts = useInstancedRocks("/models/cabin/MateriallessRock.glb");
 
   // Instanced refs
   const treeHighRefs = useRef(highParts.map(() => React.createRef()));
+  const treeLodRefs = useRef(lodParts.map(() => React.createRef()));
   const rockRefsArray = useMemo(() => {
     const external =
       (Array.isArray(refRockRefs) && refRockRefs) ||
@@ -128,7 +136,7 @@ export default function ForestDynamicSampled({
   // Optional tints
   useEffect(() => {
     const tintC = new THREE.Color(treeTint);
-    highParts.forEach((p) => {
+    [...highParts, ...lodParts].forEach((p) => {
       const m = p.material;
       if (!m?.color) return;
       if (!m.userData._origColor) m.userData._origColor = m.color.clone();
@@ -138,7 +146,7 @@ export default function ForestDynamicSampled({
         m.roughness = Math.min(1, Math.max(0.8, m.roughness ?? 1));
       m.needsUpdate = true;
     });
-  }, [highParts, treeTint, treeTintIntensity]);
+  }, [highParts, lodParts, treeTint, treeTintIntensity]);
 
   useEffect(() => {
     const tintC = new THREE.Color(rockTint);
@@ -205,11 +213,12 @@ export default function ForestDynamicSampled({
 
   // Capacities
   const TREE_CAP = 6000;
+  const TREE_LOD_CAP = 6000;
   const ROCK_CAP_PER_PART = 1200;
 
   // One-time mesh init
   useEffect(() => {
-    [treeHighRefs.current, rockRefsArray].forEach((arr) =>
+    [treeHighRefs.current, treeLodRefs.current, rockRefsArray].forEach((arr) =>
       arr.forEach((r) => {
         const m = r.current;
         if (!m) return;
@@ -220,12 +229,13 @@ export default function ForestDynamicSampled({
         m.instanceMatrix.needsUpdate = true;
       })
     );
-  }, [highParts.length, rockParts.length, rockRefsArray]);
+  }, [highParts.length, lodParts.length, rockParts.length, rockRefsArray]);
 
   // ---------- PUBLISH OCCLUDERS (trees & rocks instanced meshes) ----------
   const publishOccluders = useCallback(() => {
     const occ = [];
     treeHighRefs.current.forEach((r) => r.current && occ.push(r.current));
+    treeLodRefs.current.forEach((r) => r.current && occ.push(r.current));
     rockRefsArray.forEach((r) => r.current && occ.push(r.current));
     onOccludersChange?.(occ);
   }, [onOccludersChange, rockRefsArray]);
@@ -233,7 +243,13 @@ export default function ForestDynamicSampled({
   useEffect(() => {
     publishOccluders();
     return () => onOccludersChange?.([]);
-  }, [publishOccluders, highParts.length, rockParts.length, onOccludersChange]);
+  }, [
+    publishOccluders,
+    highParts.length,
+    lodParts.length,
+    rockParts.length,
+    onOccludersChange,
+  ]);
 
   useEffect(() => {
     scheduleRefresh();
@@ -241,7 +257,7 @@ export default function ForestDynamicSampled({
 
   useEffect(() => {
     scheduleRefresh();
-  }, [renderMidTrees, RENDER_EXTRA, sampleHeight]);
+  }, [renderMidTrees, RENDER_EXTRA, sampleHeight, immediateChunkFraction]);
 
   useEffect(() => {
     releaseCacheMap(cacheRef.current);
@@ -282,13 +298,31 @@ export default function ForestDynamicSampled({
     const assign = (coords, mode) => {
       for (const [x, z] of coords) {
         const key = chunkKey(x, z);
-        if (!next[key]) next[key] = mode;
+        next[key] = mode;
       }
     };
 
     assign(neighborhood(cx, cz, RENDER_R), "far");
     assign(neighborhood(cx, cz, MID_R), "med");
-    assign(neighborhood(cx, cz, NEAR_R), "high");
+
+    const nearEntries = neighborhood(cx, cz, NEAR_R).map(([x, z]) => ({
+      x,
+      z,
+      distSq: (x - cx) * (x - cx) + (z - cz) * (z - cz),
+    }));
+
+    nearEntries.sort((a, b) => a.distSq - b.distSq);
+    const totalNear = nearEntries.length;
+    const immediateCount = Math.min(
+      totalNear,
+      Math.max(1, Math.round(totalNear * immediateChunkFraction))
+    );
+
+    nearEntries.forEach((entry, idx) => {
+      const mode = idx < immediateCount ? "highImmediate" : "highBuffer";
+      const key = chunkKey(entry.x, entry.z);
+      next[key] = mode;
+    });
 
     return { next, viewSet: new Set(Object.keys(next)) };
   };
@@ -450,40 +484,35 @@ export default function ForestDynamicSampled({
   function applyInstancing() {
     if (!Object.keys(modesRef.current).length) return;
 
-    const nearTrees = [];
-    const midTrees = [];
-    const farTrees = [];
+    const nearImmediateTrees = [];
+    const nearBufferTrees = [];
     const rocksByPart = rockParts.map(() => []);
 
     for (const [key, mode] of Object.entries(modesRef.current)) {
       const rec = cacheRef.current.get(key);
       if (!rec) continue;
 
-      if (mode === "high") {
-        nearTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
-      } else if (mode === "med") {
-        midTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
-      } else if (mode === "far") {
-        farTrees.push(...rec.trees);
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+      if (mode === "highImmediate") {
+        nearImmediateTrees.push(...rec.trees);
+      } else if (mode === "highBuffer") {
+        nearBufferTrees.push(...rec.trees);
       }
+      rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
     }
 
-    const includeMidTrees = renderMidTrees || RENDER_EXTRA > 0;
-    const allTrees = nearTrees
-      .concat(includeMidTrees ? midTrees : [])
-      .concat(farTrees);
+    const uploadTreeMatrices = (refs, mats, cap) => {
+      refs.forEach((ref) => {
+        const m = ref.current;
+        if (!m) return;
+        const N = Math.min(cap, mats.length);
+        for (let i = 0; i < N; i++) m.setMatrixAt(i, mats[i]);
+        m.count = N;
+        m.instanceMatrix.needsUpdate = true;
+      });
+    };
 
-    treeHighRefs.current.forEach((ref) => {
-      const m = ref.current;
-      if (!m) return;
-      const N = Math.min(TREE_CAP, allTrees.length);
-      for (let i = 0; i < N; i++) m.setMatrixAt(i, allTrees[i]);
-      m.count = N;
-      m.instanceMatrix.needsUpdate = true;
-    });
+    uploadTreeMatrices(treeHighRefs.current, nearImmediateTrees, TREE_CAP);
+    uploadTreeMatrices(treeLodRefs.current, nearBufferTrees, TREE_LOD_CAP);
 
     rockRefsArray.forEach((ref, iPart) => {
       const m = ref.current;
@@ -502,7 +531,7 @@ export default function ForestDynamicSampled({
     applyInstancing();
   }, 1);
 
-  if (!highParts.length || !rockParts.length) return null;
+  if (!highParts.length || !lodParts.length || !rockParts.length) return null;
 
   return (
     <group name="ForestDynamicSampled">
@@ -512,6 +541,22 @@ export default function ForestDynamicSampled({
           key={`fds-th-${i}`}
           ref={treeHighRefs.current[i]}
           args={[p.geometry, p.material, TREE_CAP]}
+          castShadow={false}
+          receiveShadow
+          frustumCulled={false}
+        />
+      ))}
+
+      {/* Trees: LOD buffer within near ring */}
+      {lodParts.map((p, i) => (
+        <instancedMesh
+          key={`fds-tlod-${i}`}
+          ref={treeLodRefs.current[i]}
+          args={[
+            p.geometry,
+            highParts[i % highParts.length]?.material || p.material,
+            TREE_LOD_CAP,
+          ]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}

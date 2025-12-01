@@ -207,5 +207,5 @@ export function useInstancedTree(url) {
 }
 
 // Preload both Spruce variants (high + low LOD)
-useGLTF.preload("/models/tree/Spruce1LOD.glb");
+useGLTF.preload("/models/tree/Spruce_Fir/Spruce1.glb");
 useGLTF.preload("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
