@@ -112,7 +112,7 @@ export default function ForestDynamicSampled({
   );
 
   // ---------------- Assets ----------------
-  const highParts = useInstancedTree("/models/tree/Spruce1LOD.glb");
+  const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
   const rockParts = useInstancedRocks("/models/cabin/MateriallessRock.glb");
 
   // Instanced refs
