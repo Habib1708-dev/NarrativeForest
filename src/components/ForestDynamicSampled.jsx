@@ -216,6 +216,24 @@ export default function ForestDynamicSampled({
   const TREE_LOD_CAP = 6000;
   const ROCK_CAP_PER_PART = 1200;
 
+  // Memoize instancedMesh ctor args so R3F doesn't recreate materials every render
+  const treeHighArgs = useMemo(
+    () => highParts.map((p) => [p.geometry, p.material, TREE_CAP]),
+    [highParts]
+  );
+  const treeLodArgs = useMemo(() => {
+    if (!highParts.length) return [];
+    return lodParts.map((p, i) => [
+      p.geometry,
+      highParts[i % highParts.length]?.material || p.material,
+      TREE_LOD_CAP,
+    ]);
+  }, [lodParts, highParts]);
+  const rockArgs = useMemo(
+    () => rockParts.map((p) => [p.geometry, p.material, ROCK_CAP_PER_PART]),
+    [rockParts]
+  );
+
   // One-time mesh init
   useEffect(() => {
     [treeHighRefs.current, treeLodRefs.current, rockRefsArray].forEach((arr) =>
@@ -540,7 +558,7 @@ export default function ForestDynamicSampled({
         <instancedMesh
           key={`fds-th-${i}`}
           ref={treeHighRefs.current[i]}
-          args={[p.geometry, p.material, TREE_CAP]}
+          args={treeHighArgs[i]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}
@@ -552,11 +570,7 @@ export default function ForestDynamicSampled({
         <instancedMesh
           key={`fds-tlod-${i}`}
           ref={treeLodRefs.current[i]}
-          args={[
-            p.geometry,
-            highParts[i % highParts.length]?.material || p.material,
-            TREE_LOD_CAP,
-          ]}
+          args={treeLodArgs[i]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}
@@ -568,7 +582,7 @@ export default function ForestDynamicSampled({
         <instancedMesh
           key={`fds-rk-${i}`}
           ref={rockRefsArray[i]}
-          args={[p.geometry, p.material, ROCK_CAP_PER_PART]}
+          args={rockArgs[i]}
           castShadow={false}
           receiveShadow
           frustumCulled={false}

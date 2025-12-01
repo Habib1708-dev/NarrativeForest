@@ -106,7 +106,6 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     g.computeBoundingBox();
     g.computeBoundingSphere();
     // BVH if three-bvh is installed (three-bvh-setup typically patches this):
-    g.computeBoundsTree?.();
     return g;
   };
 
