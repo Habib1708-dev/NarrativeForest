@@ -30,8 +30,8 @@ export default forwardRef(function RadioTower(_, ref) {
     const mats = new Map();
     cloned.traverse((o) => {
       if (!o.isMesh) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
+      o.castShadow = false;
+      o.receiveShadow = false;
       const arr = Array.isArray(o.material) ? o.material : [o.material];
       arr.forEach((m) => {
         if (!m || !m.isMaterial) return;

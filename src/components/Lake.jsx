@@ -5,6 +5,7 @@ import React, {
   useEffect,
   forwardRef,
   useImperativeHandle,
+  useCallback,
 } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
@@ -22,18 +23,36 @@ const Lake = forwardRef(function Lake(
   ref
 ) {
   const meshRef = useRef();
-  const baseMatRef = useRef();
 
   // === Controls ===
-  const { lakePosX, lakePosY, lakePosZ } = useControls("Lake", {
+  const {
+    lakePosX,
+    lakePosY,
+    lakePosZ,
+    lakeSizeX,
+    lakeSizeZ,
+    uWavesAmplitude,
+    uWavesFrequency,
+    uWavesPersistence,
+    uWavesLacunarity,
+    uWavesIterations,
+    uWavesSpeed,
+    uTroughColor,
+    uSurfaceColor,
+    uPeakColor,
+    uPeakThreshold,
+    uPeakTransition,
+    uTroughThreshold,
+    uTroughTransition,
+    uFresnelScale,
+    uFresnelPower,
+    lakeOpacity,
+  } = useControls("Lake", {
     Transform: folder({
       lakePosX: { value: -1.8, min: -20, max: 20, step: 0.01 },
       lakePosY: { value: -4.82, min: -10, max: 10, step: 0.01 },
       lakePosZ: { value: -2.8, min: -20, max: 20, step: 0.01 },
     }),
-  });
-
-  const { lakeSizeX, lakeSizeZ } = useControls("Lake", {
     Size: folder({
       lakeSizeX: {
         value: 2.0,
@@ -50,16 +69,6 @@ const Lake = forwardRef(function Lake(
         label: "Size Z",
       },
     }),
-  });
-
-  const {
-    uWavesAmplitude,
-    uWavesFrequency,
-    uWavesPersistence,
-    uWavesLacunarity,
-    uWavesIterations,
-    uWavesSpeed,
-  } = useControls("Lake", {
     Waves: folder({
       uWavesAmplitude: { value: 0.018, min: 0, max: 0.1, step: 0.001 },
       uWavesFrequency: { value: 3.0, min: 0.1, max: 3, step: 0.01 },
@@ -68,17 +77,6 @@ const Lake = forwardRef(function Lake(
       uWavesIterations: { value: 3, min: 1, max: 16, step: 1 },
       uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
-  });
-
-  const {
-    uTroughColor,
-    uSurfaceColor,
-    uPeakColor,
-    uPeakThreshold,
-    uPeakTransition,
-    uTroughThreshold,
-    uTroughTransition,
-  } = useControls("Lake", {
     Colors: folder({
       uTroughColor: { value: "#767676" },
       uSurfaceColor: { value: "#b1b1b1" },
@@ -90,9 +88,6 @@ const Lake = forwardRef(function Lake(
       uTroughThreshold: { value: -0.005, min: -0.1, max: 0.1, step: 0.001 },
       uTroughTransition: { value: 0.06, min: 0.001, max: 0.3, step: 0.001 },
     }),
-  });
-
-  const { uFresnelScale, uFresnelPower, lakeOpacity } = useControls("Lake", {
     Material: folder({
       uFresnelScale: { value: 0.8, min: 0, max: 2, step: 0.01 },
       uFresnelPower: { value: 1.0, min: 0.1, max: 2, step: 0.01 },
@@ -119,111 +114,120 @@ const Lake = forwardRef(function Lake(
   }, []);
 
   // === Material ===
+  const uniformsRef = useRef(null);
+  if (!uniformsRef.current) {
+    uniformsRef.current = {
+      uTime: { value: 0 },
+      uOpacity: { value: 0.9 },
+      uEnvironmentMap: { value: envMap },
+      uWavesAmplitude: { value: uWavesAmplitude },
+      uWavesFrequency: { value: uWavesFrequency },
+      uWavesPersistence: { value: uWavesPersistence },
+      uWavesLacunarity: { value: uWavesLacunarity },
+      uWavesIterations: { value: uWavesIterations },
+      uWavesSpeed: { value: uWavesSpeed },
+      uTroughColor: { value: new THREE.Color(uTroughColor) },
+      uSurfaceColor: { value: new THREE.Color(uSurfaceColor) },
+      uPeakColor: { value: new THREE.Color(uPeakColor) },
+      uPeakThreshold: { value: uPeakThreshold },
+      uPeakTransition: { value: uPeakTransition },
+      uTroughThreshold: { value: uTroughThreshold },
+      uTroughTransition: { value: uTroughTransition },
+      uFresnelScale: { value: uFresnelScale },
+      uFresnelPower: { value: uFresnelPower },
+      uTrailMap: { value: emptyTexture },
+      uStampMap: { value: emptyTexture },
+      uTrailTexel: { value: new THREE.Vector2(1 / 128, 1 / 128) },
+      uBioColorA: { value: new THREE.Color("#ffffff") },
+      uBioColorB: { value: new THREE.Color("#ffffff") },
+      uBioIntensity: { value: 0.0 },
+      uBioAltFreq: { value: 0.0 },
+      uBioAltPhase: { value: 0.0 },
+      uLakeBaseY: { value: lakePosY },
+    };
+  }
+
+  const updateUniform = useCallback((name, value) => {
+    const uniform = uniformsRef.current?.[name];
+    if (!uniform || uniform.value === value) return;
+    uniform.value = value;
+  }, []);
+
+  const updateColorUniform = useCallback((name, colorHex) => {
+    const uniform = uniformsRef.current?.[name];
+    if (!uniform) return;
+    uniform.value.setStyle(colorHex);
+  }, []);
+
   const baseMaterial = useMemo(() => {
-    const mat = new THREE.ShaderMaterial({
+    return new THREE.ShaderMaterial({
       vertexShader: lakeVertexShader,
       fragmentShader: lakeFragmentShader,
-      uniforms: {
-        uTime: { value: 0 },
-        uOpacity: { value: 0.9 },
-        uEnvironmentMap: { value: envMap },
-
-        uWavesAmplitude: { value: uWavesAmplitude },
-        uWavesFrequency: { value: uWavesFrequency },
-        uWavesPersistence: { value: uWavesPersistence },
-        uWavesLacunarity: { value: uWavesLacunarity },
-        uWavesIterations: { value: uWavesIterations },
-        uWavesSpeed: { value: uWavesSpeed },
-
-        uTroughColor: { value: new THREE.Color(uTroughColor) },
-        uSurfaceColor: { value: new THREE.Color(uSurfaceColor) },
-        uPeakColor: { value: new THREE.Color(uPeakColor) },
-
-        uPeakThreshold: { value: uPeakThreshold },
-        uPeakTransition: { value: uPeakTransition },
-        uTroughThreshold: { value: uTroughThreshold },
-        uTroughTransition: { value: uTroughTransition },
-
-        uFresnelScale: { value: uFresnelScale },
-        uFresnelPower: { value: uFresnelPower },
-
-        // Trail-related uniforms are still present but neutralized
-        uTrailMap: { value: null },
-        uStampMap: { value: null },
-        uTrailTexel: { value: new THREE.Vector2(1 / 128, 1 / 128) },
-
-        // Bioluminescence uniforms kept for shader compatibility; intensity = 0
-        uBioColorA: { value: new THREE.Color("#ffffff") },
-        uBioColorB: { value: new THREE.Color("#ffffff") },
-        uBioIntensity: { value: 0.0 },
-        uBioAltFreq: { value: 0.0 },
-        uBioAltPhase: { value: 0.0 },
-
-        uLakeBaseY: { value: lakePosY },
-      },
+      uniforms: uniformsRef.current,
       transparent: true,
       depthTest: true,
       depthWrite: false,
       side: THREE.DoubleSide,
       blending: THREE.NormalBlending,
     });
-    return mat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live updates (colors, waves, fresnel, opacity, pose)
   useEffect(() => {
-    baseMaterial.uniforms.uOpacity.value = lakeOpacity;
+    updateUniform("uEnvironmentMap", envMap);
+  }, [envMap, updateUniform]);
+
+  useEffect(() => {
+    updateUniform("uOpacity", lakeOpacity);
     baseMaterial.transparent = lakeOpacity < 1.0;
+  }, [lakeOpacity, updateUniform, baseMaterial]);
 
-    baseMaterial.uniforms.uWavesAmplitude.value = uWavesAmplitude;
-    baseMaterial.uniforms.uWavesFrequency.value = uWavesFrequency;
-    baseMaterial.uniforms.uWavesPersistence.value = uWavesPersistence;
-    baseMaterial.uniforms.uWavesLacunarity.value = uWavesLacunarity;
-    baseMaterial.uniforms.uWavesIterations.value = uWavesIterations;
-    baseMaterial.uniforms.uWavesSpeed.value = uWavesSpeed;
-
-    baseMaterial.uniforms.uTroughColor.value.setStyle(uTroughColor);
-    baseMaterial.uniforms.uSurfaceColor.value.setStyle(uSurfaceColor);
-    baseMaterial.uniforms.uPeakColor.value.setStyle(uPeakColor);
-
-    baseMaterial.uniforms.uPeakThreshold.value = uPeakThreshold;
-    baseMaterial.uniforms.uPeakTransition.value = uPeakTransition;
-    baseMaterial.uniforms.uTroughThreshold.value = uTroughThreshold;
-    baseMaterial.uniforms.uTroughTransition.value = uTroughTransition;
-
-    baseMaterial.uniforms.uFresnelScale.value = uFresnelScale;
-    baseMaterial.uniforms.uFresnelPower.value = uFresnelPower;
-
-    baseMaterial.uniforms.uLakeBaseY.value = lakePosY;
+  useEffect(() => {
+    updateUniform("uWavesAmplitude", uWavesAmplitude);
+    updateUniform("uWavesFrequency", uWavesFrequency);
+    updateUniform("uWavesPersistence", uWavesPersistence);
+    updateUniform("uWavesLacunarity", uWavesLacunarity);
+    updateUniform("uWavesIterations", uWavesIterations);
+    updateUniform("uWavesSpeed", uWavesSpeed);
   }, [
-    baseMaterial,
-    lakeOpacity,
+    updateUniform,
     uWavesAmplitude,
     uWavesFrequency,
     uWavesPersistence,
     uWavesLacunarity,
     uWavesIterations,
     uWavesSpeed,
-    uTroughColor,
-    uSurfaceColor,
+  ]);
+
+  useEffect(() => {
+    updateColorUniform("uTroughColor", uTroughColor);
+    updateColorUniform("uSurfaceColor", uSurfaceColor);
+    updateColorUniform("uPeakColor", uPeakColor);
+
+    updateUniform("uPeakThreshold", uPeakThreshold);
+    updateUniform("uPeakTransition", uPeakTransition);
+    updateUniform("uTroughThreshold", uTroughThreshold);
+    updateUniform("uTroughTransition", uTroughTransition);
+  }, [
+    updateColorUniform,
+    updateUniform,
     uPeakColor,
     uPeakThreshold,
     uPeakTransition,
+    uSurfaceColor,
+    uTroughColor,
     uTroughThreshold,
     uTroughTransition,
-    uFresnelScale,
-    uFresnelPower,
-    lakePosY,
   ]);
 
-  // Feed empty textures so shader paths referencing dye/stamp remain valid
   useEffect(() => {
-    baseMaterial.uniforms.uTrailMap.value = emptyTexture;
-    baseMaterial.uniforms.uStampMap.value = emptyTexture;
-    // uTrailTexel can be any small value; 1/128 is fine and unused effectively
-    baseMaterial.uniforms.uTrailTexel.value.set(1 / 128, 1 / 128);
-  }, [baseMaterial, emptyTexture]);
+    updateUniform("uFresnelScale", uFresnelScale);
+    updateUniform("uFresnelPower", uFresnelPower);
+  }, [updateUniform, uFresnelPower, uFresnelScale]);
+
+  useEffect(() => {
+    updateUniform("uLakeBaseY", lakePosY);
+  }, [lakePosY, updateUniform]);
 
   // === Geometry ===
   const geom = useMemo(
@@ -233,8 +237,17 @@ const Lake = forwardRef(function Lake(
 
   // === Tick (only wave time) ===
   useFrame((_, dt) => {
-    baseMaterial.uniforms.uTime.value += dt;
+    uniformsRef.current.uTime.value += dt;
   });
+
+  const lakePosition = useMemo(
+    () => [lakePosX, lakePosY, lakePosZ],
+    [lakePosX, lakePosY, lakePosZ]
+  );
+  const lakeScale = useMemo(
+    () => [lakeSizeX, lakeSizeZ, 1],
+    [lakeSizeX, lakeSizeZ]
+  );
 
   // === Ref API: footprint ===
   useImperativeHandle(ref, () => ({
@@ -276,13 +289,9 @@ const Lake = forwardRef(function Lake(
 
   // Single mesh (no additive overlay)
   return (
-    <group
-      position={[lakePosX, lakePosY, lakePosZ]}
-      rotation={rotation}
-      scale={[lakeSizeX, lakeSizeZ, 1]}
-    >
+    <group position={lakePosition} rotation={rotation} scale={lakeScale}>
       <mesh ref={meshRef} geometry={geom} frustumCulled renderOrder={10}>
-        <primitive object={baseMaterial} attach="material" ref={baseMatRef} />
+        <primitive object={baseMaterial} attach="material" />
       </mesh>
     </group>
   );

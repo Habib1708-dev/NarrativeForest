@@ -62,12 +62,19 @@ export default function ForestDynamicSampled({
   onOccludersChange = () => {}, // OPTIONAL: callback(occ[]) for fog prepass, etc.
   sampleHeight = defaultHeightSampler, // height sampler replacing raycasts
   config,
+  onInitialReady,
 }) {
   const { camera } = useThree();
   const settings = useMemo(() => {
     if (!config) return DEFAULT_FOREST_PARAMS;
     return { ...DEFAULT_FOREST_PARAMS, ...config };
   }, [config]);
+  const initialReadyNotifiedRef = useRef(false);
+  const onInitialReadyRef = useRef(onInitialReady);
+
+  useEffect(() => {
+    onInitialReadyRef.current = onInitialReady;
+  }, [onInitialReady]);
 
   const {
     seed,
@@ -548,6 +555,20 @@ export default function ForestDynamicSampled({
     needsRefreshRef.current = false;
     applyInstancing();
   }, 1);
+
+  useFrame(() => {
+    if (initialReadyNotifiedRef.current) return;
+    const modeEntries = Object.keys(modesRef.current || {});
+    if (!modeEntries.length) return;
+    if (buildQueueRef.current.length > 0) return;
+    for (const key of modeEntries) {
+      if (!cacheRef.current.has(key)) {
+        return;
+      }
+    }
+    initialReadyNotifiedRef.current = true;
+    onInitialReadyRef.current?.();
+  });
 
   if (!highParts.length || !lodParts.length || !rockParts.length) return null;
 

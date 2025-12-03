@@ -3,7 +3,14 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
-import { useRef, useState, Suspense, useEffect, useMemo } from "react";
+import {
+  useRef,
+  useState,
+  Suspense,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useDebugStore } from "./state/useDebugStore";
@@ -82,6 +89,9 @@ export default function Experience() {
   // Lake exclusion
   const [lakeExclusion, setLakeExclusion] = useState(null);
   const prevExclRef = useRef(null);
+  const handleForestReady = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("forest-ready"));
+  }, []);
 
   // Preset control (only visible in debug mode)
   const presetControl = useControls(
@@ -687,6 +697,7 @@ export default function Experience() {
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
           exclusion={lakeExclusion}
           onOccludersChange={setForestOccluders}
+          onInitialReady={handleForestReady}
         />
         <MagicMushrooms ref={mushroomsRef} />
         <Fireflies />

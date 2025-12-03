@@ -82,8 +82,8 @@ export default forwardRef(function Cat(_, ref) {
 
     cloned.traverse((o) => {
       if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
+        o.castShadow = false;
+        o.receiveShadow = false;
         o.frustumCulled = false;
 
         // If this mesh has a material or a material array, clone and record original colors

@@ -327,7 +327,7 @@ export default function CameraControllerR3F() {
       return undefined;
     }
 
-    const TOUCH_DELTA_MULTIPLIER = 12;
+    const TOUCH_DELTA_MULTIPLIER = 36;
     const MIN_TOUCH_DELTA = 0.5;
     const interactiveSelector =
       "button, input, textarea, select, a, [role='button'], [role='link'], [role='textbox'], [data-touch-scroll='ignore']";

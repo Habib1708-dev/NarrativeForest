@@ -1412,8 +1412,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
         <instancedMesh
           ref={meshARef}
           args={[geoA, materialA, COUNT_A]}
-          castShadow
-          receiveShadow
+          castShadow={false}
+          receiveShadow={false}
           frustumCulled={false}
         />
       </group>
@@ -1421,8 +1421,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
         <instancedMesh
           ref={meshBRef}
           args={[geoB, materialB, COUNT_B]}
-          castShadow
-          receiveShadow
+          castShadow={false}
+          receiveShadow={false}
           frustumCulled={false}
         />
       </group>
@@ -1430,8 +1430,8 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
         <instancedMesh
           ref={meshCRef}
           args={[geoC, materialC, COUNT_C]}
-          castShadow
-          receiveShadow
+          castShadow={false}
+          receiveShadow={false}
           frustumCulled={false}
         />
       </group>

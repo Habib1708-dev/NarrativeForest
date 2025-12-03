@@ -1053,8 +1053,8 @@ export default forwardRef(function MagicMushrooms(props, ref) {
           key={idx}
           ref={(el) => (meshRefs.current[idx] = el)}
           args={[src.geometry, src.material, INSTANCES.length]}
-          castShadow
-          receiveShadow
+          castShadow={false}
+          receiveShadow={false}
           frustumCulled={false}
           onClick={onClickInstance}
           onPointerDown={onClickInstance}

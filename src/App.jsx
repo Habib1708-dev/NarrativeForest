@@ -6,6 +6,7 @@ import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "./components/DebugModeIndicator";
 import ClickAndDragHint from "./components/ClickAndDragHint";
 import PresetSelector from "./components/PresetSelector";
+import LoadingScreen from "./components/LoadingScreen";
 import { useDebugStore } from "./state/useDebugStore";
 import { PRESET_NAMES } from "./utils/presets";
 
@@ -149,6 +150,7 @@ export default function App() {
 
   return (
     <>
+      <LoadingScreen />
       <audio
         ref={audioRef}
         src="/audio/night-forest-soundscape-158701.mp3"
