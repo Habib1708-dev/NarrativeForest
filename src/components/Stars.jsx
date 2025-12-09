@@ -50,21 +50,24 @@ export default function Stars() {
       const target = Array.isArray(mat) ? mat[0] : mat;
       if (!target || target.userData?._nfStarsPatched) return;
 
-      const prev = target.onBeforeCompile;
-      target.onBeforeCompile = (shader) => {
-        prev?.(shader);
+      target.userData._nfStarsPatched = true;
 
-        // Add varying and uniforms
-        shader.vertexShader =
-          `varying float vNF_WorldY;\n` + shader.vertexShader;
-        // inject world Y at end of main
-        {
+      const prev = target.onBeforeCompile;
+      target.onBeforeCompile = function (shader) {
+        prev?.call(this, shader);
+
+        if (!/varying\s+float\s+vNF_WorldY\s*;/.test(shader.vertexShader)) {
+          shader.vertexShader =
+            `varying float vNF_WorldY;\n` + shader.vertexShader;
+        }
+
+        if (!/vNF_WorldY\s*=\s*nf_wp\.y/.test(shader.vertexShader)) {
           const vs = shader.vertexShader;
           const mainOpen = vs.indexOf("void main()");
           if (mainOpen >= 0) {
             const braceOpen = vs.indexOf("{", mainOpen);
-            let depth = 0,
-              i = braceOpen;
+            let depth = 0;
+            let i = braceOpen;
             for (; i < vs.length; i++) {
               const ch = vs[i];
               if (ch === "{") depth++;
@@ -82,14 +85,26 @@ export default function Stars() {
           }
         }
 
-        shader.fragmentShader =
-          `uniform float uNF_CutoffEnabled;\n` +
-          `uniform float uNF_CutoffY;\n` +
-          `varying float vNF_WorldY;\n` +
-          shader.fragmentShader;
+        if (
+          !/uniform\s+float\s+uNF_CutoffEnabled/.test(shader.fragmentShader)
+        ) {
+          shader.fragmentShader =
+            `uniform float uNF_CutoffEnabled;\n` + shader.fragmentShader;
+        }
+        if (!/uniform\s+float\s+uNF_CutoffY/.test(shader.fragmentShader)) {
+          shader.fragmentShader =
+            `uniform float uNF_CutoffY;\n` + shader.fragmentShader;
+        }
+        if (!/varying\s+float\s+vNF_WorldY/.test(shader.fragmentShader)) {
+          shader.fragmentShader =
+            `varying float vNF_WorldY;\n` + shader.fragmentShader;
+        }
 
-        // Discard below cutoff at start of main
-        {
+        if (
+          !/uNF_CutoffEnabled\s*>\s*0\.5\s*&&\s*vNF_WorldY\s*<\s*uNF_CutoffY/.test(
+            shader.fragmentShader
+          )
+        ) {
           const fs = shader.fragmentShader;
           const mainIdx = fs.indexOf("void main()");
           if (mainIdx >= 0) {
@@ -101,11 +116,8 @@ export default function Stars() {
           }
         }
 
-        // Hook uniforms
         shader.uniforms.uNF_CutoffEnabled = { value: cutoffEnabled ? 1 : 0 };
         shader.uniforms.uNF_CutoffY = { value: cutoffY };
-
-        target.userData._nfStarsPatched = true;
         target.userData.uNF_CutoffEnabled = shader.uniforms.uNF_CutoffEnabled;
         target.userData.uNF_CutoffY = shader.uniforms.uNF_CutoffY;
       };

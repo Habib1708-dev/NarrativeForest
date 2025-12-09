@@ -258,13 +258,13 @@ df_vViewDist = length(mvPosition.xyz);
     // Preserve original blending flags (no overrides here)
 
     const prev = mat.onBeforeCompile;
-    mat.onBeforeCompile = (shader) => {
+    mat.onBeforeCompile = function (shader) {
       // Only patch shaders that use the standard project_vertex chunk
       if (!shader.vertexShader.includes("#include <project_vertex>")) {
-        prev?.(shader);
+        prev?.call(this, shader);
         return;
       }
-      prev?.(shader);
+      prev?.call(this, shader);
       Object.assign(shader.uniforms, uniforms);
 
       shader.vertexShader =

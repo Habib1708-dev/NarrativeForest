@@ -1,4 +1,3 @@
-// App.jsx
 import { Canvas } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import Experience from "./Experience";
@@ -6,7 +5,7 @@ import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "./components/DebugModeIndicator";
 import ClickAndDragHint from "./components/ClickAndDragHint";
 import PresetSelector from "./components/PresetSelector";
-import LoadingScreen from "./components/LoadingScreen";
+import StopCircleOverlay from "./components/StopCircleOverlay";
 import { useDebugStore } from "./state/useDebugStore";
 import { PRESET_NAMES } from "./utils/presets";
 
@@ -31,9 +30,8 @@ export default function App() {
   // Keyboard shortcut to toggle debug mode (Ctrl+D)
   useEffect(() => {
     const handleKeyDown = (event) => {
-      // Check for Ctrl+D (or Cmd+D on Mac)
       if ((event.ctrlKey || event.metaKey) && event.key === "d") {
-        event.preventDefault(); // Prevent browser bookmark dialog
+        event.preventDefault();
         toggleDebugMode();
       }
     };
@@ -54,10 +52,8 @@ export default function App() {
     };
   }, []);
 
-  // Handle preset change from PresetSelector
   const handlePresetChange = (presetName) => {
     setCurrentPreset(presetName);
-    // Dispatch event to Experience component
     window.dispatchEvent(
       new CustomEvent("userPresetChange", {
         detail: { preset: presetName },
@@ -71,13 +67,11 @@ export default function App() {
     if (!rainAudio) return;
 
     if (currentPreset === "Stormy Night") {
-      // Fade in rain audio
       rainAudio.volume = 0;
       rainAudio.play().catch(() => {
         // Autoplay blocked
       });
 
-      // Fade in over 1 second
       let vol = 0;
       const fadeIn = setInterval(() => {
         vol += 0.05;
@@ -89,21 +83,20 @@ export default function App() {
       }, 50);
 
       return () => clearInterval(fadeIn);
-    } else {
-      // Fade out rain audio
-      let vol = rainAudio.volume;
-      const fadeOut = setInterval(() => {
-        vol -= 0.05;
-        if (vol <= 0) {
-          vol = 0;
-          clearInterval(fadeOut);
-          rainAudio.pause();
-        }
-        rainAudio.volume = Math.max(0, vol);
-      }, 50);
-
-      return () => clearInterval(fadeOut);
     }
+
+    let vol = rainAudio.volume;
+    const fadeOut = setInterval(() => {
+      vol -= 0.05;
+      if (vol <= 0) {
+        vol = 0;
+        clearInterval(fadeOut);
+        rainAudio.pause();
+      }
+      rainAudio.volume = Math.max(0, vol);
+    }, 50);
+
+    return () => clearInterval(fadeOut);
   }, [currentPreset]);
 
   // Handle main background audio
@@ -111,10 +104,8 @@ export default function App() {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Set volume
     audio.volume = 0.5;
 
-    // Try to play immediately
     const playAudio = () => {
       audio.play().catch(() => {
         // Autoplay blocked, will play on user interaction
@@ -123,10 +114,8 @@ export default function App() {
 
     playAudio();
 
-    // If autoplay fails, play on first user interaction
     const handleInteraction = () => {
       audio.play();
-      // Remove listeners after first interaction
       document.removeEventListener("click", handleInteraction);
       document.removeEventListener("keydown", handleInteraction);
       document.removeEventListener("touchstart", handleInteraction);
@@ -150,7 +139,6 @@ export default function App() {
 
   return (
     <>
-      <LoadingScreen />
       <audio
         ref={audioRef}
         src="/audio/night-forest-soundscape-158701.mp3"
@@ -164,13 +152,9 @@ export default function App() {
         preload="auto"
       />
 
-      {/* Debug mode indicator badge */}
       <DebugModeIndicator />
-
-      {/* Click and drag hint overlay for free-fly mode */}
       <ClickAndDragHint />
-
-      {/* Preset selector for free-fly mode */}
+      <StopCircleOverlay />
       <PresetSelector
         presets={PRESET_NAMES}
         currentPreset={currentPreset}
@@ -178,7 +162,6 @@ export default function App() {
       />
 
       <Canvas
-        // World camera (OrbitControls drives this)
         camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
         shadows
         gl={{ antialias: true }}
@@ -187,7 +170,6 @@ export default function App() {
         <Experience />
       </Canvas>
 
-      {/* Joystick overlay - always visible for user navigation */}
       <FreeFlyJoystickOverlay />
     </>
   );

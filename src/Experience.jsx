@@ -53,6 +53,7 @@ import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
 import IntroButterfly from "./components/IntroButterfly";
 import CameraControllerR3F from "./components/CameraControllerR3F";
+import IntroText from "./components/IntroText";
 import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
@@ -704,6 +705,7 @@ export default function Experience() {
         <UnifiedCrystalClusters />
         <Butterfly />
         <IntroButterfly />
+        <IntroText />
       </Suspense>
 
       <DistanceFade
