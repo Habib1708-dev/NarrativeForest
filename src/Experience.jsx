@@ -9,7 +9,6 @@ import {
   Suspense,
   useEffect,
   useMemo,
-  useCallback,
 } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
@@ -28,9 +27,9 @@ import { DistanceBlurEffect } from "./post/DistanceBlurEffect";
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
-import FogParticleSystem from "./components/FogParticleSystem";
-import RadioTower from "./components/RadioTower";
 import Lake from "./components/Lake";
+// import FogParticleSystem from "./components/FogParticleSystem";
+import RadioTower from "./components/RadioTower";
 import DistanceFade from "./fog/DistanceFade";
 
 // Preset system
@@ -43,15 +42,13 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 
 // NEW
 // import ForestDynamic from "./components/ForestDynamic";
+// import ForestDynamic from "./components/ForestDynamic";
 import ForestDynamicSampled from "./components/ForestDynamicSampled";
-import MagicMushrooms from "./components/MagicMushrooms";
 import "./three-bvh-setup";
-import Fireflies from "./components/Fireflies";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
-import IntroButterfly from "./components/IntroButterfly";
 import CameraControllerR3F from "./components/CameraControllerR3F";
 import IntroText from "./components/IntroText";
 import { useCameraStore } from "./state/useCameraStore";
@@ -75,24 +72,40 @@ export default function Experience() {
     };
   }, [gl, isDebugMode, enabled]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let rafId = 0;
+
+    const attachTerrainGroup = () => {
+      if (cancelled) return;
+      const group = terrainRef.current;
+      if (group) {
+        setTerrainGroupHandle(group);
+        return;
+      }
+      rafId = requestAnimationFrame(attachTerrainGroup);
+    };
+
+    attachTerrainGroup();
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      setTerrainGroupHandle(null);
+    };
+  }, []);
+
   // ==== REFS ====
   const cabinRef = useRef(null);
   const manRef = useRef(null);
   const catRef = useRef(null);
   const radioTowerRef = useRef(null);
-  const lakeRef = useRef(null);
   const terrainRef = useRef(null);
-  const mushroomsRef = useRef(null);
+  const lakeRef = useRef(null);
+  const [terrainGroupHandle, setTerrainGroupHandle] = useState(null);
 
   // Forest occluders (instanced trees + rocks) — NEW
-  const [forestOccluders, setForestOccluders] = useState([]);
-
-  // Lake exclusion
-  const [lakeExclusion, setLakeExclusion] = useState(null);
-  const prevExclRef = useRef(null);
-  const handleForestReady = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("forest-ready"));
-  }, []);
+  const [forestOccluders] = useState([]);
 
   // Preset control (only visible in debug mode)
   const presetControl = useControls(
@@ -519,68 +532,61 @@ export default function Experience() {
   ]);
 
   useEffect(() => {
-    let cancelled = false;
-    const assign = () => {
-      if (cancelled) return;
-      const terrain = terrainRef.current;
-      if (terrain) {
-        setTerrainCollider(terrain);
-        return;
-      }
-      requestAnimationFrame(assign);
-    };
-    assign();
+    if (!terrainGroupHandle) return;
+    setTerrainCollider(terrainGroupHandle);
     return () => {
-      cancelled = true;
       setTerrainCollider(null);
     };
-  }, [setTerrainCollider]);
+  }, [terrainGroupHandle, setTerrainCollider]);
 
-  // Build occluders list (don’t include the lake)
+  // Build occluders list (instanced assets can append themselves later)
   const occluders = useMemo(
     () =>
       [
-        terrainRef.current,
+        terrainGroupHandle,
         cabinRef.current,
         manRef.current,
         catRef.current,
         radioTowerRef.current,
-        mushroomsRef.current,
         ...forestOccluders,
       ].filter(Boolean),
     [
-      terrainRef.current,
+      terrainGroupHandle,
       cabinRef.current,
       manRef.current,
       catRef.current,
       radioTowerRef.current,
-      mushroomsRef.current,
-      forestOccluders, // updates when ForestDynamic publishes
+      forestOccluders,
     ]
   );
 
-  // Lake exclusion tracking
-  useFrame(() => {
-    const fp = lakeRef.current?.getFootprint?.(0.45);
-    if (!fp) return;
-
-    const prev = prevExclRef.current;
-    const eps = 0.02;
-    const changed =
-      !prev ||
-      Math.abs(fp.centerX - prev.centerX) > eps ||
-      Math.abs(fp.centerZ - prev.centerZ) > eps ||
-      Math.abs(fp.width - prev.width) > eps ||
-      Math.abs(fp.depth - prev.depth) > eps;
-
-    if (changed) {
-      prevExclRef.current = fp;
-      setLakeExclusion(fp);
-    }
-  });
-
   const TERRAIN_TILE_SIZE = 4;
   const TERRAIN_LOAD_RADIUS = 2;
+
+  const [lakeExclusion, setLakeExclusion] = useState(null);
+
+  useEffect(() => {
+    let rafId = 0;
+    let cancelled = false;
+
+    const updateFootprint = () => {
+      if (cancelled) return;
+      const lake = lakeRef.current;
+      if (!lake?.getFootprint) {
+        rafId = requestAnimationFrame(updateFootprint);
+        return;
+      }
+      const footprint = lake.getFootprint(0.35);
+      setLakeExclusion(footprint);
+    };
+
+    updateFootprint();
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [terrainGroupHandle]);
 
   return (
     <>
@@ -653,7 +659,7 @@ export default function Experience() {
           loadRadius={TERRAIN_LOAD_RADIUS}
           dropRadius={3}
           prefetch={1}
-          resolution={26}
+          resolution={4}
         />
 
         {/* Actors */}
@@ -665,10 +671,9 @@ export default function Experience() {
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
         {/* <FogParticleSystem
-          terrainGroup={terrainRef.current}
+          terrainGroup={terrainGroupHandle}
           cellSize={2}
           occluders={occluders}
-          exclusion={lakeExclusion}
           fogParams={{
             color: fColor,
             density: fDensity,
@@ -686,25 +691,18 @@ export default function Experience() {
 
         {/* Forest — publish instanced meshes for fog occlusion */}
         {/* <ForestDynamic
-          terrainGroup={terrainRef.current}
+          terrainGroup={terrainGroupHandle}
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-          exclusion={lakeExclusion}
-          onOccludersChange={setForestOccluders}
         /> */}
         <ForestDynamicSampled
-          terrainGroup={terrainRef.current}
+          terrainGroup={terrainGroupHandle}
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
           exclusion={lakeExclusion}
-          onOccludersChange={setForestOccluders}
-          onInitialReady={handleForestReady}
         />
-        <MagicMushrooms ref={mushroomsRef} />
-        <Fireflies />
         <UnifiedCrystalClusters />
         <Butterfly />
-        <IntroButterfly />
         <IntroText />
       </Suspense>
 

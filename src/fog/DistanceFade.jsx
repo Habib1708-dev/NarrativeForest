@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { useControls, folder, button } from "leva";
 import { DISTANCE_FADE_TILE_READY_EVENT } from "../utils/distanceFadeEvents";
 
+const DISTANCE_FADE_SKIP_FLAG = "distanceFadeSkip";
+
 /**
  * DistanceFade — bulletproof patcher with on-the-fly Leva controls.
  * - Toggle on/off and tune distStart/distEnd/clipStart/clipEnd live.
@@ -23,6 +25,8 @@ export default function DistanceFade({
 }) {
   const { scene, gl } = useThree();
   const patched = useRef(new WeakSet());
+  const patchedMeshesRef = useRef(new WeakSet());
+  const fullSceneScanNeededRef = useRef(true);
   const didLog = useRef(false);
   const stats = useRef({ count: 0, byType: new Map() });
 
@@ -41,7 +45,8 @@ export default function DistanceFade({
         RepatchNow: button(() => {
           // manual patch trigger
           didLog.current = false;
-          runPatchPass();
+          fullSceneScanNeededRef.current = true;
+          runPatchPass(true);
         }),
       }),
     },
@@ -164,6 +169,9 @@ void DFade_doDiscard(float df_vViewDist){
   const depthMatCache = useRef(new WeakMap());
   const distMatCache = useRef(new WeakMap());
 
+  const shouldSkipSubtree = (obj) =>
+    !!obj?.userData?.[DISTANCE_FADE_SKIP_FLAG];
+
   function getDepthMat(srcMat) {
     if (depthMatCache.current.has(srcMat))
       return depthMatCache.current.get(srcMat);
@@ -235,15 +243,15 @@ df_vViewDist = length(mvPosition.xyz);
   const hasNoDistanceFade = (obj) => {
     let o = obj;
     while (o) {
-      if (o.userData && o.userData.noDistanceFade) return true;
+      if (shouldSkipSubtree(o) || o.userData?.noDistanceFade) return true;
       o = o.parent;
     }
     return false;
   };
 
   const patchMaterial = (mat, mesh) => {
-    if (!effEnabled || !mat || patched.current.has(mat)) return;
-    if (hasNoDistanceFade(mesh) || mat?.userData?.noDistanceFade) return;
+    if (!effEnabled || !mat) return false;
+    if (hasNoDistanceFade(mesh) || mat?.userData?.noDistanceFade) return false;
 
     if (
       mat.isShaderMaterial ||
@@ -251,68 +259,104 @@ df_vViewDist = length(mvPosition.xyz);
       mat.isLineMaterial ||
       mat.isLineBasicMaterial
     )
-      return;
+      return false;
 
-    // Align flags to reduce odd blending/culling artifacts
-    mat.fog = true; // helps some variants expose fog-related chunks
-    // Preserve original blending flags (no overrides here)
+    const alreadyPatched = patched.current.has(mat);
 
-    const prev = mat.onBeforeCompile;
-    mat.onBeforeCompile = function (shader) {
-      // Only patch shaders that use the standard project_vertex chunk
-      if (!shader.vertexShader.includes("#include <project_vertex>")) {
+    if (!alreadyPatched) {
+      // Align flags to reduce odd blending/culling artifacts
+      mat.fog = true; // helps some variants expose fog-related chunks
+
+      const prev = mat.onBeforeCompile;
+      mat.onBeforeCompile = function (shader) {
+        // Only patch shaders that use the standard project_vertex chunk
+        if (!shader.vertexShader.includes("#include <project_vertex>")) {
+          prev?.call(this, shader);
+          return;
+        }
         prev?.call(this, shader);
-        return;
-      }
-      prev?.call(this, shader);
-      Object.assign(shader.uniforms, uniforms);
+        Object.assign(shader.uniforms, uniforms);
 
-      shader.vertexShader =
-        "varying float df_vViewDist;\n" +
-        shader.vertexShader.replace(
-          "#include <project_vertex>",
-          `
+        shader.vertexShader =
+          "varying float df_vViewDist;\n" +
+          shader.vertexShader.replace(
+            "#include <project_vertex>",
+            `
 #include <project_vertex>
 df_vViewDist = length(mvPosition.xyz);
 `
-        );
+          );
 
-      shader.fragmentShader =
-        "varying float df_vViewDist;\n" +
-        GLSL_SHARED +
-        "\n" +
-        insertDiscardBlock(shader.fragmentShader);
-    };
+        shader.fragmentShader =
+          "varying float df_vViewDist;\n" +
+          GLSL_SHARED +
+          "\n" +
+          insertDiscardBlock(shader.fragmentShader);
+      };
 
-    if (mesh) {
-      mesh.customDepthMaterial = getDepthMat(mat);
-      mesh.customDistanceMaterial = getDistanceMat(mat);
+      patched.current.add(mat);
+      // One-shot recompile so our onBeforeCompile takes effect deterministically
+      mat.needsUpdate = true;
+
+      stats.current.count++;
+      const t = mat.type || "UnknownMaterial";
+      stats.current.byType.set(t, (stats.current.byType.get(t) || 0) + 1);
     }
 
-    patched.current.add(mat);
-    // One-shot recompile so our onBeforeCompile takes effect deterministically
-    mat.needsUpdate = true;
+    if (mesh) {
+      mesh.customDepthMaterial ||= getDepthMat(mat);
+      mesh.customDistanceMaterial ||= getDistanceMat(mat);
+    }
 
-    stats.current.count++;
-    const t = mat.type || "UnknownMaterial";
-    stats.current.byType.set(t, (stats.current.byType.get(t) || 0) + 1);
+    return true;
   };
 
   const patchMesh = (mesh) => {
-    if (!mesh?.isMesh) return;
+    if (!mesh?.isMesh) return false;
+    if (shouldSkipSubtree(mesh)) return false;
+    if (patchedMeshesRef.current.has(mesh)) return false;
+
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const m of mats) patchMaterial(m, mesh);
-    mesh.visible = true;
+    let ready = false;
+    for (const m of mats) ready = patchMaterial(m, mesh) || ready;
+
+    if (ready) {
+      mesh.visible = true;
+      patchedMeshesRef.current.add(mesh);
+    }
+
+    return ready;
   };
 
   // Patch pass helper
-  const runPatchPass = () => {
-    if (!effEnabled) return;
-    scene.traverse((o) => {
-      if (!o.isMesh) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of mats) patchMaterial(m, o);
-    });
+  const runPatchPass = (forceFull = false) => {
+    if (!effEnabled) return false;
+    if (!forceFull && !fullSceneScanNeededRef.current) return false;
+
+    let patchedThisPass = 0;
+    const walk = (node) => {
+      if (!node || shouldSkipSubtree(node)) return;
+      if (node.isMesh) {
+        if (!forceFull && patchedMeshesRef.current.has(node)) {
+          // continue to children even if this mesh was patched already
+        } else if (patchMesh(node)) {
+          patchedThisPass += 1;
+        }
+      }
+      const children = node.children;
+      if (!children || !children.length) return;
+      for (const child of children) walk(child);
+    };
+    walk(scene);
+
+    if (!forceFull) {
+      if (patchedThisPass === 0) {
+        fullSceneScanNeededRef.current = false;
+      } else {
+        fullSceneScanNeededRef.current = true;
+      }
+    }
+
     if (!didLog.current && stats.current.count > 0) {
       didLog.current = true;
       const breakdown = [...stats.current.byType.entries()]
@@ -322,25 +366,22 @@ df_vViewDist = length(mvPosition.xyz);
         `[DistanceFade] patched materials: ${stats.current.count} (${breakdown})`
       );
     }
+
+    return patchedThisPass > 0;
   };
 
   // Initial delayed patch to avoid racing with scene mount
   useEffect(() => {
     if (!effEnabled) return;
-    const t = setTimeout(runPatchPass, 50);
+    fullSceneScanNeededRef.current = true;
+    warmupFramesRef.current = 120;
+    didLog.current = false;
+    const t = setTimeout(() => runPatchPass(true), 50);
     return () => clearTimeout(t);
   }, [effEnabled, scene]);
 
-  // Re-run a patch pass when uniforms ranges change significantly (new materials may arrive later)
-  useEffect(() => {
-    if (!effEnabled) return;
-    runPatchPass();
-  }, [effEnabled, effDistStart, effDistEnd, effClipStart, effClipEnd]);
-
   // Warm-up: patch for a short window to catch late-mounting assets (GLTF/Suspense)
   const warmupFramesRef = useRef(120); // ~2s at 60fps
-  const throttleRef = useRef(0);
-  const tileEventPendingRef = useRef(false);
   const pendingMeshesRef = useRef([]);
 
   useEffect(() => {
@@ -351,8 +392,6 @@ df_vViewDist = length(mvPosition.xyz);
         if (mesh) mesh.visible = true;
         return;
       }
-      tileEventPendingRef.current = true;
-      warmupFramesRef.current = Math.max(warmupFramesRef.current, 90);
       if (mesh) pendingMeshesRef.current.push(mesh);
     };
     window.addEventListener(DISTANCE_FADE_TILE_READY_EVENT, handleTileReady);
@@ -365,29 +404,31 @@ df_vViewDist = length(mvPosition.xyz);
   }, [effEnabled]);
   useFrame(() => {
     if (!effEnabled) return;
-    if (tileEventPendingRef.current) {
-      tileEventPendingRef.current = false;
-      runPatchPass();
-    }
+
     const pending = pendingMeshesRef.current;
     if (pending.length) {
       const meshes = pending.splice(0, pending.length);
       for (const mesh of meshes) patchMesh(mesh);
     }
+
+    if (!fullSceneScanNeededRef.current) return;
+
     if (warmupFramesRef.current > 0) {
       runPatchPass();
       warmupFramesRef.current -= 1;
+      if (!fullSceneScanNeededRef.current) warmupFramesRef.current = 0;
       return;
     }
-    // Throttled patch pass every ~0.5s at 60fps to catch late-mounting meshes
-    throttleRef.current = (throttleRef.current + 1) % 30;
-    if (throttleRef.current === 0) runPatchPass();
+    // After warmup, only run when manually requested
+    if (fullSceneScanNeededRef.current) runPatchPass();
   });
 
   // Cleanup
   useEffect(() => {
     return () => {
       patched.current = new WeakSet();
+      patchedMeshesRef.current = new WeakSet();
+      fullSceneScanNeededRef.current = true;
       scene.traverse((o) => {
         if (!o.isMesh) return;
         const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -400,4 +441,22 @@ df_vViewDist = length(mvPosition.xyz);
   }, [scene, gl]);
 
   return null;
+}
+
+export function markDistanceFadeStatic(object3D, options = {}) {
+  if (!object3D) return;
+  const { includeChildren = true } = options;
+
+  const applyFlag = (target) => {
+    if (!target) return;
+    target.userData = target.userData || {};
+    target.userData[DISTANCE_FADE_SKIP_FLAG] = true;
+    target.userData.noDistanceFade = true;
+  };
+
+  if (includeChildren && typeof object3D.traverse === "function") {
+    object3D.traverse((child) => applyFlag(child));
+  } else {
+    applyFlag(object3D);
+  }
 }
