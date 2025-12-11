@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 import { useCameraStore } from "../state/useCameraStore";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
@@ -40,6 +40,14 @@ export default function StopCircleOverlay() {
   const t = useCameraStore((state) => state.t ?? 0);
   const waypoints = useCameraStore((state) => state.waypoints || []);
 
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth <= 900);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   // Helper to get t for a stop
   const getStopT = (name) => {
     if (!waypoints.length) return null;
@@ -58,7 +66,14 @@ export default function StopCircleOverlay() {
   const t13 = getStopT("stop-13");
   const t13b = getStopT("stop-13b");
   const t13bLeft = getStopT("stop-13b-left-1");
-  const t14 = getStopT("stop-14"); // For fading out the new text
+  const t14 = getStopT("stop-14");
+  const t15Spin = getStopT("stop-15-spin-360");
+  const tRing4b = getStopT("ring-4b");
+  const tRingClose = getStopT("ring-close");
+  const tSeqArch1 = getStopT("seq-arch-1");
+  const tSeqArch2 = getStopT("seq-arch-2");
+  const tSeqArch3 = getStopT("seq-arch-3");
+  const tSeqArch4 = getStopT("seq-arch-4");
 
   if (t4 === null || t5 === null) {
     return null;
@@ -80,11 +95,16 @@ export default function StopCircleOverlay() {
 
   // Size Logic (Scale)
   // Default scale 1.0. From stop-9 to stop-10, scale to 2.0.
-  let circleScale = 1.0;
+  // On mobile, start at 2.0 (double size).
+  let circleScale = isMobile ? 2.0 : 1.0;
   if (t9 !== null && t10 !== null && t > t9) {
     const span910 = t10 - t9;
     const p910 = clamp01((t - t9) / span910);
-    circleScale = 1.0 + 1.0 * p910; // 1.0 -> 2.0
+    if (!isMobile) {
+      circleScale = 1.0 + 1.0 * p910; // 1.0 -> 2.0
+    } else {
+      circleScale = 2.0; // Stay at 2.0
+    }
   }
 
   // Collapse Logic (after stop-13b-left-1)
@@ -174,12 +194,12 @@ export default function StopCircleOverlay() {
       endIn: t13b
         ? t13 + (t13b - t13) * 0.8
         : t14
-        ? t13 + (t14 - t13) * 0.3
+        ? t13 + (t14 - t13) * 0.8
         : t13 + 0.06,
       // Start fading out immediately after carousel finishes
-      startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 || t13 + 0.2,
-      // Completely faded out by 13b
-      endOut: t13b || (t14 ? t14 + 0.1 : t13 + 0.3),
+      startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 ? t14 - 0.02 : t13 + 0.2,
+      // Completely faded out by 13b or t14
+      endOut: t13b || t14 || t13 + 0.3,
       delayIn: 0.0,
       type: "carousel",
     },
@@ -269,7 +289,7 @@ export default function StopCircleOverlay() {
             // Order matters: translate then scale? Or scale then translate?
             // If we use scale(0.5), the element shrinks.
             // Let's apply scale via a wrapper or just combine them.
-            transform: `translateY(-50%) scale(${1 / circleScale})`,
+            transform: `translateY(-50%)`,
           }}
         >
           {words.map((word, i) => {
@@ -337,7 +357,7 @@ export default function StopCircleOverlay() {
           width: "max-content", // Ensure width fits content
           // Inverse scale for standard text too, if it overlaps with scaling phase
           transformOrigin: "left center",
-          transform: `translateY(-50%) scale(${1 / circleScale})`,
+          transform: `translateY(-50%)`,
         }}
       >
         {words.map((word, i) => {
@@ -383,6 +403,175 @@ export default function StopCircleOverlay() {
     );
   };
 
+  const renderTopCenterText = () => {
+    if (t14 === null || t15Spin === null || tRing4b === null) return null;
+
+    const text = "We craft the extraordinary with our creativity";
+    const words = text.split(" ");
+
+    const startIn = t14;
+    const endIn = t15Spin;
+    const startOut = t15Spin;
+    const endOut = tRing4b;
+
+    let phase = "hidden";
+    let localP = 0;
+
+    if (t < startIn) phase = "hidden";
+    else if (t <= endIn) {
+      phase = "in";
+      localP = clamp01((t - startIn) / (endIn - startIn));
+    } else if (t <= endOut) {
+      phase = "out";
+      localP = clamp01((t - startOut) / (endOut - startOut));
+    } else {
+      phase = "hidden";
+    }
+
+    if (phase === "hidden") return null;
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: "15%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          gap: "0.3em",
+          pointerEvents: "none",
+          zIndex: 60,
+          fontFamily: "var(--font-family, sans-serif)",
+          fontSize: "1.5rem",
+          color: "white",
+          textShadow: "0 2px 4px rgba(0,0,0,0.5)",
+          whiteSpace: "normal",
+          width: "90%",
+          justifyContent: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        {words.map((word, i) => {
+          const wordCount = words.length;
+          // Stagger logic
+          const step = 1 / (wordCount + 2);
+          const wordStart = i * step;
+          const wordEnd = wordStart + 3 * step;
+
+          let wordProgress = 0;
+          if (localP >= wordStart) {
+            wordProgress = clamp01(
+              (localP - wordStart) / (wordEnd - wordStart)
+            );
+          }
+
+          let opacity = 0;
+          let translateY = 0;
+
+          if (phase === "in") {
+            opacity = wordProgress;
+            translateY = 10 * (1 - wordProgress);
+          } else {
+            opacity = 1 - wordProgress;
+            translateY = -10 * wordProgress;
+          }
+
+          return (
+            <span
+              key={i}
+              style={{
+                opacity,
+                transform: `translateY(${translateY}px)`,
+                display: "inline-block",
+              }}
+            >
+              {word}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderArchTexts = () => {
+    // We have two segments:
+    // 1. seq-arch-1 -> seq-arch-2
+    // 2. seq-arch-3 -> seq-arch-4
+
+    if (
+      tSeqArch1 === null ||
+      tSeqArch2 === null ||
+      tSeqArch3 === null ||
+      tSeqArch4 === null
+    ) {
+      return null;
+    }
+
+    const segments = [
+      {
+        lines: ["We make", "creative 3D & full-stack websites"],
+        start: tSeqArch1,
+        end: tSeqArch2,
+      },
+      {
+        lines: ["We Develop", "AI models & softwares"],
+        start: tSeqArch3,
+        end: tSeqArch4,
+      },
+    ];
+
+    const activeSegment = segments.find((s) => t >= s.start && t <= s.end);
+
+    if (!activeSegment) return null;
+
+    const { lines, start, end } = activeSegment;
+    const localP = clamp01((t - start) / (end - start));
+
+    // Animate from top (10%) to bottom (90%)
+    const topPos = 10 + localP * 80; // 10% -> 90%
+
+    // Fade logic:
+    // Fade in: 0.0 -> 0.25
+    // Hold:    0.25 -> 0.75
+    // Fade out: 0.75 -> 1.0
+    let opacity = 1;
+    if (localP < 0.25) {
+      opacity = localP / 0.25;
+    } else if (localP > 0.75) {
+      opacity = 1 - (localP - 0.75) / 0.25;
+    }
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: `${topPos}%`,
+          transform: "translate(-50%, -50%)", // Center on the point
+          width: "90%",
+          maxWidth: "1200px",
+          textAlign: "center",
+          pointerEvents: "none",
+          zIndex: 60,
+          fontFamily: '"Georama", sans-serif',
+          fontOpticalSizing: "auto",
+          fontSize: "clamp(2rem, 5vw, 4.5rem)",
+          fontWeight: "300", // Minimalist light weight
+          letterSpacing: "0.02em",
+          lineHeight: "1.1",
+          color: "#ffffff",
+          textShadow: "0 2px 12px rgba(0,0,0,0.5)",
+          whiteSpace: "normal",
+          opacity: opacity,
+        }}
+      >
+        {lines.map((line, i) => (
+          <div key={i}>{line}</div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div
       className="stop-overlay-container"
@@ -393,6 +582,8 @@ export default function StopCircleOverlay() {
         zIndex: 50,
       }}
     >
+      {renderTopCenterText()}
+      {renderArchTexts()}
       {/* Wrapper for Circle + Text */}
       <div
         className="stop-circle-wrapper"
@@ -444,21 +635,42 @@ export default function StopCircleOverlay() {
             mixBlendMode: "screen",
           }}
         />
+      </div>
 
-        {/* Text Container - Absolute positioned relative to wrapper */}
-        <div
-          style={{
-            position: "absolute",
-            left: "100%",
-            top: "50%",
-            marginLeft: "60px",
-            display: "grid", // To stack multiple text segments
-            placeItems: "center start", // Align left
-          }}
-          className="stop-overlay-text-container" // Add class for media query targeting
-        >
-          {textSegments.map(renderText)}
-        </div>
+      {/* Text Container - Moved outside wrapper to avoid scaling issues */}
+      <div
+        style={{
+          position: "absolute",
+          ...(isMobile
+            ? {
+                left: "50%",
+                // Center between circle bottom and screen bottom
+                // Circle bottom is at 50% + (Radius * Scale)
+                // Radius is clamp(180px, 45vw, 420px) / 2
+                // Scale is circleScale (which is 2.0 on mobile)
+                // So Circle Bottom = 50% + clamp(...) * 0.5 * 2.0 = 50% + clamp(...)
+                // Midpoint = (100% + (50% + clamp(...))) / 2 = 75% + clamp(...) / 2
+                top: `calc(75% + clamp(180px, 45vw, 420px) * ${
+                  circleScale * 0.25
+                })`,
+                transform: "translate(-50%, -50%)",
+                width: "80%",
+                textAlign: "center",
+                display: "grid",
+                placeItems: "center",
+              }
+            : {
+                left: "calc(50% + clamp(180px, 45vw, 420px) * 0.5 + 60px)",
+                top: "50%",
+                transform: "translateY(-50%)",
+                marginLeft: "0",
+                display: "grid",
+                placeItems: "center start",
+              }),
+        }}
+        className="stop-overlay-text-container"
+      >
+        {textSegments.map(renderText)}
       </div>
     </div>
   );

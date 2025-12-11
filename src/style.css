@@ -454,10 +454,11 @@ body.user-mode [class*="leva-"] {
 @media (max-width: 900px) {
   .stop-overlay-text-container {
     left: 50%;
-    top: auto;
-    bottom: 100%;
+    top: 100%;
+    bottom: auto;
     margin-left: 0;
-    margin-bottom: 40px;
+    margin-top: 20px;
+    margin-bottom: 0;
     place-items: center;
     transform: translateX(-50%);
   }
