@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
+import { emitDistanceFadeTileReady } from "../utils/distanceFadeEvents";
 
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
@@ -222,6 +223,9 @@ export default function ForestDynamic({
         m.frustumCulled = false;
         m.count = 0;
         m.instanceMatrix.needsUpdate = true;
+
+        // Notify DistanceFade that this mesh is ready to be patched
+        emitDistanceFadeTileReady({ mesh: m, key: m.uuid });
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

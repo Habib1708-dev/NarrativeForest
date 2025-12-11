@@ -5,6 +5,7 @@ import { useThree, useFrame } from "@react-three/fiber";
 import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 import { heightAt as defaultHeightSampler } from "../proc/heightfield";
+import { emitDistanceFadeTileReady } from "../utils/distanceFadeEvents";
 
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
@@ -252,6 +253,9 @@ export default function ForestDynamicSampled({
         m.frustumCulled = false;
         m.count = 0;
         m.instanceMatrix.needsUpdate = true;
+
+        // Notify DistanceFade that this mesh is ready to be patched
+        emitDistanceFadeTileReady({ mesh: m, key: m.uuid });
       })
     );
   }, [highParts.length, lodParts.length, rockParts.length, rockRefsArray]);
