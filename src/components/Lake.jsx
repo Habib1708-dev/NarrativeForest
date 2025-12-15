@@ -50,7 +50,7 @@ const Lake = forwardRef(function Lake(
   } = useControls("Lake", {
     Transform: folder({
       lakePosX: { value: -1.8, min: -20, max: 20, step: 0.01 },
-      lakePosY: { value: -4.82, min: -10, max: 10, step: 0.01 },
+      lakePosY: { value: -4.79, min: -10, max: 10, step: 0.01 },
       lakePosZ: { value: -2.8, min: -20, max: 20, step: 0.01 },
     }),
     Size: folder({

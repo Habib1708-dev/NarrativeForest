@@ -1,6 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import Experience from "./Experience";
+import LoadingScreen from "./components/LoadingScreen";
 import FreeFlyJoystickOverlay from "./components/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "./components/DebugModeIndicator";
 import ClickAndDragHint from "./components/ClickAndDragHint";
@@ -139,6 +140,7 @@ export default function App() {
 
   return (
     <>
+      <LoadingScreen />
       <audio
         ref={audioRef}
         src="/audio/night-forest-soundscape-158701.mp3"

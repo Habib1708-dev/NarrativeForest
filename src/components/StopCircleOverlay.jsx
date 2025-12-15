@@ -1,40 +1,9 @@
-import { useMemo, useEffect, useRef, useState } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useCameraStore } from "../state/useCameraStore";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const normalizeName = (value) => (value || "").trim().toLowerCase();
-
-const getStopWindow = (waypoints, startName, endName) => {
-  if (!Array.isArray(waypoints) || waypoints.length < 2) {
-    return null;
-  }
-
-  const segmentCount = waypoints.length - 1;
-  if (segmentCount <= 0) {
-    return null;
-  }
-
-  const findIndex = (target) =>
-    waypoints.findIndex((wp) => normalizeName(wp?.name) === target);
-
-  const startIndex = findIndex(normalizeName(startName));
-  const endIndex = findIndex(normalizeName(endName));
-
-  if (startIndex < 0 || endIndex < 0 || startIndex === endIndex) {
-    return null;
-  }
-
-  const startT = startIndex / segmentCount;
-  const endT = endIndex / segmentCount;
-
-  if (!Number.isFinite(startT) || !Number.isFinite(endT)) {
-    return null;
-  }
-
-  return startT < endT
-    ? { start: startT, end: endT }
-    : { start: endT, end: startT };
-};
+const safeSpan = (a, b) => Math.max(1e-6, (b ?? 0) - (a ?? 0));
 
 export default function StopCircleOverlay() {
   const t = useCameraStore((state) => state.t ?? 0);
@@ -48,46 +17,51 @@ export default function StopCircleOverlay() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // Helper to get t for a stop
-  const getStopT = (name) => {
-    if (!waypoints.length) return null;
-    const idx = waypoints.findIndex((wp) => normalizeName(wp?.name) === name);
-    if (idx < 0) return null;
-    return idx / (waypoints.length - 1);
-  };
+  // Memoized lookup: name -> normalized t (0..1)
+  const stopT = useMemo(() => {
+    if (!Array.isArray(waypoints) || waypoints.length < 2) {
+      return () => null;
+    }
 
-  const t4 = getStopT("stop-4");
-  const t5 = getStopT("stop-5");
-  const t6 = getStopT("stop-6");
-  const t8 = getStopT("stop-8");
-  const t9 = getStopT("stop-9");
-  const t10 = getStopT("stop-10");
-  const t12 = getStopT("stop-12");
-  const t13 = getStopT("stop-13");
-  const t13b = getStopT("stop-13b");
-  const t13bLeft = getStopT("stop-13b-left-1");
-  const t14 = getStopT("stop-14");
-  const t15Spin = getStopT("stop-15-spin-360");
-  const tRing4b = getStopT("ring-4b");
-  const tRingClose = getStopT("ring-close");
-  const tSeqArch1 = getStopT("seq-arch-1");
-  const tSeqArch2 = getStopT("seq-arch-2");
-  const tSeqArch3 = getStopT("seq-arch-3");
-  const tSeqArch4 = getStopT("seq-arch-4");
+    const segmentCount = waypoints.length - 1;
+    const map = new Map();
 
-  if (t4 === null || t5 === null) {
-    return null;
-  }
+    waypoints.forEach((wp, i) => {
+      const key = normalizeName(wp?.name);
+      if (!key) return;
+      map.set(key, i / segmentCount);
+    });
+
+    return (name) => map.get(normalizeName(name)) ?? null;
+  }, [waypoints]);
+
+  const t4 = stopT("stop-4");
+  const t5 = stopT("stop-5");
+  const t6 = stopT("stop-6");
+  const t8 = stopT("stop-8");
+  const t9 = stopT("stop-9");
+  const t10 = stopT("stop-10");
+  const t12 = stopT("stop-12");
+  const t13 = stopT("stop-13");
+  const t13b = stopT("stop-13b");
+  const t13bLeft = stopT("stop-13b-left-1");
+  const t14 = stopT("stop-14");
+  const t15Spin = stopT("stop-15-spin-360");
+  const tRing4b = stopT("ring-4b");
+  const tRingClose = stopT("ring-close");
+  const tSeqArch1 = stopT("seq-arch-1");
+  const tSeqArch2 = stopT("seq-arch-2");
+  const tSeqArch3 = stopT("seq-arch-3");
+  const tSeqArch4 = stopT("seq-arch-4");
+
+  if (t4 === null || t5 === null) return null;
 
   const EPS = 1e-4;
-  if (t < t4 - EPS) {
-    return null;
-  }
+  if (t < t4 - EPS) return null;
 
   // --- Circle & Backdrop Logic ---
   // Fade in from stop-4 to stop-5
-  const span45 = t5 - t4;
-  const progress45 = clamp01((t - t4) / span45);
+  const progress45 = clamp01((t - t4) / safeSpan(t4, t5));
 
   let circleOpacity = progress45;
   let backdropOpacity = 0.8 * progress45;
@@ -98,20 +72,17 @@ export default function StopCircleOverlay() {
   // On mobile, start at 2.0 (double size).
   let circleScale = isMobile ? 2.0 : 1.0;
   if (t9 !== null && t10 !== null && t > t9) {
-    const span910 = t10 - t9;
-    const p910 = clamp01((t - t9) / span910);
-    if (!isMobile) {
-      circleScale = 1.0 + 1.0 * p910; // 1.0 -> 2.0
-    } else {
-      circleScale = 2.0; // Stay at 2.0
-    }
+    const p910 = clamp01((t - t9) / safeSpan(t9, t10));
+    if (!isMobile) circleScale = 1.0 + 1.0 * p910; // 1.0 -> 2.0
+    else circleScale = 2.0;
   }
 
   // Collapse Logic (after stop-13b-left-1)
-  // "Immediately but gradually" -> very short duration
   if (t13bLeft !== null && t > t13bLeft) {
     const collapseDuration = 0.015; // Fast transition
-    const pCollapse = clamp01((t - t13bLeft) / collapseDuration);
+    const pCollapse = clamp01(
+      (t - t13bLeft) / safeSpan(t13bLeft, t13bLeft + collapseDuration)
+    );
     const collapseFactor = 1.0 - pCollapse;
 
     circleScale *= collapseFactor;
@@ -121,34 +92,25 @@ export default function StopCircleOverlay() {
   }
 
   // Halo Color Logic
-  // Yellow up to stop-5, then transition to Orange by stop-6
-  // Then Orange up to stop-9, then transition to Green by stop-10
-  // Then Green up to stop-10, then transition to White by stop-13
   let haloColor = "255, 220, 100"; // Yellow
 
-  if (t6 !== null && t > t5 && t <= t9) {
+  if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
     // Transition Yellow -> Orange (5->6)
-    const span56 = t6 - t5;
-    const p56 = clamp01((t - t5) / span56);
-    // Lerp from Yellow (255, 220, 100) to Orange (255, 140, 50)
+    const p56 = clamp01((t - t5) / safeSpan(t5, t6));
     const r = Math.round(255 + (255 - 255) * p56);
     const g = Math.round(220 + (140 - 220) * p56);
     const b = Math.round(100 + (50 - 100) * p56);
     haloColor = `${r}, ${g}, ${b}`;
   } else if (t9 !== null && t10 !== null && t > t9 && t <= t10) {
     // Transition Orange -> Green (9->10)
-    const span910 = t10 - t9;
-    const p910 = clamp01((t - t9) / span910);
-    // Lerp from Orange (255, 140, 50) to Green (100, 255, 100)
+    const p910 = clamp01((t - t9) / safeSpan(t9, t10));
     const r = Math.round(255 + (100 - 255) * p910);
     const g = Math.round(140 + (255 - 140) * p910);
     const b = Math.round(50 + (100 - 50) * p910);
     haloColor = `${r}, ${g}, ${b}`;
   } else if (t10 !== null && t13 !== null && t > t10) {
     // Transition Green -> White (10->13)
-    const span1013 = t13 - t10;
-    const p1013 = clamp01((t - t10) / span1013);
-    // Lerp from Green (100, 255, 100) to White (255, 255, 255)
+    const p1013 = clamp01((t - t10) / safeSpan(t10, t13));
     const r = Math.round(100 + (255 - 100) * p1013);
     const g = Math.round(255 + (255 - 255) * p1013);
     const b = Math.round(100 + (255 - 100) * p1013);
@@ -156,12 +118,6 @@ export default function StopCircleOverlay() {
   }
 
   // --- Text Logic ---
-  // We have four text segments:
-  // 1. "Hello, this is me Habib." (In: 4->5, Out: 5->6)
-  // 2. "This is my cat Skye" (In: 5->6, Out: 8->9)
-  // 3. "Nature is all around us" (In: 9->10, Out: just before 13)
-  // 4. "But, we are connected through technology" (In: 13->13.5, Out: 14)
-
   const textSegments = [
     {
       text: "Hello, this is me Habib.",
@@ -182,8 +138,8 @@ export default function StopCircleOverlay() {
       text: "Nature is all around us",
       startIn: t9,
       endIn: t12 || t10, // Complete processing by stop 12
-      startOut: t13 ? t13 - 0.02 : t10 + 0.5, // Fade out just before stop 13
-      endOut: t13 || t10 + 1.0,
+      startOut: t13 ? t13 - 0.02 : (t10 ?? 0) + 0.5, // Fade out just before stop 13
+      endOut: t13 || (t10 ?? 0) + 1.0,
       delayIn: 0.0,
       type: "carousel",
     },
@@ -205,11 +161,6 @@ export default function StopCircleOverlay() {
     },
   ];
 
-  // Find active segment or transitioning segment
-  // We render all segments that have > 0 opacity
-  // But to keep it simple, let's just map over them and render them absolutely on top of each other
-  // (CSS grid handles the stacking)
-
   const renderText = (segment, index) => {
     const {
       text,
@@ -220,15 +171,17 @@ export default function StopCircleOverlay() {
       delayIn = 0,
       type,
     } = segment;
+
+    // If timing is missing, skip safely
+    if (!Number.isFinite(startIn) || !Number.isFinite(endIn)) return null;
+
     const words = text.split(" ");
 
-    // Calculate global progress for In and Out phases
-    const spanIn = endIn - startIn;
-    const spanOut = endOut ? endOut - startOut : 0.1;
+    const spanIn = safeSpan(startIn, endIn);
+    const spanOut = endOut ? safeSpan(startOut, endOut) : 0.1;
 
-    // Determine if we are in the "In" phase, "Hold" phase, or "Out" phase
     let phase = "hidden";
-    let localP = 0; // 0..1 progress within the phase
+    let localP = 0;
 
     if (t < startIn) phase = "hidden";
     else if (t <= endIn) {
@@ -241,36 +194,27 @@ export default function StopCircleOverlay() {
       phase = "out";
       localP = clamp01((t - startOut) / spanOut);
     } else {
-      phase = "hidden"; // or "done"
+      phase = "hidden";
     }
 
     if (phase === "hidden") return null;
 
-    // Special Carousel Logic for "Nature is all around us"
+    // Carousel texts
     if (type === "carousel") {
-      // Only render if we are in "in" phase or "hold" phase (showing last word)
-      // If "out", we can just fade out the last word or hide it.
-
-      // Map localP (0..1) to the sequence of words.
-      // If phase is "hold" or "out", we show the last word (or handle out animation).
-
       let activeIndex = -1;
-      let wordP = 0; // Progress for the active word (0..1)
+      let wordP = 0;
 
       if (phase === "in") {
         const totalWords = words.length;
-        // Divide 0..1 into slots
         const slotSize = 1 / totalWords;
         activeIndex = Math.floor(localP / slotSize);
         if (activeIndex >= totalWords) activeIndex = totalWords - 1;
 
-        // Progress within the slot
         const slotStart = activeIndex * slotSize;
         wordP = (localP - slotStart) / slotSize;
       } else {
-        // Hold/Out: Show last word
         activeIndex = words.length - 1;
-        wordP = 0.5; // Stable
+        wordP = 0.5;
       }
 
       return (
@@ -282,47 +226,32 @@ export default function StopCircleOverlay() {
             transform: "translateY(-50%)",
             pointerEvents: "none",
             width: "max-content",
-            // Inverse scale to counteract parent scaling
-            // Use transform-origin left center to stay attached to the circle edge
             transformOrigin: "left center",
-            // Note: We need to combine translateY(-50%) with scale.
-            // Order matters: translate then scale? Or scale then translate?
-            // If we use scale(0.5), the element shrinks.
-            // Let's apply scale via a wrapper or just combine them.
-            transform: `translateY(-50%)`,
           }}
         >
           {words.map((word, i) => {
-            // Only animate the active word
             if (i !== activeIndex) return null;
 
             let opacity = 0;
             let translateY = 0;
 
             if (phase === "in") {
-              // Slide In (0.0 - 0.2)
               if (wordP < 0.2) {
                 const p = wordP / 0.2;
                 opacity = p;
                 translateY = -20 * (1 - p);
-              }
-              // Slide Out (0.8 - 1.0) -> UNLESS it's the very last word
-              else if (wordP > 0.8 && i < words.length - 1) {
+              } else if (wordP > 0.8 && i < words.length - 1) {
                 const p = (wordP - 0.8) / 0.2;
                 opacity = 1 - p;
                 translateY = 20 * p;
-              }
-              // Hold
-              else {
+              } else {
                 opacity = 1;
                 translateY = 0;
               }
             } else if (phase === "out") {
-              // Fade out the last word
               opacity = 1 - localP;
               translateY = 20 * localP;
             } else {
-              // Hold
               opacity = 1;
               translateY = 0;
             }
@@ -334,7 +263,6 @@ export default function StopCircleOverlay() {
                   opacity,
                   transform: `translateY(${translateY}px)`,
                   display: "inline-block",
-                  // No margin needed since only one word shows at a time
                 }}
               >
                 {word}
@@ -351,13 +279,11 @@ export default function StopCircleOverlay() {
         key={index}
         className="stop-overlay-text"
         style={{
-          gridArea: "1/1", // Stack them
+          gridArea: "1/1",
           transform: "translateY(-50%)",
           pointerEvents: "none",
-          width: "max-content", // Ensure width fits content
-          // Inverse scale for standard text too, if it overlaps with scaling phase
+          width: "max-content",
           transformOrigin: "left center",
-          transform: `translateY(-50%)`,
         }}
       >
         {words.map((word, i) => {
@@ -365,9 +291,6 @@ export default function StopCircleOverlay() {
           let translateY = 0;
 
           if (phase === "in") {
-            // Slide in from above (-150px)
-            // Stagger: 0.2 to 0.8 (or adjusted by delayIn)
-            // If delayIn is 0.5, we map 0.5..1.0 of the window to the animation
             const effectiveStart = 0.2 + delayIn * 0.5 + i * 0.1;
             const duration = 0.3;
             const p = clamp01((localP - effectiveStart) / duration);
@@ -377,7 +300,6 @@ export default function StopCircleOverlay() {
             opacity = 1;
             translateY = 0;
           } else if (phase === "out") {
-            // Slide down (+150px)
             const start = i * 0.08;
             const duration = 0.3;
             const p = clamp01((localP - start) / duration);
@@ -420,10 +342,10 @@ export default function StopCircleOverlay() {
     if (t < startIn) phase = "hidden";
     else if (t <= endIn) {
       phase = "in";
-      localP = clamp01((t - startIn) / (endIn - startIn));
+      localP = clamp01((t - startIn) / safeSpan(startIn, endIn));
     } else if (t <= endOut) {
       phase = "out";
-      localP = clamp01((t - startOut) / (endOut - startOut));
+      localP = clamp01((t - startOut) / safeSpan(startOut, endOut));
     } else {
       phase = "hidden";
     }
@@ -453,7 +375,6 @@ export default function StopCircleOverlay() {
       >
         {words.map((word, i) => {
           const wordCount = words.length;
-          // Stagger logic
           const step = 1 / (wordCount + 2);
           const wordStart = i * step;
           const wordEnd = wordStart + 3 * step;
@@ -461,7 +382,7 @@ export default function StopCircleOverlay() {
           let wordProgress = 0;
           if (localP >= wordStart) {
             wordProgress = clamp01(
-              (localP - wordStart) / (wordEnd - wordStart)
+              (localP - wordStart) / safeSpan(wordStart, wordEnd)
             );
           }
 
@@ -494,10 +415,6 @@ export default function StopCircleOverlay() {
   };
 
   const renderArchTexts = () => {
-    // We have two segments:
-    // 1. seq-arch-1 -> seq-arch-2
-    // 2. seq-arch-3 -> seq-arch-4
-
     if (
       tSeqArch1 === null ||
       tSeqArch2 === null ||
@@ -521,25 +438,16 @@ export default function StopCircleOverlay() {
     ];
 
     const activeSegment = segments.find((s) => t >= s.start && t <= s.end);
-
     if (!activeSegment) return null;
 
     const { lines, start, end } = activeSegment;
-    const localP = clamp01((t - start) / (end - start));
+    const localP = clamp01((t - start) / safeSpan(start, end));
 
-    // Animate from top (10%) to bottom (90%)
     const topPos = 10 + localP * 80; // 10% -> 90%
 
-    // Fade logic:
-    // Fade in: 0.0 -> 0.25
-    // Hold:    0.25 -> 0.75
-    // Fade out: 0.75 -> 1.0
     let opacity = 1;
-    if (localP < 0.25) {
-      opacity = localP / 0.25;
-    } else if (localP > 0.75) {
-      opacity = 1 - (localP - 0.75) / 0.25;
-    }
+    if (localP < 0.25) opacity = localP / 0.25;
+    else if (localP > 0.75) opacity = 1 - (localP - 0.75) / 0.25;
 
     return (
       <div
@@ -547,7 +455,7 @@ export default function StopCircleOverlay() {
           position: "absolute",
           left: "50%",
           top: `${topPos}%`,
-          transform: "translate(-50%, -50%)", // Center on the point
+          transform: "translate(-50%, -50%)",
           width: "90%",
           maxWidth: "1200px",
           textAlign: "center",
@@ -556,13 +464,13 @@ export default function StopCircleOverlay() {
           fontFamily: '"Georama", sans-serif',
           fontOpticalSizing: "auto",
           fontSize: "clamp(2rem, 5vw, 4.5rem)",
-          fontWeight: "300", // Minimalist light weight
+          fontWeight: "300",
           letterSpacing: "0.02em",
           lineHeight: "1.1",
           color: "#ffffff",
           textShadow: "0 2px 12px rgba(0,0,0,0.5)",
           whiteSpace: "normal",
-          opacity: opacity,
+          opacity,
         }}
       >
         {lines.map((line, i) => (
@@ -571,6 +479,9 @@ export default function StopCircleOverlay() {
       </div>
     );
   };
+
+  // Layout scale for text positioning on large screens
+  const layoutCircleScale = !isMobile ? Math.max(circleScale, 1) : 1;
 
   return (
     <div
@@ -584,14 +495,14 @@ export default function StopCircleOverlay() {
     >
       {renderTopCenterText()}
       {renderArchTexts()}
-      {/* Wrapper for Circle + Text */}
+
+      {/* Wrapper for Circle */}
       <div
         className="stop-circle-wrapper"
         style={{
           width: "clamp(180px, 45vw, 420px)",
           height: "clamp(180px, 45vw, 420px)",
           transform: `scale(${circleScale})`,
-          // Removed transition to prevent fighting with frame-by-frame updates
         }}
       >
         {/* Backdrop with hole */}
@@ -614,7 +525,6 @@ export default function StopCircleOverlay() {
             borderRadius: "50%",
             border: "2px solid rgba(255, 255, 255, 0.9)",
             opacity: circleOpacity,
-            // Removed transition
             boxShadow: `0 0 55px rgba(${haloColor}, ${glowStrength})`,
             backdropFilter: "blur(2px)",
             mixBlendMode: "screen",
@@ -624,32 +534,25 @@ export default function StopCircleOverlay() {
           aria-hidden="true"
           style={{
             gridArea: "1/1",
-            width: "140%", // Scaled up relative to wrapper
+            width: "140%",
             height: "120%",
             borderRadius: "50%",
             opacity: circleOpacity * 0.55,
             filter: "blur(45px)",
             boxShadow: `0 0 120px rgba(${haloColor}, ${glowStrength})`,
             transform: "scaleX(1.1)",
-            // Removed transition
             mixBlendMode: "screen",
           }}
         />
       </div>
 
-      {/* Text Container - Moved outside wrapper to avoid scaling issues */}
+      {/* Text Container */}
       <div
         style={{
           position: "absolute",
           ...(isMobile
             ? {
                 left: "50%",
-                // Center between circle bottom and screen bottom
-                // Circle bottom is at 50% + (Radius * Scale)
-                // Radius is clamp(180px, 45vw, 420px) / 2
-                // Scale is circleScale (which is 2.0 on mobile)
-                // So Circle Bottom = 50% + clamp(...) * 0.5 * 2.0 = 50% + clamp(...)
-                // Midpoint = (100% + (50% + clamp(...))) / 2 = 75% + clamp(...) / 2
                 top: `calc(75% + clamp(180px, 45vw, 420px) * ${
                   circleScale * 0.25
                 })`,
@@ -660,7 +563,7 @@ export default function StopCircleOverlay() {
                 placeItems: "center",
               }
             : {
-                left: "calc(50% + clamp(180px, 45vw, 420px) * 0.5 + 60px)",
+                left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
                 top: "50%",
                 transform: "translateY(-50%)",
                 marginLeft: "0",

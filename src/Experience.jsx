@@ -3,13 +3,7 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
-import {
-  useRef,
-  useState,
-  Suspense,
-  useEffect,
-  useMemo,
-} from "react";
+import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useDebugStore } from "./state/useDebugStore";
@@ -61,6 +55,11 @@ export default function Experience() {
   const setArchConfig = useCameraStore((s) => s.setArchConfig);
   const rebuildArch = useCameraStore((s) => s.rebuildArch);
   const setTerrainCollider = useCameraStore((s) => s.setTerrainCollider);
+
+  useEffect(() => {
+    // Signal that the forest (scene) is ready
+    window.dispatchEvent(new Event("forest-ready"));
+  }, []);
 
   useEffect(() => {
     const canvas = gl?.domElement;
