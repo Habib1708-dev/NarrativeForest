@@ -5,3 +5,4 @@ export const useAudioStore = create((set) => ({
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
   setMuted: (muted) => set({ isMuted: muted }),
 }));
+

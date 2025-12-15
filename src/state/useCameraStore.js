@@ -829,6 +829,38 @@ export const useCameraStore = create((set, get) => {
     },
 
     enterFreeFly: () => activateFreeFly(),
+
+    // Skip to freeflight at current position (for navbar button)
+    skipToFreeFly: () => {
+      const state = get();
+      if (state.mode === "freeFly") return;
+
+      // Get pose at current t value (wherever user currently is)
+      const currentT = state.t ?? 0;
+      const pose = getPoseAt(state.waypoints, currentT);
+
+      const nextFreeFly = createFreeFlyState();
+      nextFreeFly.position.copy(pose.position);
+      nextFreeFly.quaternion.copy(pose.quaternion);
+      nextFreeFly.fov = pose.fov;
+      const { yaw, pitch } = yawPitchFromQuaternion(pose.quaternion);
+      nextFreeFly.yaw = yaw;
+      nextFreeFly.pitch = pitch;
+
+      localScrollState.velocity = 0;
+      if (velocityTween) {
+        velocityTween.kill();
+        velocityTween = null;
+      }
+      stopTicker();
+
+      set({
+        mode: "freeFly",
+        freeFly: nextFreeFly,
+      });
+
+      ensureTicker();
+    },
     startFreeFlyDrag: (x, y) =>
       set((s) => {
         if (s.mode !== "freeFly") return {};
