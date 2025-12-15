@@ -58,10 +58,39 @@ export default function StopCircleOverlay() {
   const tSeqArch3 = stopT("seq-arch-3");
   const tSeqArch4 = stopT("seq-arch-4");
 
-  if (t4 === null || t5 === null) return null;
+  // ✅ Paw trail hook MUST be called every render (before any return)
+  const pawTrail = useMemo(() => {
+    const count = isMobile ? 8 : 11;
+    const insetPct = 10;
+    const span = 100 - insetPct * 2;
+    const step = count > 1 ? span / (count - 1) : 0;
 
+    // ✅ Double the spacing for opposite left/right along diagonal
+    const basePerpPx = isMobile ? 5 : 7;
+    const perpPx = basePerpPx * 3;
+
+    return {
+      items: Array.from({ length: count }, (_, i) => {
+        const xPct = insetPct + i * step;
+        const yPct = insetPct + (count - 1 - i) * step;
+
+        const sign = i % 2 === 0 ? -1 : 1;
+        const dx = sign * perpPx;
+        const dy = sign * perpPx;
+
+        const rot = 45 + sign * 8;
+
+        return { i, xPct, yPct, dx, dy, rot };
+      }),
+    };
+  }, [isMobile]);
+
+  // ✅ Now it’s safe to early-return (after hooks)
   const EPS = 1e-4;
-  if (t < t4 - EPS) return null;
+  const shouldRender =
+    t4 !== null && t5 !== null && typeof t4 === "number" && t >= t4 - EPS;
+
+  if (!shouldRender) return null;
 
   // --- Circle & Backdrop Logic ---
   const progress45 = clamp01((t - t4) / safeSpan(t4, t5));
@@ -70,7 +99,6 @@ export default function StopCircleOverlay() {
   let backdropOpacity = 0.8 * progress45;
   let glowStrength = 0.25 + 0.45 * progress45;
 
-  // Size Logic (Scale)
   let circleScale = isMobile ? 2.0 : 1.0;
   if (t9 !== null && t10 !== null && t > t9) {
     const p910 = clamp01((t - t9) / safeSpan(t9, t10));
@@ -78,7 +106,6 @@ export default function StopCircleOverlay() {
     else circleScale = 2.0;
   }
 
-  // Collapse Logic (after stop-13b-left-1)
   if (t13bLeft !== null && t > t13bLeft) {
     const collapseDuration = 0.015;
     const pCollapse = clamp01(
@@ -93,8 +120,7 @@ export default function StopCircleOverlay() {
   }
 
   // Halo Color Logic
-  let haloColor = "255, 220, 100"; // Yellow
-
+  let haloColor = "255, 220, 100";
   if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
     const p56 = clamp01((t - t5) / safeSpan(t5, t6));
     const r = Math.round(255 + (255 - 255) * p56);
@@ -115,7 +141,51 @@ export default function StopCircleOverlay() {
     haloColor = `${r}, ${g}, ${b}`;
   }
 
-  // --- Text Logic ---
+  // ✅ Paw trail: runs ONCE after "This is me Habib" finishes rendering
+  // Start paws 15% into t5→t6 window (after Habib text is fully visible)
+  let pawAnimProgress = 0;
+  let pawLayerActive = false;
+  if (
+    t5 !== null &&
+    t6 !== null &&
+    Number.isFinite(t5) &&
+    Number.isFinite(t6)
+  ) {
+    const pawDelay = 0.15; // Delay as fraction of t5→t6 span
+    const pawStartT = t5 + safeSpan(t5, t6) * pawDelay;
+    if (t >= pawStartT && t <= t6) {
+      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, t6));
+      pawLayerActive = true;
+    }
+  }
+
+  // Calculate individual paw opacities for sequential animation with fading tail
+  const getPawOpacity = (pawIndex, totalPaws) => {
+    if (!pawLayerActive) return 0;
+
+    const tailLength = 0.35; // How long each paw stays visible (as fraction of animation)
+    const pawStart = pawIndex / totalPaws; // When this paw starts appearing
+    const pawPeak = pawStart + 0.08; // Quick fade-in
+    const pawEnd = pawStart + tailLength; // When paw fully fades out
+
+    if (pawAnimProgress < pawStart) return 0;
+    if (pawAnimProgress < pawPeak) {
+      // Fade in
+      return clamp01((pawAnimProgress - pawStart) / (pawPeak - pawStart));
+    }
+    if (pawAnimProgress < pawEnd) {
+      // Fade out (tail effect)
+      return clamp01(1 - (pawAnimProgress - pawPeak) / (pawEnd - pawPeak));
+    }
+    return 0;
+  };
+
+  const pawLayerOpacity = clamp01(circleOpacity);
+
+  // x3 size (kept)
+  const pawSize = isMobile ? 48 : 60;
+
+  // --- Text Logic (unchanged) ---
   const textSegments = [
     {
       text: "Hello, this is me Habib.",
@@ -186,9 +256,7 @@ export default function StopCircleOverlay() {
     } else if (t <= endOut) {
       phase = "out";
       localP = clamp01((t - startOut) / spanOut);
-    } else {
-      phase = "hidden";
-    }
+    } else phase = "hidden";
 
     if (phase === "hidden") return null;
 
@@ -337,9 +405,7 @@ export default function StopCircleOverlay() {
     } else if (t <= endOut) {
       phase = "out";
       localP = clamp01((t - startOut) / safeSpan(startOut, endOut));
-    } else {
-      phase = "hidden";
-    }
+    } else phase = "hidden";
 
     if (phase === "hidden") return null;
 
@@ -471,46 +537,7 @@ export default function StopCircleOverlay() {
     );
   };
 
-  // Layout scale for text positioning on large screens
   const layoutCircleScale = !isMobile ? Math.max(circleScale, 1) : 1;
-
-  // -------- Paw Trail (Bottom-right quarter) --------
-  const pawTrail = useMemo(() => {
-    const count = isMobile ? 8 : 11;
-    const insetPct = 10;
-    const span = 100 - insetPct * 2;
-    const step = count > 1 ? span / (count - 1) : 0;
-
-    const perpPx = isMobile ? 5 : 7;
-    const durationMs = isMobile ? 1900 : 2300;
-    const delayStepMs = Math.round(durationMs / count);
-
-    return {
-      durationMs,
-      items: Array.from({ length: count }, (_, i) => {
-        const xPct = insetPct + i * step;
-        const yPct = insetPct + (count - 1 - i) * step;
-
-        const sign = i % 2 === 0 ? -1 : 1;
-        const dx = sign * perpPx;
-        const dy = sign * perpPx;
-
-        const rot = 45 + sign * 8;
-
-        return {
-          i,
-          xPct,
-          yPct,
-          dx,
-          dy,
-          rot,
-          delayMs: i * delayStepMs,
-        };
-      }),
-    };
-  }, [isMobile]);
-
-  const pawLayerOpacity = clamp01(circleOpacity) * 0.95;
 
   return (
     <div
@@ -522,66 +549,60 @@ export default function StopCircleOverlay() {
         zIndex: 50,
       }}
     >
-      <style>{`
-        @keyframes pawPulse {
-          0%   { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.92); filter: blur(0px); }
-          18%  { opacity: 0.95; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.0); }
-          62%  { opacity: 0.95; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.0); }
-          100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.08); filter: blur(0.2px); }
-        }
-      `}</style>
-
       {renderTopCenterText()}
       {renderArchTexts()}
 
-      {/* Paw trail overlay (bottom-right quarter) */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: 0,
-          bottom: 0,
-          width: "50%",
-          height: "50%",
-          pointerEvents: "none",
-          zIndex: 55,
-          opacity: pawLayerOpacity,
-        }}
-      >
-        {pawTrail.items.map((p) => (
-          <div
-            key={p.i}
-            style={{
-              position: "absolute",
-              left: `${p.xPct}%`,
-              top: `${p.yPct}%`,
-              transform: "translate(-50%, -50%)",
-            }}
-          >
-            <img
-              src={PAW_ICON_URL}
-              alt=""
-              draggable={false}
-              style={{
-                width: isMobile ? 16 : 20,
-                height: isMobile ? 16 : 20,
-                display: "block",
-                opacity: 0,
-                "--dx": `${p.dx}px`,
-                "--dy": `${p.dy}px`,
-                "--rot": `${p.rot}deg`,
-                animationName: "pawPulse",
-                animationDuration: `${pawTrail.durationMs}ms`,
-                animationTimingFunction: "ease-in-out",
-                animationIterationCount: "infinite",
-                animationDelay: `${p.delayMs}ms`,
-                filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.35))",
-                userSelect: "none",
-              }}
-            />
-          </div>
-        ))}
-      </div>
+      {/* Paw trail overlay (bottom-right quarter) - sequential with fading tail */}
+      {pawLayerActive && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            right: 0,
+            bottom: 0,
+            width: "50%",
+            height: "50%",
+            pointerEvents: "none",
+            zIndex: 55,
+            opacity: pawLayerOpacity,
+          }}
+        >
+          {pawTrail.items.map((p) => {
+            const individualOpacity = getPawOpacity(p.i, pawTrail.items.length);
+            if (individualOpacity <= 0) return null;
+
+            return (
+              <div
+                key={p.i}
+                style={{
+                  position: "absolute",
+                  left: `${p.xPct}%`,
+                  top: `${p.yPct}%`,
+                  transform: "translate(-50%, -50%)",
+                }}
+              >
+                <img
+                  src={PAW_ICON_URL}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    width: pawSize,
+                    height: pawSize,
+                    display: "block",
+                    opacity: individualOpacity,
+                    transform: `translate(${p.dx}px, ${p.dy}px) rotate(${p.rot}deg)`,
+                    transformOrigin: "center",
+                    // white paws
+                    filter:
+                      "invert(1) brightness(2) drop-shadow(0 2px 8px rgba(0,0,0,0.35))",
+                    userSelect: "none",
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Wrapper for Circle */}
       <div
