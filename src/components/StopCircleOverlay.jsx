@@ -5,6 +5,10 @@ const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const normalizeName = (value) => (value || "").trim().toLowerCase();
 const safeSpan = (a, b) => Math.max(1e-6, (b ?? 0) - (a ?? 0));
 
+// CC0 paw icon (Wikimedia Commons)
+const PAW_ICON_URL =
+  "https://upload.wikimedia.org/wikipedia/commons/5/51/Paw_icon.svg";
+
 export default function StopCircleOverlay() {
   const t = useCameraStore((state) => state.t ?? 0);
   const waypoints = useCameraStore((state) => state.waypoints || []);
@@ -60,7 +64,6 @@ export default function StopCircleOverlay() {
   if (t < t4 - EPS) return null;
 
   // --- Circle & Backdrop Logic ---
-  // Fade in from stop-4 to stop-5
   const progress45 = clamp01((t - t4) / safeSpan(t4, t5));
 
   let circleOpacity = progress45;
@@ -68,18 +71,16 @@ export default function StopCircleOverlay() {
   let glowStrength = 0.25 + 0.45 * progress45;
 
   // Size Logic (Scale)
-  // Default scale 1.0. From stop-9 to stop-10, scale to 2.0.
-  // On mobile, start at 2.0 (double size).
   let circleScale = isMobile ? 2.0 : 1.0;
   if (t9 !== null && t10 !== null && t > t9) {
     const p910 = clamp01((t - t9) / safeSpan(t9, t10));
-    if (!isMobile) circleScale = 1.0 + 1.0 * p910; // 1.0 -> 2.0
+    if (!isMobile) circleScale = 1.0 + 1.0 * p910;
     else circleScale = 2.0;
   }
 
   // Collapse Logic (after stop-13b-left-1)
   if (t13bLeft !== null && t > t13bLeft) {
-    const collapseDuration = 0.015; // Fast transition
+    const collapseDuration = 0.015;
     const pCollapse = clamp01(
       (t - t13bLeft) / safeSpan(t13bLeft, t13bLeft + collapseDuration)
     );
@@ -95,21 +96,18 @@ export default function StopCircleOverlay() {
   let haloColor = "255, 220, 100"; // Yellow
 
   if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
-    // Transition Yellow -> Orange (5->6)
     const p56 = clamp01((t - t5) / safeSpan(t5, t6));
     const r = Math.round(255 + (255 - 255) * p56);
     const g = Math.round(220 + (140 - 220) * p56);
     const b = Math.round(100 + (50 - 100) * p56);
     haloColor = `${r}, ${g}, ${b}`;
   } else if (t9 !== null && t10 !== null && t > t9 && t <= t10) {
-    // Transition Orange -> Green (9->10)
     const p910 = clamp01((t - t9) / safeSpan(t9, t10));
     const r = Math.round(255 + (100 - 255) * p910);
     const g = Math.round(140 + (255 - 140) * p910);
     const b = Math.round(50 + (100 - 50) * p910);
     haloColor = `${r}, ${g}, ${b}`;
   } else if (t10 !== null && t13 !== null && t > t10) {
-    // Transition Green -> White (10->13)
     const p1013 = clamp01((t - t10) / safeSpan(t10, t13));
     const r = Math.round(100 + (255 - 100) * p1013);
     const g = Math.round(255 + (255 - 255) * p1013);
@@ -137,8 +135,8 @@ export default function StopCircleOverlay() {
     {
       text: "Nature is all around us",
       startIn: t9,
-      endIn: t12 || t10, // Complete processing by stop 12
-      startOut: t13 ? t13 - 0.02 : (t10 ?? 0) + 0.5, // Fade out just before stop 13
+      endIn: t12 || t10,
+      startOut: t13 ? t13 - 0.02 : (t10 ?? 0) + 0.5,
       endOut: t13 || (t10 ?? 0) + 1.0,
       delayIn: 0.0,
       type: "carousel",
@@ -146,15 +144,12 @@ export default function StopCircleOverlay() {
     {
       text: "But, we are connected through technology",
       startIn: t13,
-      // Carousel finishes (last word appears) at 80% of the way to 13b
       endIn: t13b
         ? t13 + (t13b - t13) * 0.8
         : t14
         ? t13 + (t14 - t13) * 0.8
         : t13 + 0.06,
-      // Start fading out immediately after carousel finishes
       startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 ? t14 - 0.02 : t13 + 0.2,
-      // Completely faded out by 13b or t14
       endOut: t13b || t14 || t13 + 0.3,
       delayIn: 0.0,
       type: "carousel",
@@ -172,11 +167,9 @@ export default function StopCircleOverlay() {
       type,
     } = segment;
 
-    // If timing is missing, skip safely
     if (!Number.isFinite(startIn) || !Number.isFinite(endIn)) return null;
 
     const words = text.split(" ");
-
     const spanIn = safeSpan(startIn, endIn);
     const spanOut = endOut ? safeSpan(startOut, endOut) : 0.1;
 
@@ -199,7 +192,6 @@ export default function StopCircleOverlay() {
 
     if (phase === "hidden") return null;
 
-    // Carousel texts
     if (type === "carousel") {
       let activeIndex = -1;
       let wordP = 0;
@@ -273,7 +265,6 @@ export default function StopCircleOverlay() {
       );
     }
 
-    // Standard Animation (Word by Word Stagger)
     return (
       <div
         key={index}
@@ -443,7 +434,7 @@ export default function StopCircleOverlay() {
     const { lines, start, end } = activeSegment;
     const localP = clamp01((t - start) / safeSpan(start, end));
 
-    const topPos = 10 + localP * 80; // 10% -> 90%
+    const topPos = 10 + localP * 80;
 
     let opacity = 1;
     if (localP < 0.25) opacity = localP / 0.25;
@@ -483,6 +474,44 @@ export default function StopCircleOverlay() {
   // Layout scale for text positioning on large screens
   const layoutCircleScale = !isMobile ? Math.max(circleScale, 1) : 1;
 
+  // -------- Paw Trail (Bottom-right quarter) --------
+  const pawTrail = useMemo(() => {
+    const count = isMobile ? 8 : 11;
+    const insetPct = 10;
+    const span = 100 - insetPct * 2;
+    const step = count > 1 ? span / (count - 1) : 0;
+
+    const perpPx = isMobile ? 5 : 7;
+    const durationMs = isMobile ? 1900 : 2300;
+    const delayStepMs = Math.round(durationMs / count);
+
+    return {
+      durationMs,
+      items: Array.from({ length: count }, (_, i) => {
+        const xPct = insetPct + i * step;
+        const yPct = insetPct + (count - 1 - i) * step;
+
+        const sign = i % 2 === 0 ? -1 : 1;
+        const dx = sign * perpPx;
+        const dy = sign * perpPx;
+
+        const rot = 45 + sign * 8;
+
+        return {
+          i,
+          xPct,
+          yPct,
+          dx,
+          dy,
+          rot,
+          delayMs: i * delayStepMs,
+        };
+      }),
+    };
+  }, [isMobile]);
+
+  const pawLayerOpacity = clamp01(circleOpacity) * 0.95;
+
   return (
     <div
       className="stop-overlay-container"
@@ -493,8 +522,66 @@ export default function StopCircleOverlay() {
         zIndex: 50,
       }}
     >
+      <style>{`
+        @keyframes pawPulse {
+          0%   { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.92); filter: blur(0px); }
+          18%  { opacity: 0.95; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.0); }
+          62%  { opacity: 0.95; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.0); }
+          100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.08); filter: blur(0.2px); }
+        }
+      `}</style>
+
       {renderTopCenterText()}
       {renderArchTexts()}
+
+      {/* Paw trail overlay (bottom-right quarter) */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          right: 0,
+          bottom: 0,
+          width: "50%",
+          height: "50%",
+          pointerEvents: "none",
+          zIndex: 55,
+          opacity: pawLayerOpacity,
+        }}
+      >
+        {pawTrail.items.map((p) => (
+          <div
+            key={p.i}
+            style={{
+              position: "absolute",
+              left: `${p.xPct}%`,
+              top: `${p.yPct}%`,
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            <img
+              src={PAW_ICON_URL}
+              alt=""
+              draggable={false}
+              style={{
+                width: isMobile ? 16 : 20,
+                height: isMobile ? 16 : 20,
+                display: "block",
+                opacity: 0,
+                "--dx": `${p.dx}px`,
+                "--dy": `${p.dy}px`,
+                "--rot": `${p.rot}deg`,
+                animationName: "pawPulse",
+                animationDuration: `${pawTrail.durationMs}ms`,
+                animationTimingFunction: "ease-in-out",
+                animationIterationCount: "infinite",
+                animationDelay: `${p.delayMs}ms`,
+                filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.35))",
+                userSelect: "none",
+              }}
+            />
+          </div>
+        ))}
+      </div>
 
       {/* Wrapper for Circle */}
       <div
@@ -505,7 +592,6 @@ export default function StopCircleOverlay() {
           transform: `scale(${circleScale})`,
         }}
       >
-        {/* Backdrop with hole */}
         <div
           aria-hidden="true"
           style={{
