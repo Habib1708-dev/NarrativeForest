@@ -1,50 +1,59 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useCameraStore } from "../state/useCameraStore";
 
 /**
  * Click and Drag Hint Overlay
- * Shows when entering free-fly mode to instruct users
+ * Shows when entering free-fly mode to instruct users how to navigate.
+ * Uses store flag to track if user has dragged, allowing proper scroll-back behavior.
  */
 export default function ClickAndDragHint() {
   const mode = useCameraStore((state) => state.mode);
+  const t = useCameraStore((state) => state.t);
+  const freeFlyUserHasDragged = useCameraStore(
+    (state) => state.freeFlyUserHasDragged
+  );
   const [isVisible, setIsVisible] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
+  const autoHideTimeoutRef = useRef(null);
 
   useEffect(() => {
-    // Show hint when entering free-fly mode for the first time
-    if (mode === "freeFly" && !hasInteracted) {
+    // Show hint only when entering free-fly at the end of scroll path,
+    // and only until the user actually drag-interacts.
+    const isAtEnd = typeof t === "number" ? t >= 0.999 : false;
+    if (mode === "freeFly" && isAtEnd && !freeFlyUserHasDragged) {
       setIsVisible(true);
+    } else if (mode !== "freeFly" || freeFlyUserHasDragged || !isAtEnd) {
+      // Hide when leaving freeflight or when user has dragged
+      setIsVisible(false);
     }
-  }, [mode, hasInteracted]);
+  }, [mode, t, freeFlyUserHasDragged]);
 
   useEffect(() => {
-    if (!isVisible) return;
-
-    // Hide hint after user interacts
-    const handleInteraction = () => {
-      setIsVisible(false);
-      setHasInteracted(true);
-    };
-
-    const handlePointerDown = () => handleInteraction();
-    const handleTouchStart = () => handleInteraction();
-
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("touchstart", handleTouchStart);
+    if (!isVisible) {
+      // Clear any pending timeout when not visible
+      if (autoHideTimeoutRef.current) {
+        clearTimeout(autoHideTimeoutRef.current);
+        autoHideTimeoutRef.current = null;
+      }
+      return;
+    }
 
     // Auto-hide after 5 seconds
-    const timeout = setTimeout(() => {
+    autoHideTimeoutRef.current = setTimeout(() => {
       setIsVisible(false);
     }, 5000);
 
     return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("touchstart", handleTouchStart);
-      clearTimeout(timeout);
+      if (autoHideTimeoutRef.current) {
+        clearTimeout(autoHideTimeoutRef.current);
+        autoHideTimeoutRef.current = null;
+      }
     };
   }, [isVisible]);
 
-  if (!isVisible) return null;
+  // Don't show if not in freeflight mode or if user has already interacted
+  const isAtEnd = typeof t === "number" ? t >= 0.999 : false;
+  if (!isVisible || mode !== "freeFly" || !isAtEnd || freeFlyUserHasDragged)
+    return null;
 
   return (
     <div

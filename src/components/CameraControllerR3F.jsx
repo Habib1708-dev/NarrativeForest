@@ -277,7 +277,7 @@ export default function CameraControllerR3F() {
       const store = useCameraStore.getState();
       if (!store.enabled) return;
       if (store.locked || store.paused) return;
-      if (store.mode !== "path") return;
+      // Allow wheel while in freeFly too (store handles scroll-back → exit freeFly).
       applyWheel(-e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });

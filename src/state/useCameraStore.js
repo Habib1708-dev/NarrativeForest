@@ -673,7 +673,23 @@ export const useCameraStore = create((set, get) => {
     set({
       mode: "freeFly",
       freeFly: nextFreeFly,
+      freeFlyUserHasDragged: false, // Reset interaction flag when entering freeflight
       t: 1,
+    });
+  };
+
+  // Exit freeflight mode and return to path mode
+  const exitFreeFly = () => {
+    const state = get();
+    if (state.mode !== "freeFly") return;
+
+    // Return to path mode at t just below threshold to prevent immediate re-entry
+    const exitT = LAST_T_THRESHOLD - 0.001;
+    tDriver.value = exitT;
+    set({
+      mode: "path",
+      t: exitT,
+      freeFlyUserHasDragged: false,
     });
   };
 
@@ -710,6 +726,7 @@ export const useCameraStore = create((set, get) => {
 
     mode: "path",
     freeFly: createFreeFlyState(),
+    freeFlyUserHasDragged: false, // Track if user has interacted via drag since entering freeflight
     freeFlyDragScale: 0.02,
     freeFlySpeed: 2.7,
     freeFlyMinStrength: 0.25,
@@ -857,14 +874,20 @@ export const useCameraStore = create((set, get) => {
       set({
         mode: "freeFly",
         freeFly: nextFreeFly,
+        freeFlyUserHasDragged: false, // Reset interaction flag when entering freeflight via skip
       });
 
       ensureTicker();
     },
+
+    // Exit freeflight mode and return to path mode at t=1
+    exitFreeFly: () => exitFreeFly(),
+
     startFreeFlyDrag: (x, y) =>
       set((s) => {
         if (s.mode !== "freeFly") return {};
         return {
+          // Don't mark as "dragged" yet; only lock scroll-back once there is real movement.
           freeFly: {
             ...s.freeFly,
             dragging: true,
@@ -885,6 +908,7 @@ export const useCameraStore = create((set, get) => {
       set((s) => {
         if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
         const origin = s.freeFly.joystick?.origin;
+        const dragLockPx = 6; // movement threshold before we consider it a real drag
 
         // Calculate responsive radius based on screen width
         let baseRadius = s.freeFlyJoystickRadius ?? 80;
@@ -908,6 +932,11 @@ export const useCameraStore = create((set, get) => {
         const rawY = y - origin.y;
         const vec2 = new THREE.Vector2(rawX, rawY);
         const len = vec2.length();
+
+        // Only after a meaningful movement do we "lock" the narrative return behavior.
+        const didRealDrag = len >= dragLockPx;
+        const nextHasDragged = s.freeFlyUserHasDragged || didRealDrag;
+
         if (len > radius) {
           vec2.multiplyScalar(radius / len);
         }
@@ -961,7 +990,7 @@ export const useCameraStore = create((set, get) => {
           Math.abs(yawRate) > 1e-4 ||
           Math.abs(pitchRate) > 1e-4 ||
           Math.abs(speedTarget) > 1e-4;
-        return { freeFly: nextFreeFly };
+        return { freeFly: nextFreeFly, freeFlyUserHasDragged: nextHasDragged };
       });
       if (shouldStartTicker) ensureTicker();
     },
@@ -1001,15 +1030,30 @@ export const useCameraStore = create((set, get) => {
 
     // ---------- wheel input → direct step ----------
     applyWheel: (deltaY) => {
-      const state = get();
-      if (
-        !state.enabled ||
-        state.paused ||
-        state.locked ||
-        deltaY === 0 ||
-        state.mode !== "path"
-      )
+      let state = get();
+      if (!state.enabled || state.paused || state.locked || deltaY === 0)
         return;
+
+      // Handle scrolling back from freeflight mode (only if user hasn't dragged)
+      if (state.mode === "freeFly") {
+        // If user has dragged, don't allow scroll-back
+        if (state.freeFlyUserHasDragged) return;
+
+        // If scrolling backward (deltaY > 0 means scroll down = go backward)
+        const dir = deltaY < 0 ? +1 : -1;
+        if (dir < 0) {
+          // Scrolling backward - exit freeflight and return to path mode
+          exitFreeFly();
+          // Re-fetch state after exiting freeflight
+          state = get();
+          // Continue processing the scroll in path mode
+        } else {
+          // Scrolling forward in freeflight (no-op, already at end)
+          return;
+        }
+      }
+
+      // Now we're definitely in path mode
 
       const dir = deltaY < 0 ? +1 : -1;
       const mag = Math.abs(deltaY);
