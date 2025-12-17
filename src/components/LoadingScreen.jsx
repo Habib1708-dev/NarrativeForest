@@ -1,11 +1,11 @@
 import { useProgress } from "@react-three/drei";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const STABILIZE_DURATION = 1000;
 const FADE_DURATION = 2000;
 
 export default function LoadingScreen() {
-  const { active, progress } = useProgress();
+  const { active } = useProgress();
   const [hasStarted, setHasStarted] = useState(false);
   const [isForestReady, setIsForestReady] = useState(false);
   const [isSceneSettled, setIsSceneSettled] = useState(false);
@@ -13,10 +13,11 @@ export default function LoadingScreen() {
   const [isRemoved, setIsRemoved] = useState(false);
 
   const previousOverflowRef = useRef(null);
-  const safeProgress = useMemo(
-    () => Math.min(100, Math.max(0, progress || 0)),
-    [progress]
-  );
+
+  // Reset the global flag on mount to prevent stale state from previous sessions
+  useEffect(() => {
+    window.__loadingScreenFinished = false;
+  }, []);
 
   useEffect(() => {
     const handleForestReady = () => setIsForestReady(true);
@@ -66,11 +67,11 @@ export default function LoadingScreen() {
     return () => clearTimeout(fadeTimeout);
   }, [isSceneSettled]);
 
+  // Fire event when fade STARTS so welcome overlay appears immediately
+  // and covers the canvas before loading screen reveals it
   useEffect(() => {
     if (!isFadingOut) return undefined;
 
-    // Let other components know the loading overlay is finishing (fire when fade STARTS
-    // so overlays can appear immediately and cover the canvas content).
     window.__loadingScreenFinished = true;
     window.dispatchEvent(new Event("loading-screen-finished"));
 
@@ -110,23 +111,15 @@ export default function LoadingScreen() {
           aria-live="polite"
         >
           <div className="loading-screen__content">
-            <p className="loading-screen__welcome">
-              Welcome to Narrative Forest.
-            </p>
-            <p className="loading-screen__instruction">
-              Please wait till assets load.
-            </p>
-            <div
-              className="loading-screen__progress"
-              aria-label="Loading progress"
-              aria-live="polite"
-            >
-              <div className="loading-screen__progress-track">
+            <p className="loading-screen__text">LOADING</p>
+            <div className="loading-screen__spinner" aria-hidden="true">
+              {[...Array(8)].map((_, i) => (
                 <div
-                  className="loading-screen__progress-fill"
-                  style={{ width: `${safeProgress}%` }}
+                  key={i}
+                  className="loading-screen__spinner-segment"
+                  style={{ "--segment-index": i }}
                 />
-              </div>
+              ))}
             </div>
           </div>
         </div>

@@ -77,15 +77,21 @@ export default function StopCircleOverlay() {
 
     window.addEventListener("loading-screen-finished", handleLoadingFinished);
 
-    if (typeof window !== "undefined" && window.__loadingScreenFinished) {
-      handleLoadingFinished();
-    }
+    // Check after a small delay to let LoadingScreen reset the flag first
+    // This prevents race conditions on page refresh
+    const checkTimeout = setTimeout(() => {
+      if (typeof window !== "undefined" && window.__loadingScreenFinished) {
+        handleLoadingFinished();
+      }
+    }, 100);
 
-    return () =>
+    return () => {
+      clearTimeout(checkTimeout);
       window.removeEventListener(
         "loading-screen-finished",
         handleLoadingFinished
       );
+    };
   }, []);
 
   // If user skips straight to freeflight via navbar, fade out the welcome overlay
