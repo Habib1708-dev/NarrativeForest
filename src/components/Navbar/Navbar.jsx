@@ -111,7 +111,12 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="navbar" role="navigation" aria-label="Main navigation">
+      <nav
+        className="navbar"
+        role="navigation"
+        aria-label="Main navigation"
+        data-freefly-ignore
+      >
         <div className="navbar-container">
           {/* Left side - Skip to Freeflight / Exit Freeflight toggle */}
           <div className="navbar-left">
@@ -141,42 +146,32 @@ export default function Navbar() {
           <ul className="navbar-links navbar-links--desktop">
             <li>
               <Link
-                to="/about"
+                to="/about-us"
                 className={`navbar-link ${
-                  location.pathname === "/about" ? "active" : ""
+                  location.pathname === "/about-us" ? "active" : ""
                 }`}
               >
-                About
+                About Us
               </Link>
             </li>
             <li>
               <Link
-                to="/work"
+                to="/our-work"
                 className={`navbar-link ${
-                  location.pathname === "/work" ? "active" : ""
+                  location.pathname === "/our-work" ? "active" : ""
                 }`}
               >
-                Illustration
+                Our Work
               </Link>
             </li>
             <li>
               <Link
-                to="/work"
+                to="/contact-us"
                 className={`navbar-link ${
-                  location.pathname === "/work" ? "active" : ""
+                  location.pathname === "/contact-us" ? "active" : ""
                 }`}
               >
-                Design & Dev
-              </Link>
-            </li>
-            <li>
-              <Link
-                to="/contact"
-                className={`navbar-link ${
-                  location.pathname === "/contact" ? "active" : ""
-                }`}
-              >
-                Contact
+                Contact Us
               </Link>
             </li>
             <li>
@@ -221,6 +216,7 @@ export default function Navbar() {
         }`}
         onClick={closeDrawer}
         aria-hidden="true"
+        data-freefly-ignore
       />
 
       {/* Mobile drawer */}
@@ -229,6 +225,7 @@ export default function Navbar() {
         role="dialog"
         aria-modal="true"
         aria-label="Navigation menu"
+        data-freefly-ignore
       >
         <div className="navbar-drawer-header">
           <button
@@ -243,46 +240,35 @@ export default function Navbar() {
         <ul className="navbar-drawer-links">
           <li>
             <Link
-              to="/about"
+              to="/about-us"
               className={`navbar-drawer-link ${
-                location.pathname === "/about" ? "active" : ""
+                location.pathname === "/about-us" ? "active" : ""
               }`}
               onClick={closeDrawer}
             >
-              About
+              About Us
             </Link>
           </li>
           <li>
             <Link
-              to="/work"
+              to="/our-work"
               className={`navbar-drawer-link ${
-                location.pathname === "/work" ? "active" : ""
+                location.pathname === "/our-work" ? "active" : ""
               }`}
               onClick={closeDrawer}
             >
-              Illustration
+              Our Work
             </Link>
           </li>
           <li>
             <Link
-              to="/work"
+              to="/contact-us"
               className={`navbar-drawer-link ${
-                location.pathname === "/work" ? "active" : ""
+                location.pathname === "/contact-us" ? "active" : ""
               }`}
               onClick={closeDrawer}
             >
-              Design & Dev
-            </Link>
-          </li>
-          <li>
-            <Link
-              to="/contact"
-              className={`navbar-drawer-link ${
-                location.pathname === "/contact" ? "active" : ""
-              }`}
-              onClick={closeDrawer}
-            >
-              Contact
+              Contact Us
             </Link>
           </li>
         </ul>
@@ -290,4 +276,3 @@ export default function Navbar() {
     </>
   );
 }
-

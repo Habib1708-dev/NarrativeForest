@@ -4,6 +4,7 @@ import { useCameraStore } from "../state/useCameraStore";
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const normalizeName = (value) => (value || "").trim().toLowerCase();
 const safeSpan = (a, b) => Math.max(1e-6, (b ?? 0) - (a ?? 0));
+const NAVBAR_SAFE_GAP_PX = 10;
 
 // CC0 paw icon (Wikimedia Commons)
 const PAW_ICON_URL =
@@ -14,11 +15,48 @@ export default function StopCircleOverlay() {
   const waypoints = useCameraStore((state) => state.waypoints || []);
 
   const [isMobile, setIsMobile] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight : 0
+  );
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth <= 900);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    const updateViewport = () => {
+      setIsMobile(window.innerWidth <= 900);
+      setViewportHeight(window.innerHeight);
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
+
+  // Measure navbar height so we can keep circles out of its area without shifting their position.
+  const [navbarOffsetTop, setNavbarOffsetTop] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const nav = document.querySelector(".navbar");
+    if (!nav) {
+      setNavbarOffsetTop(0);
+      return undefined;
+    }
+
+    const measure = () => {
+      const rect = nav.getBoundingClientRect();
+      const h = Number.isFinite(rect.height) ? rect.height : 0;
+      setNavbarOffsetTop(Math.max(0, Math.ceil(h)));
+    };
+
+    measure();
+
+    const ro =
+      typeof window.ResizeObserver !== "undefined"
+        ? new window.ResizeObserver(measure)
+        : null;
+    if (ro) ro.observe(nav);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      window.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
   }, []);
 
   // Memoized lookup: name -> normalized t (0..1)
@@ -118,6 +156,25 @@ export default function StopCircleOverlay() {
     backdropOpacity *= collapseFactor;
     glowStrength *= collapseFactor;
   }
+
+  // --- Layout-safe circle sizing ---
+  // Keep the circle vertically centered (equal top/bottom margins), but cap its size so it never
+  // extends into the navbar area.
+  const BASE_CIRCLE_MAX_PX = 420;
+  const navbarSafeTopPx = navbarOffsetTop + NAVBAR_SAFE_GAP_PX;
+  const maxCircleDiameterPx = Math.max(
+    0,
+    (viewportHeight || 0) - 2 * navbarSafeTopPx
+  );
+  const maxAllowedScale =
+    maxCircleDiameterPx > 0 ? maxCircleDiameterPx / BASE_CIRCLE_MAX_PX : 1;
+  const layoutCircleScale = !isMobile
+    ? Math.max(Math.min(circleScale, maxAllowedScale), 0)
+    : 1;
+  const circleScaleForLayout = Math.max(
+    0,
+    Math.min(circleScale, maxAllowedScale)
+  );
 
   // Halo Color Logic
   let haloColor = "255, 220, 100";
@@ -537,14 +594,15 @@ export default function StopCircleOverlay() {
     );
   };
 
-  const layoutCircleScale = !isMobile ? Math.max(circleScale, 1) : 1;
-
   return (
     <div
       className="stop-overlay-container"
       style={{
         position: "fixed",
-        inset: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        top: 0,
         pointerEvents: "none",
         zIndex: 50,
       }}
@@ -610,7 +668,7 @@ export default function StopCircleOverlay() {
         style={{
           width: "clamp(180px, 45vw, 420px)",
           height: "clamp(180px, 45vw, 420px)",
-          transform: `scale(${circleScale})`,
+          transform: `scale(${circleScaleForLayout})`,
         }}
       >
         <div
@@ -661,7 +719,7 @@ export default function StopCircleOverlay() {
             ? {
                 left: "50%",
                 top: `calc(75% + clamp(180px, 45vw, 420px) * ${
-                  circleScale * 0.25
+                  circleScaleForLayout * 0.25
                 })`,
                 transform: "translate(-50%, -50%)",
                 width: "80%",
