@@ -21,9 +21,11 @@ export default function StopCircleOverlay() {
   );
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
   const [isWelcomeFadingOut, setIsWelcomeFadingOut] = useState(false);
+  const [isBackgroundFadingOut, setIsBackgroundFadingOut] = useState(false);
   const [welcomeOverlayFinished, setWelcomeOverlayFinished] = useState(true);
   const [habibTextVisible, setHabibTextVisible] = useState(false);
   const [hasEnteredFreeFly, setHasEnteredFreeFly] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 50, y: 50 });
   useEffect(() => {
     const updateViewport = () => {
       setIsMobile(window.innerWidth <= 900);
@@ -69,6 +71,7 @@ export default function StopCircleOverlay() {
     const handleLoadingFinished = () => {
       setShowWelcomeOverlay(true);
       setIsWelcomeFadingOut(false);
+      setIsBackgroundFadingOut(false);
       setWelcomeOverlayFinished(false);
     };
 
@@ -97,14 +100,24 @@ export default function StopCircleOverlay() {
     }
   }, [cameraMode, showWelcomeOverlay, isWelcomeFadingOut]);
 
+  // First phase: content fades out, then trigger background fade
   useEffect(() => {
     if (!isWelcomeFadingOut) return undefined;
     const timeout = setTimeout(() => {
-      setShowWelcomeOverlay(false);
-      setWelcomeOverlayFinished(true);
-    }, 650);
+      setIsBackgroundFadingOut(true);
+    }, 400); // Content fade duration
     return () => clearTimeout(timeout);
   }, [isWelcomeFadingOut]);
+
+  // Second phase: background fades out, then finish
+  useEffect(() => {
+    if (!isBackgroundFadingOut) return undefined;
+    const timeout = setTimeout(() => {
+      setShowWelcomeOverlay(false);
+      setWelcomeOverlayFinished(true);
+    }, 500); // Background fade duration
+    return () => clearTimeout(timeout);
+  }, [isBackgroundFadingOut]);
 
   // Fade in Habib text after welcome overlay has completely faded
   useEffect(() => {
@@ -669,6 +682,12 @@ export default function StopCircleOverlay() {
     >
       {showWelcomeOverlay && (
         <div
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            setMousePos({ x, y });
+          }}
           style={{
             position: "fixed",
             inset: 0,
@@ -678,10 +697,14 @@ export default function StopCircleOverlay() {
             justifyContent: "center",
             padding: isMobile ? "1.5rem" : "2.5rem",
             pointerEvents: isWelcomeFadingOut ? "none" : "auto",
-            opacity: isWelcomeFadingOut ? 0 : 1,
-            transition: "opacity 600ms ease",
-            background:
-              "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 40%), radial-gradient(circle at 80% 30%, rgba(120,190,255,0.12), transparent 45%), rgba(8, 12, 18, 0.65)",
+            opacity: isBackgroundFadingOut ? 0 : 1,
+            transition: "opacity 450ms ease",
+            background: `
+              radial-gradient(circle at ${mousePos.x}% ${mousePos.y}%, rgba(80, 160, 255, 0.25), rgba(100, 180, 255, 0.1) 25%, transparent 50%),
+              radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 40%),
+              radial-gradient(circle at 80% 30%, rgba(120,190,255,0.12), transparent 45%),
+              rgba(8, 12, 18, 0.65)
+            `,
             backdropFilter: "blur(14px) saturate(140%)",
             WebkitBackdropFilter: "blur(14px) saturate(140%)",
           }}
@@ -696,6 +719,8 @@ export default function StopCircleOverlay() {
               display: "flex",
               flexDirection: "column",
               gap: isMobile ? "1rem" : "1.5rem",
+              opacity: isWelcomeFadingOut ? 0 : 1,
+              transition: "opacity 350ms ease",
             }}
           >
             <div
