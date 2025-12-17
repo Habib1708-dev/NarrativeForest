@@ -66,6 +66,17 @@ export default function LoadingScreen() {
     return () => clearTimeout(fadeTimeout);
   }, [isSceneSettled]);
 
+  useEffect(() => {
+    if (!isFadingOut) return undefined;
+
+    // Let other components know the loading overlay is finishing (fire when fade STARTS
+    // so overlays can appear immediately and cover the canvas content).
+    window.__loadingScreenFinished = true;
+    window.dispatchEvent(new Event("loading-screen-finished"));
+
+    return undefined;
+  }, [isFadingOut]);
+
   const overlayActive = !isRemoved;
 
   useEffect(() => {

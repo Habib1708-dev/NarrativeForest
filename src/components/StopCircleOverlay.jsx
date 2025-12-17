@@ -13,11 +13,17 @@ const PAW_ICON_URL =
 export default function StopCircleOverlay() {
   const t = useCameraStore((state) => state.t ?? 0);
   const waypoints = useCameraStore((state) => state.waypoints || []);
+  const cameraMode = useCameraStore((state) => state.mode);
 
   const [isMobile, setIsMobile] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(() =>
     typeof window !== "undefined" ? window.innerHeight : 0
   );
+  const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(false);
+  const [isWelcomeFadingOut, setIsWelcomeFadingOut] = useState(false);
+  const [welcomeOverlayFinished, setWelcomeOverlayFinished] = useState(true);
+  const [habibTextVisible, setHabibTextVisible] = useState(false);
+  const [hasEnteredFreeFly, setHasEnteredFreeFly] = useState(false);
   useEffect(() => {
     const updateViewport = () => {
       setIsMobile(window.innerWidth <= 900);
@@ -58,6 +64,60 @@ export default function StopCircleOverlay() {
       if (ro) ro.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    const handleLoadingFinished = () => {
+      setShowWelcomeOverlay(true);
+      setIsWelcomeFadingOut(false);
+      setWelcomeOverlayFinished(false);
+    };
+
+    window.addEventListener("loading-screen-finished", handleLoadingFinished);
+
+    if (typeof window !== "undefined" && window.__loadingScreenFinished) {
+      handleLoadingFinished();
+    }
+
+    return () =>
+      window.removeEventListener(
+        "loading-screen-finished",
+        handleLoadingFinished
+      );
+  }, []);
+
+  // If user skips straight to freeflight via navbar, fade out the welcome overlay
+  useEffect(() => {
+    if (cameraMode !== "freeFly") return;
+
+    setHasEnteredFreeFly(true);
+    setHabibTextVisible(false);
+
+    if (showWelcomeOverlay && !isWelcomeFadingOut) {
+      setIsWelcomeFadingOut(true);
+    }
+  }, [cameraMode, showWelcomeOverlay, isWelcomeFadingOut]);
+
+  useEffect(() => {
+    if (!isWelcomeFadingOut) return undefined;
+    const timeout = setTimeout(() => {
+      setShowWelcomeOverlay(false);
+      setWelcomeOverlayFinished(true);
+    }, 650);
+    return () => clearTimeout(timeout);
+  }, [isWelcomeFadingOut]);
+
+  // Fade in Habib text after welcome overlay has completely faded
+  useEffect(() => {
+    if (!welcomeOverlayFinished || hasEnteredFreeFly) {
+      setHabibTextVisible(false);
+      return undefined;
+    }
+    // Small delay to ensure smooth transition after welcome overlay is gone
+    const timeout = setTimeout(() => {
+      setHabibTextVisible(true);
+    }, 50);
+    return () => clearTimeout(timeout);
+  }, [welcomeOverlayFinished, hasEnteredFreeFly]);
 
   // Memoized lookup: name -> normalized t (0..1)
   const stopT = useMemo(() => {
@@ -128,7 +188,7 @@ export default function StopCircleOverlay() {
   const shouldRender =
     t4 !== null && t5 !== null && typeof t4 === "number" && t >= t4 - EPS;
 
-  if (!shouldRender) return null;
+  if (!shouldRender && !showWelcomeOverlay) return null;
 
   // --- Circle & Backdrop Logic ---
   const progress45 = clamp01((t - t4) / safeSpan(t4, t5));
@@ -607,139 +667,243 @@ export default function StopCircleOverlay() {
         zIndex: 50,
       }}
     >
-      {renderTopCenterText()}
-      {renderArchTexts()}
-
-      {/* Paw trail overlay (bottom-right quarter) - sequential with fading tail */}
-      {pawLayerActive && (
+      {showWelcomeOverlay && (
         <div
-          aria-hidden="true"
           style={{
-            position: "absolute",
-            right: 0,
-            bottom: 0,
-            width: "50%",
-            height: "50%",
-            pointerEvents: "none",
-            zIndex: 55,
-            opacity: pawLayerOpacity,
+            position: "fixed",
+            inset: 0,
+            zIndex: 120,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: isMobile ? "1.5rem" : "2.5rem",
+            pointerEvents: isWelcomeFadingOut ? "none" : "auto",
+            opacity: isWelcomeFadingOut ? 0 : 1,
+            transition: "opacity 600ms ease",
+            background:
+              "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 40%), radial-gradient(circle at 80% 30%, rgba(120,190,255,0.12), transparent 45%), rgba(8, 12, 18, 0.65)",
+            backdropFilter: "blur(14px) saturate(140%)",
+            WebkitBackdropFilter: "blur(14px) saturate(140%)",
           }}
         >
-          {pawTrail.items.map((p) => {
-            const individualOpacity = getPawOpacity(p.i, pawTrail.items.length);
-            if (individualOpacity <= 0) return null;
-
-            return (
-              <div
-                key={p.i}
+          <div
+            style={{
+              maxWidth: "720px",
+              width: "min(90vw, 720px)",
+              padding: isMobile ? "1.2rem" : "1.6rem",
+              color: "#f5f7fb",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              gap: isMobile ? "1rem" : "1.5rem",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: '"Georama", sans-serif',
+                fontSize: isMobile
+                  ? "clamp(1.75rem, 6vw, 2.6rem)"
+                  : "clamp(2rem, 4vw, 3rem)",
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                lineHeight: 1.15,
+                textShadow: "0 8px 28px rgba(0,0,0,0.45)",
+              }}
+            >
+              Welcome To The Narrative Forest
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (!showWelcomeOverlay) return;
+                  setIsWelcomeFadingOut(true);
+                }}
                 style={{
-                  position: "absolute",
-                  left: `${p.xPct}%`,
-                  top: `${p.yPct}%`,
-                  transform: "translate(-50%, -50%)",
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  background:
+                    "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08))",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  padding: "0.65rem 1.6rem",
+                  borderRadius: "999px",
+                  cursor: "pointer",
+                  boxShadow:
+                    "0 12px 28px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.65)",
+                  transition:
+                    "transform 200ms ease, box-shadow 200ms ease, background 200ms ease",
+                  fontSize: isMobile ? "1rem" : "1.05rem",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow =
+                    "0 16px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.85)";
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.12))";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow =
+                    "0 12px 28px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.65)";
+                  e.currentTarget.style.background =
+                    "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08))";
                 }}
               >
-                <img
-                  src={PAW_ICON_URL}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    width: pawSize,
-                    height: pawSize,
-                    display: "block",
-                    opacity: individualOpacity,
-                    transform: `translate(${p.dx}px, ${p.dy}px) rotate(${p.rot}deg)`,
-                    transformOrigin: "center",
-                    // white paws
-                    filter:
-                      "invert(1) brightness(2) drop-shadow(0 2px 8px rgba(0,0,0,0.35))",
-                    userSelect: "none",
-                  }}
-                />
-              </div>
-            );
-          })}
+                Explore
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Wrapper for Circle */}
-      <div
-        className="stop-circle-wrapper"
-        style={{
-          width: "clamp(180px, 45vw, 420px)",
-          height: "clamp(180px, 45vw, 420px)",
-          transform: `scale(${circleScaleForLayout})`,
-        }}
-      >
-        <div
-          aria-hidden="true"
-          style={{
-            gridArea: "1/1",
-            width: "100%",
-            height: "100%",
-            borderRadius: "50%",
-            boxShadow: `0 0 0 200vmax rgba(30, 30, 30, ${backdropOpacity})`,
-          }}
-        />
-        <div
-          aria-hidden="true"
-          style={{
-            gridArea: "1/1",
-            width: "100%",
-            height: "100%",
-            borderRadius: "50%",
-            border: "2px solid rgba(255, 255, 255, 0.9)",
-            opacity: circleOpacity,
-            boxShadow: `0 0 55px rgba(${haloColor}, ${glowStrength})`,
-            backdropFilter: "blur(2px)",
-            mixBlendMode: "screen",
-          }}
-        />
-        <div
-          aria-hidden="true"
-          style={{
-            gridArea: "1/1",
-            width: "140%",
-            height: "120%",
-            borderRadius: "50%",
-            opacity: circleOpacity * 0.55,
-            filter: "blur(45px)",
-            boxShadow: `0 0 120px rgba(${haloColor}, ${glowStrength})`,
-            transform: "scaleX(1.1)",
-            mixBlendMode: "screen",
-          }}
-        />
-      </div>
+      {shouldRender && (
+        <>
+          {renderTopCenterText()}
+          {renderArchTexts()}
 
-      {/* Text Container */}
-      <div
-        style={{
-          position: "absolute",
-          ...(isMobile
-            ? {
-                left: "50%",
-                top: `calc(75% + clamp(180px, 45vw, 420px) * ${
-                  circleScaleForLayout * 0.25
-                })`,
-                transform: "translate(-50%, -50%)",
-                width: "80%",
-                textAlign: "center",
-                display: "grid",
-                placeItems: "center",
-              }
-            : {
-                left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
-                top: "50%",
-                transform: "translateY(-50%)",
-                marginLeft: "0",
-                display: "grid",
-                placeItems: "center start",
-              }),
-        }}
-        className="stop-overlay-text-container"
-      >
-        {textSegments.map(renderText)}
-      </div>
+          {/* Paw trail overlay (bottom-right quarter) - sequential with fading tail */}
+          {pawLayerActive && (
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                right: 0,
+                bottom: 0,
+                width: "50%",
+                height: "50%",
+                pointerEvents: "none",
+                zIndex: 55,
+                opacity: pawLayerOpacity,
+              }}
+            >
+              {pawTrail.items.map((p) => {
+                const individualOpacity = getPawOpacity(
+                  p.i,
+                  pawTrail.items.length
+                );
+                if (individualOpacity <= 0) return null;
+
+                return (
+                  <div
+                    key={p.i}
+                    style={{
+                      position: "absolute",
+                      left: `${p.xPct}%`,
+                      top: `${p.yPct}%`,
+                      transform: "translate(-50%, -50%)",
+                    }}
+                  >
+                    <img
+                      src={PAW_ICON_URL}
+                      alt=""
+                      draggable={false}
+                      style={{
+                        width: pawSize,
+                        height: pawSize,
+                        display: "block",
+                        opacity: individualOpacity,
+                        transform: `translate(${p.dx}px, ${p.dy}px) rotate(${p.rot}deg)`,
+                        transformOrigin: "center",
+                        // white paws
+                        filter:
+                          "invert(1) brightness(2) drop-shadow(0 2px 8px rgba(0,0,0,0.35))",
+                        userSelect: "none",
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Wrapper for Circle */}
+          <div
+            className="stop-circle-wrapper"
+            style={{
+              width: "clamp(180px, 45vw, 420px)",
+              height: "clamp(180px, 45vw, 420px)",
+              transform: `scale(${circleScaleForLayout})`,
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                gridArea: "1/1",
+                width: "100%",
+                height: "100%",
+                borderRadius: "50%",
+                boxShadow: `0 0 0 200vmax rgba(30, 30, 30, ${backdropOpacity})`,
+              }}
+            />
+            <div
+              aria-hidden="true"
+              style={{
+                gridArea: "1/1",
+                width: "100%",
+                height: "100%",
+                borderRadius: "50%",
+                border: "2px solid rgba(255, 255, 255, 0.9)",
+                opacity: circleOpacity,
+                boxShadow: `0 0 55px rgba(${haloColor}, ${glowStrength})`,
+                backdropFilter: "blur(2px)",
+                mixBlendMode: "screen",
+              }}
+            />
+            <div
+              aria-hidden="true"
+              style={{
+                gridArea: "1/1",
+                width: "140%",
+                height: "120%",
+                borderRadius: "50%",
+                opacity: circleOpacity * 0.55,
+                filter: "blur(45px)",
+                boxShadow: `0 0 120px rgba(${haloColor}, ${glowStrength})`,
+                transform: "scaleX(1.1)",
+                mixBlendMode: "screen",
+              }}
+            />
+          </div>
+
+          {/* Text Container */}
+          <div
+            style={{
+              position: "absolute",
+              opacity: habibTextVisible ? 1 : 0,
+              transition: "opacity 600ms ease",
+              ...(isMobile
+                ? {
+                    left: "50%",
+                    top: `calc(75% + clamp(180px, 45vw, 420px) * ${
+                      circleScaleForLayout * 0.25
+                    })`,
+                    transform: "translate(-50%, -50%)",
+                    width: "80%",
+                    textAlign: "center",
+                    display: "grid",
+                    placeItems: "center",
+                  }
+                : {
+                    left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    marginLeft: "0",
+                    display: "grid",
+                    placeItems: "center start",
+                  }),
+            }}
+            className="stop-overlay-text-container"
+          >
+            {welcomeOverlayFinished && textSegments.map(renderText)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
