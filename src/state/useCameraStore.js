@@ -759,7 +759,21 @@ export const useCameraStore = create((set, get) => {
 
     // segment-aware sensitivity (unit baseline). Keep magnitudeMap micro; use GlobalSS as macro multiplier.
     globalSS: 1.68,
-    localSSPercent: {},
+    // Doubled sensitivity (100% increase = 2x) for segments between stop-13b and stop-15-down only
+    localSSPercent: {
+      16: 100, // stop-13b -> stop-13b-left-1
+      17: 100, // stop-13b-left-1 -> stop-13b-left-2
+      18: 100, // stop-13b-left-2 -> stop-13c
+      19: 100, // stop-13c -> stop-13c-arc-1
+      20: 100, // stop-13c-arc-1 -> stop-13c-arc-2
+      21: 100, // stop-13c-arc-2 -> stop-13c-arc-3
+      22: 100, // stop-13c-arc-3 -> stop-13c-arc-4
+      23: 100, // stop-13c-arc-4 -> stop-13c-arc-5
+      24: 100, // stop-13c-arc-5 -> stop-13c-arc-6
+      25: 100, // stop-13c-arc-6 -> stop-13c-arc-7
+      26: 100, // stop-13c-arc-7 -> stop-14
+      27: 100, // stop-14 -> stop-15-down
+    },
 
     // Magnitude → Glide mapping (new)
     magnitudeMap: {
