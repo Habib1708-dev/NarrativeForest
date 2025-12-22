@@ -7,6 +7,7 @@ import {
   segmentAt,
   yawPitchFromQuaternion,
 } from "../utils/cameraInterp";
+import { heightAt } from "../proc/heightfield";
 
 /**
  * @typedef {Object} Waypoint
@@ -349,9 +350,7 @@ const isBrowser = typeof window !== "undefined";
 
 const tDriver = { value: 0 };
 const scrollState = { velocity: 0 };
-const terrainRaycaster = new THREE.Raycaster();
-terrainRaycaster.firstHitOnly = true;
-const terrainRayOrigin = new THREE.Vector3();
+// Note: Raycasting removed for freeflight - now using analytical heightAt() for performance
 
 const LAST_T_THRESHOLD = 0.999;
 const createFreeFlyState = () => ({
@@ -541,30 +540,55 @@ export const useCameraStore = create((set, get) => {
         .clone()
         .addScaledVector(forward, speed * dt);
 
-      const terrain = state.terrainCollider;
-      if (terrain) {
-        const rayHeight = state.freeFlyTerrainRayHeight ?? 12.0;
-        const rayFar = state.freeFlyTerrainRayFar ?? 200;
-        const altitudeResponse = state.freeFlyAltitudeResponse ?? 3.2;
-        const offset = state.freeFlyTerrainOffset ?? 1.4;
-        const prevY = freeFly.position.y;
-        const startY = Math.max(prevY, nextPos.y) + rayHeight;
-        terrainRayOrigin.set(nextPos.x, startY, nextPos.z);
-        terrainRaycaster.ray.origin.copy(terrainRayOrigin);
-        terrainRaycaster.ray.direction.set(0, -1, 0);
-        terrainRaycaster.near = 0;
-        terrainRaycaster.far = rayFar;
-        const hits = terrainRaycaster.intersectObject(terrain, true);
-        if (hits.length > 0) {
-          const groundY = hits[0].point.y;
-          const desiredY = groundY + offset;
-          const nextY =
-            typeof THREE.MathUtils.damp === "function"
-              ? THREE.MathUtils.damp(prevY, desiredY, altitudeResponse, dt)
-              : prevY + (desiredY - prevY) * Math.min(1, altitudeResponse * dt);
-          nextPos.y = nextY;
+      // Terrain following using analytical heightfield (no raycasting - much faster)
+      const altitudeResponse = state.freeFlyAltitudeResponse ?? 3.2;
+      const offset = state.freeFlyTerrainOffset ?? 1.4;
+      const prevY = freeFly.position.y;
+
+      // Lookahead configuration
+      const lookaheadSamples = state.freeFlyLookaheadSamples ?? 5;
+      const lookaheadTime = state.freeFlyLookaheadTime ?? 1.2;
+      const lookaheadMinDist = state.freeFlyLookaheadMinDist ?? 1.5;
+      const lookaheadBlend = state.freeFlyLookaheadBlend ?? 0.7;
+
+      // Calculate lookahead distance based on speed
+      const lookaheadDist = Math.max(lookaheadMinDist, speed * lookaheadTime);
+
+      // Get horizontal forward direction (ignore pitch, just yaw)
+      // Negative because camera looks along -Z in its local space
+      const horizForwardX = -Math.sin(yaw);
+      const horizForwardZ = -Math.cos(yaw);
+
+      // Sample terrain at current position using heightfield (O(1) - no raycasting)
+      const currentGroundY = heightAt(nextPos.x, nextPos.z);
+
+      // Scan ahead and find the MAXIMUM terrain height in the lookahead window
+      let maxAheadGroundY = currentGroundY;
+      for (let i = 1; i <= lookaheadSamples; i++) {
+        const sampleDist = (i / lookaheadSamples) * lookaheadDist;
+        const sampleX = nextPos.x + horizForwardX * sampleDist;
+        const sampleZ = nextPos.z + horizForwardZ * sampleDist;
+
+        // Direct heightfield lookup - O(1) constant time, no mesh needed
+        const sampleGroundY = heightAt(sampleX, sampleZ);
+
+        // Track the highest point ahead
+        if (sampleGroundY > maxAheadGroundY) {
+          maxAheadGroundY = sampleGroundY;
         }
       }
+
+      // Blend between current ground and max ahead based on lookaheadBlend
+      // Higher blend = camera stays higher to clear upcoming terrain
+      const effectiveGroundY =
+        currentGroundY + (maxAheadGroundY - currentGroundY) * lookaheadBlend;
+
+      const desiredY = effectiveGroundY + offset;
+      const nextY =
+        typeof THREE.MathUtils.damp === "function"
+          ? THREE.MathUtils.damp(prevY, desiredY, altitudeResponse, dt)
+          : prevY + (desiredY - prevY) * Math.min(1, altitudeResponse * dt);
+      nextPos.y = nextY;
       const nextFreeFly = {
         ...freeFly,
         position: nextPos,
@@ -743,8 +767,12 @@ export const useCameraStore = create((set, get) => {
     freeFlySpeedResponse: 3.5,
     freeFlyTerrainOffset: 1.4,
     freeFlyAltitudeResponse: 3.2,
-    freeFlyTerrainRayHeight: 12.0,
-    freeFlyTerrainRayFar: 200,
+    // freeFlyTerrainRayHeight and freeFlyTerrainRayFar removed - now using heightAt() instead of raycasting
+    // Lookahead terrain scanning to prevent diving into valleys before hills
+    freeFlyLookaheadSamples: 5, // number of points to sample ahead
+    freeFlyLookaheadTime: 1.2, // seconds ahead to scan (multiplied by speed)
+    freeFlyLookaheadMinDist: 1.5, // minimum lookahead distance even at low speed
+    freeFlyLookaheadBlend: 0.7, // 0 = use current ground, 1 = use max ahead
     freeFlyTurnResponse: 4.0,
     freeFlyForwardBias: 0.24,
     freeFlyNeutralBand: 0.12,
