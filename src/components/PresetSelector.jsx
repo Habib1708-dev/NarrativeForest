@@ -65,9 +65,10 @@ export default function PresetSelector({
   return (
     <div
       ref={panelRef}
+      data-preset-selector
       style={{
         position: "fixed",
-        top: "clamp(16px, 3vh, 24px)",
+        top: "clamp(72px, calc(1rem + 1rem + 2.5rem + 1vh), 88px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 9997,
@@ -309,6 +310,13 @@ export default function PresetSelector({
 
           div::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.3);
+          }
+
+          /* Responsive positioning for preset selector to sit below navbar */
+          @media (max-width: 768px) {
+            [data-preset-selector] {
+              top: clamp(64px, calc(0.75rem + 0.75rem + 2.5rem + 1vh), 76px) !important;
+            }
           }
         `}
       </style>
