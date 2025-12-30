@@ -21,6 +21,7 @@ import { DistanceBlurEffect } from "./post/DistanceBlurEffect";
 import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
+import CatNoTextures from "./components/CatNoTextures";
 import Lake from "./components/Lake";
 // import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
@@ -664,7 +665,9 @@ export default function Experience() {
         {/* Actors */}
         <Cabin ref={cabinRef} />
         <Man ref={manRef} />
-        <Cat ref={catRef} />
+        {/* Original Cat component - commented out for testing */}
+        {/* <Cat ref={catRef} /> */}
+        <CatNoTextures ref={catRef} />
         <RadioTower ref={radioTowerRef} />
         <Lake ref={lakeRef} />
 
