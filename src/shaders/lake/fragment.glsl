@@ -15,7 +15,7 @@ uniform float uTroughTransition;
 uniform float uFresnelScale;
 uniform float uFresnelPower;
 
-uniform samplerCube uEnvironmentMap;
+// Environment map removed - not used in this project
 
 // Bioluminescent dye + stamp (age) maps
 uniform sampler2D uTrailMap;      // R: dye intensity 0..1
@@ -38,11 +38,9 @@ void main(){
   vec3 N = normalize(vNormalW);
   vec3 V = normalize(vWorldPosition - cameraPosition);
 
-  // keep existing handedness hack for reflections (we'll fix in Step 4)
-  vec3 R = reflect(V, N);
-  R.x = -R.x;
-
-  vec3 reflection = textureCube(uEnvironmentMap, R).rgb;
+  // Environment map lookups removed - not used in this project
+  // Reflection effect removed to improve performance
+  // Using simple fresnel-based color blending instead
 
   float NoV = clamp(dot(N, V), 0.0, 1.0);
   float fresnel = uFresnelScale * pow(1.0 - NoV, uFresnelPower);
@@ -53,7 +51,9 @@ void main(){
 
   vec3 base1 = mix(uTroughColor, uSurfaceColor, trough);
   vec3 base2 = mix(base1,        uPeakColor,    peak);
-  vec3 baseColor = mix(base2, reflection, fresnel);
+  // Simple fresnel effect: blend towards a lighter color based on viewing angle
+  vec3 fresnelColor = mix(base2, uSurfaceColor, fresnel * 0.3);
+  vec3 baseColor = fresnelColor;
 
   // --- Bioluminescent dye sampling (soft watercolor look) ---
   // REPLACED: vec2 texel = 1.0 / vec2(textureSize(uTrailMap, 0));

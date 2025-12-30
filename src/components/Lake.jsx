@@ -18,7 +18,7 @@ const Lake = forwardRef(function Lake(
     position = [-2, 0.0, -2],
     rotation = [Math.PI * 0.5, 0, 0],
     resolution = 140,
-    envMap = null,
+    // envMap prop removed - environment maps not used in this project
   },
   ref
 ) {
@@ -78,8 +78,8 @@ const Lake = forwardRef(function Lake(
       uWavesSpeed: { value: 0.3, min: 0, max: 2, step: 0.01 },
     }),
     Colors: folder({
-      uTroughColor: { value: "#767676" },
-      uSurfaceColor: { value: "#b1b1b1" },
+      uTroughColor: { value: "#303030" },
+      uSurfaceColor: { value: "#afafaf" },
       uPeakColor: { value: "#bebebe" },
     }),
     Thresholds: folder({
@@ -119,7 +119,7 @@ const Lake = forwardRef(function Lake(
     uniformsRef.current = {
       uTime: { value: 0 },
       uOpacity: { value: 0.9 },
-      uEnvironmentMap: { value: envMap },
+      // uEnvironmentMap removed - environment maps not used
       uWavesAmplitude: { value: uWavesAmplitude },
       uWavesFrequency: { value: uWavesFrequency },
       uWavesPersistence: { value: uWavesPersistence },
@@ -173,9 +173,7 @@ const Lake = forwardRef(function Lake(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    updateUniform("uEnvironmentMap", envMap);
-  }, [envMap, updateUniform]);
+  // Environment map effect removed - not used in this project
 
   useEffect(() => {
     updateUniform("uOpacity", lakeOpacity);
@@ -189,15 +187,7 @@ const Lake = forwardRef(function Lake(
     updateUniform("uWavesLacunarity", uWavesLacunarity);
     updateUniform("uWavesIterations", uWavesIterations);
     updateUniform("uWavesSpeed", uWavesSpeed);
-  }, [
-    updateUniform,
-    uWavesAmplitude,
-    uWavesFrequency,
-    uWavesPersistence,
-    uWavesLacunarity,
-    uWavesIterations,
-    uWavesSpeed,
-  ]);
+  }, [updateUniform, uWavesAmplitude, uWavesFrequency, uWavesPersistence, uWavesLacunarity, uWavesIterations, uWavesSpeed]);
 
   useEffect(() => {
     updateColorUniform("uTroughColor", uTroughColor);
@@ -208,17 +198,7 @@ const Lake = forwardRef(function Lake(
     updateUniform("uPeakTransition", uPeakTransition);
     updateUniform("uTroughThreshold", uTroughThreshold);
     updateUniform("uTroughTransition", uTroughTransition);
-  }, [
-    updateColorUniform,
-    updateUniform,
-    uPeakColor,
-    uPeakThreshold,
-    uPeakTransition,
-    uSurfaceColor,
-    uTroughColor,
-    uTroughThreshold,
-    uTroughTransition,
-  ]);
+  }, [updateColorUniform, updateUniform, uPeakColor, uPeakThreshold, uPeakTransition, uSurfaceColor, uTroughColor, uTroughThreshold, uTroughTransition]);
 
   useEffect(() => {
     updateUniform("uFresnelScale", uFresnelScale);
