@@ -1322,10 +1322,14 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     const sC = materialC?.userData?.shader;
     if (!sA || !sB || !sC) return;
 
-    const hovered =
-      anyHoveredFor(meshARef.current, geoA?.boundingSphere?.radius || 1) ||
-      anyHoveredFor(meshBRef.current, geoB?.boundingSphere?.radius || 1) ||
-      anyHoveredFor(meshCRef.current, geoC?.boundingSphere?.radius || 1);
+    // Skip hover detection when crystals are not visible (dissolved out)
+    // Progress < 0 means crystals are fully dissolved and invisible
+    const isVisible = progressRef.current >= 0.0;
+    const hovered = isVisible
+      ? anyHoveredFor(meshARef.current, geoA?.boundingSphere?.radius || 1) ||
+        anyHoveredFor(meshBRef.current, geoB?.boundingSphere?.radius || 1) ||
+        anyHoveredFor(meshCRef.current, geoC?.boundingSphere?.radius || 1)
+      : false;
 
     const wasHovered = prevHoveredRef.current;
     prevHoveredRef.current = hovered;
