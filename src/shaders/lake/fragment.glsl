@@ -16,23 +16,10 @@ uniform float uFresnelScale;
 uniform float uFresnelPower;
 
 // Environment map removed - not used in this project
-
-// Bioluminescent dye + stamp (age) maps
-uniform sampler2D uTrailMap;      // R: dye intensity 0..1
-uniform sampler2D uStampMap;      // R: last-write time in seconds
-
-// NEW (Step 2): texel size for uTrailMap/uStampMap (1/size, 1/size)
-uniform vec2 uTrailTexel;
-
-uniform vec3  uBioColorA;
-uniform vec3  uBioColorB;
-uniform float uBioIntensity;      // emissive boost multiplier
-uniform float uBioAltFreq;        // radians per second of age
-uniform float uBioAltPhase;       // phase offset in radians
+// Bioluminescent dye system removed - not used in this project
 
 varying vec3 vNormalW;
 varying vec3 vWorldPosition;
-varying vec2 vUv0;
 
 void main(){
   vec3 N = normalize(vNormalW);
@@ -53,27 +40,9 @@ void main(){
   vec3 base2 = mix(base1,        uPeakColor,    peak);
   // Simple fresnel effect: blend towards a lighter color based on viewing angle
   vec3 fresnelColor = mix(base2, uSurfaceColor, fresnel * 0.3);
-  vec3 baseColor = fresnelColor;
+  vec3 finalColor = fresnelColor;
 
-  // --- Bioluminescent dye sampling (soft watercolor look) ---
-  // REPLACED: vec2 texel = 1.0 / vec2(textureSize(uTrailMap, 0));
-  vec2 texel = uTrailTexel;
-  float d0 = texture2D(uTrailMap, vUv0).r * 0.36;
-  float d1 = texture2D(uTrailMap, vUv0 + vec2( texel.x, 0.0)).r * 0.16;
-  float d2 = texture2D(uTrailMap, vUv0 + vec2(-texel.x, 0.0)).r * 0.16;
-  float d3 = texture2D(uTrailMap, vUv0 + vec2(0.0,  texel.y)).r * 0.16;
-  float d4 = texture2D(uTrailMap, vUv0 + vec2(0.0, -texel.y)).r * 0.16;
-  float dye = clamp(d0 + d1 + d2 + d3 + d4, 0.0, 1.0);
-
-  // --- Alternation between two colors along the trail's age ---
-  float stamp = texture2D(uStampMap, vUv0).r;
-  float ageSec = max(uTime - stamp, 0.0);
-
-  float w = 0.5 + 0.5 * sin(ageSec * uBioAltFreq + uBioAltPhase);
-  vec3 dyeColor = mix(uBioColorA, uBioColorB, w);
-
-  vec3 emission = dyeColor * (dye * uBioIntensity);
-  vec3 finalColor = baseColor + emission;
+  // Bioluminescent dye system removed - not used in this project
 
   gl_FragColor = vec4(finalColor, uOpacity);
 }

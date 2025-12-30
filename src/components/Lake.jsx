@@ -101,18 +101,6 @@ const Lake = forwardRef(function Lake(
     }),
   });
 
-  // 1×1 "empty" texture to feed into dye/stamp uniforms (no emission)
-  const emptyTexture = useMemo(() => {
-    const t = new THREE.DataTexture(
-      new Uint8Array([0, 0, 0, 255]),
-      1,
-      1,
-      THREE.RGBAFormat
-    );
-    t.needsUpdate = true;
-    return t;
-  }, []);
-
   // === Material ===
   const uniformsRef = useRef(null);
   if (!uniformsRef.current) {
@@ -135,14 +123,7 @@ const Lake = forwardRef(function Lake(
       uTroughTransition: { value: uTroughTransition },
       uFresnelScale: { value: uFresnelScale },
       uFresnelPower: { value: uFresnelPower },
-      uTrailMap: { value: emptyTexture },
-      uStampMap: { value: emptyTexture },
-      uTrailTexel: { value: new THREE.Vector2(1 / 128, 1 / 128) },
-      uBioColorA: { value: new THREE.Color("#ffffff") },
-      uBioColorB: { value: new THREE.Color("#ffffff") },
-      uBioIntensity: { value: 0.0 },
-      uBioAltFreq: { value: 0.0 },
-      uBioAltPhase: { value: 0.0 },
+      // Dye system uniforms removed - not used in this project
       uLakeBaseY: { value: lakePosY },
     };
   }

@@ -11,7 +11,7 @@ uniform float uWavesIterations;
 
 varying vec3 vNormalW;        // world-space normal
 varying vec3 vWorldPosition;  // world-space position
-varying vec2 vUv0;            // for sampling trail map
+// vUv0 removed - was only used for dye system
 
 // --- simplex 2D noise helpers ---
 vec4 permute(vec4 x){ return mod(((x * 34.0) + 1.0) * x, 289.0); }
@@ -76,7 +76,7 @@ void main(){
 
   vNormalW = nW;
   vWorldPosition = wp.xyz;
-  vUv0 = uv;
+  // vUv0 removed - was only used for dye system
 
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
