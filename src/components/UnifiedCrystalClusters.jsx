@@ -442,15 +442,8 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
         float eBoost = 1.0 + uU_BottomEmissiveBoost * bottom;
         gl_FragColor.rgb += grad * uU_EmissiveIntensity * eBoost;
 
-        float fresRef = pow(1.0 - abs(dot(N, V)), max(0.0001, uU_ReflectPower));
-        #ifdef USE_ENVMAP
-          vec3 R = reflect(-V, N);
-          vec3 envBoost = vec3(0.0);
-          #ifdef ENVMAP_TYPE_CUBE_UV
-            envBoost = envMapIntensity * textureCubeUV(envMap, R, 0.0).rgb;
-          #endif
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, envBoost, clamp(uU_ReflectBoost * fresRef, 0.0, 1.0));
-        #endif
+        // Environment map lookups removed - not used in this project
+        // Reflection effect removed to improve performance
         float rim = pow(1.0 - abs(dot(N, V)), max(0.0001, uU_RimPower));
         gl_FragColor.rgb += rim * uU_RimBoost;
 
@@ -479,7 +472,7 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
     mat.attenuationDistance = unified.U_attenuationDistance;
     mat.roughness = unified.U_roughness;
     mat.emissiveIntensity = unified.U_emissiveIntensity;
-    mat.envMapIntensity = unified.U_envIntensity;
+    // envMapIntensity removed - environment maps not used
 
     const s = mat.userData.shader;
     if (s) {
