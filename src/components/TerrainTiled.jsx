@@ -30,7 +30,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     loadRadius = 2,
     dropRadius = 2,
     prefetch = 1,
-    resolution = 4,
+    resolution = 3,
     materialFactory,
     unloadCooldownMs = 2000,
     buildBudgetMs = 4,
