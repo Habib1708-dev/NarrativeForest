@@ -543,7 +543,10 @@ export default function ForestDynamicSampled({
       } else if (mode === "highBuffer") {
         nearBufferTrees.push(...rec.trees);
       }
-      rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+      // Keep rocks only in near ring chunks (highImmediate/highBuffer)
+      if (mode === "highImmediate" || mode === "highBuffer") {
+        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+      }
     }
 
     const uploadTreeMatrices = (refs, mats, cap) => {
