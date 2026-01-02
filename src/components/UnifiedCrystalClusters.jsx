@@ -1206,6 +1206,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   const sampleWorld = useMemo(() => new THREE.Vector3(), []);
 
   const hoverMixRef = useRef(0);
+  const hoverAccumRef = useRef(0);
   const segIdxRef = useRef(0);
   const segTRef = useRef(0);
   const prevHoveredRef = useRef(false);
@@ -1316,6 +1317,13 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     updateUniformAll("uCoolMix", coolMixRef.current);
 
+    // Throttle hover/raycast work to ~6 Hz to reduce per-frame cost
+    hoverAccumRef.current += dt;
+    const HOVER_STEP = 1 / 6; // ~6 times per second
+    if (hoverAccumRef.current < HOVER_STEP) return;
+    const dtHover = hoverAccumRef.current;
+    hoverAccumRef.current = 0;
+
     // Hover colors (scaled by heat)
     const sA = materialA?.userData?.shader;
     const sB = materialB?.userData?.shader;
@@ -1334,13 +1342,13 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     const wasHovered = prevHoveredRef.current;
     prevHoveredRef.current = hovered;
 
-    const easeK = 1 - Math.exp(-unifiedHover.U_hoverEase * dt);
+    const easeK = 1 - Math.exp(-unifiedHover.U_hoverEase * dtHover);
     if (unifiedHover.U_hoverEnabled && hovered) {
       hoverMixRef.current += (1 - hoverMixRef.current) * easeK;
     } else {
       const coolRate =
         unifiedHover.U_coolTime > 0
-          ? dt / Math.max(1e-3, unifiedHover.U_coolTime)
+          ? dtHover / Math.max(1e-3, unifiedHover.U_coolTime)
           : 1.0;
       hoverMixRef.current = Math.max(0, hoverMixRef.current - coolRate);
     }
@@ -1367,7 +1375,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       segTRef.current = 0;
     if (unifiedHover.U_hoverEnabled && hovered) {
       const dur = Math.max(0.05, unifiedHover.U_cycleTime);
-      segTRef.current += dt / dur;
+      segTRef.current += dtHover / dur;
       if (segTRef.current >= 1.0) {
         segIdxRef.current = (segIdxRef.current + 1) % 3;
         segTRef.current -= 1.0;

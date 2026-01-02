@@ -443,8 +443,8 @@ export default function Experience() {
     // Complete transition - keep the overrides permanently as the new values
     if (rawProgress >= 1.0) {
       transition.isTransitioning = false;
-      console.log("✅ Transition complete!");
-      console.log("🎯 Final values actually applied:");
+      console.log("Transition complete!");
+      console.log("Final values actually applied:");
       console.table(updates);
       console.log("========================================\n");
       // Don't clear overrides - they become the permanent values
