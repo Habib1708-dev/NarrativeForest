@@ -6,7 +6,10 @@ import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 import { heightAt as defaultHeightSampler } from "../proc/heightfield";
 import { emitDistanceFadeTileReady } from "../utils/distanceFadeEvents";
-import { usePerformanceMonitor, useGLBLoadTracker } from "../utils/usePerformanceMonitor";
+import {
+  usePerformanceMonitor,
+  useGLBLoadTracker,
+} from "../utils/usePerformanceMonitor";
 
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
@@ -124,7 +127,14 @@ export default function ForestDynamicSampled({
   );
 
   // Effective radii (ensure mid >= near, both within tile extent)
-  const NEAR_R = Math.max(1, Math.min(nearRingChunks | 0, maxRFromTiles));
+  const NEAR_SCALE = 0.8; // shrink near ring to 80% of configured size
+  const NEAR_R = Math.max(
+    1,
+    Math.min(
+      Math.max(1, Math.round((nearRingChunks | 0) * NEAR_SCALE)),
+      maxRFromTiles
+    )
+  );
   const MID_R = Math.max(NEAR_R, Math.min(midRingChunks | 0, maxRFromTiles));
   const RENDER_EXTRA = Math.max(0, Math.floor(renderExtraChunks ?? 0));
   const RENDER_R = Math.max(
