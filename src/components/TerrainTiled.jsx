@@ -14,6 +14,8 @@ import {
   heightAt as defaultHeightSampler,
   getTerrainParams,
 } from "../proc/heightfield";
+import { usePerformanceMonitor } from "../utils/usePerformanceMonitor";
+import performanceMonitor from "../utils/performanceMonitor";
 
 /**
  * TerrainTiled — forwardRef so other systems (Forest/Fog) can raycast recursively.
@@ -40,6 +42,8 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     throw new Error("<TerrainTiled> needs sampleHeight(x,z).");
   }
 
+  const { markStart, markEnd } = usePerformanceMonitor("TerrainTiled");
+
   const groupRef = useRef();
   useImperativeHandle(ref, () => groupRef.current, []);
 
@@ -49,6 +53,8 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   const pendingWorkerJobsRef = useRef(new Map());
   const workerFailedRef = useRef(false);
   const workerErrorCountRef = useRef(0);
+  const firstTileStartedRef = useRef(false);
+  const firstTileDoneRef = useRef(false);
 
   const canUseWorker = useMemo(() => {
     if (typeof window === "undefined" || typeof window.Worker === "undefined") {
@@ -95,6 +101,13 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   }, [resolution]);
 
   useEffect(() => {
+    if (!firstTileStartedRef.current) {
+      firstTileStartedRef.current = true;
+      markStart("first-tile");
+    }
+  }, [markStart]);
+
+  useEffect(() => {
     if (!canUseWorker) {
       workerRef.current?.terminate?.();
       workerRef.current = null;
@@ -107,6 +120,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     workerErrorCountRef.current = 0;
 
     let worker;
+    const t0 = performance.now();
     try {
       worker = new Worker(
         new URL("../workers/terrainTileWorker.js", import.meta.url),
@@ -119,6 +133,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     }
 
     workerRef.current = worker;
+    performanceMonitor.markSystemInit("terrain-worker", performance.now() - t0);
 
     const handleMessage = (event) => {
       const data = event.data;
@@ -244,6 +259,11 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     rec.state = "ready";
     rec.lastTouched = performance.now();
     emitDistanceFadeTileReady({ mesh, key: rec.key });
+
+    if (!firstTileDoneRef.current) {
+      firstTileDoneRef.current = true;
+      markEnd("first-tile");
+    }
   };
 
   const flushPendingWorkerJobs = () => {

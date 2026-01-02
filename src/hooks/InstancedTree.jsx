@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
+import performanceMonitor from "../utils/performanceMonitor";
 
 const __logged = new Set();
 
@@ -91,6 +92,12 @@ function isFoliageMaterial(m) {
  */
 export function useInstancedTree(url) {
   const { scene } = useGLTF(url);
+
+  useEffect(() => {
+    if (scene) {
+      performanceMonitor.endGLBLoad(url);
+    }
+  }, [scene, url]);
 
   const parts = useMemo(() => {
     scene.updateMatrixWorld(true);

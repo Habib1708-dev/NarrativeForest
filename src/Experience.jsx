@@ -7,6 +7,8 @@ import { useRef, useState, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useDebugStore } from "./state/useDebugStore";
+import { usePerformanceMonitor } from "./utils/usePerformanceMonitor";
+import performanceMonitor from "./utils/performanceMonitor";
 
 import {
   EffectComposer,
@@ -50,6 +52,7 @@ import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
   const { gl, camera } = useThree();
+  usePerformanceMonitor("Experience");
   const isDebugMode = useDebugStore((state) => state.isDebugMode);
   const enabled = useCameraStore((s) => s.enabled);
   const archConfig = useCameraStore((s) => s.archConfig);
@@ -61,6 +64,12 @@ export default function Experience() {
     // Signal that the forest (scene) is ready
     window.dispatchEvent(new Event("forest-ready"));
   }, []);
+
+  useFrame(() => {
+    if (!firstFrameRef.current) return;
+    firstFrameRef.current = false;
+    performanceMonitor.markTimeToFirstFrame();
+  });
 
   useEffect(() => {
     const canvas = gl?.domElement;
@@ -103,6 +112,7 @@ export default function Experience() {
   const terrainRef = useRef(null);
   const lakeRef = useRef(null);
   const [terrainGroupHandle, setTerrainGroupHandle] = useState(null);
+  const firstFrameRef = useRef(true);
 
   // Forest occluders (instanced trees + rocks) — NEW
   const [forestOccluders] = useState([]);
@@ -702,6 +712,10 @@ export default function Experience() {
           tileSize={TERRAIN_TILE_SIZE}
           terrainLoadRadius={TERRAIN_LOAD_RADIUS}
           exclusion={lakeExclusion}
+          onInitialReady={() => {
+            performanceMonitor.markTimeToInteractive();
+            performanceMonitor.markTotalLoadTime();
+          }}
         />
         <UnifiedCrystalClusters />
         <Butterfly />

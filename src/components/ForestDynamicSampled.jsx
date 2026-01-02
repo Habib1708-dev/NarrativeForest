@@ -6,6 +6,7 @@ import { useInstancedTree } from "../hooks/InstancedTree";
 import { useInstancedRocks } from "../hooks/InstancedRocks";
 import { heightAt as defaultHeightSampler } from "../proc/heightfield";
 import { emitDistanceFadeTileReady } from "../utils/distanceFadeEvents";
+import { usePerformanceMonitor, useGLBLoadTracker } from "../utils/usePerformanceMonitor";
 
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
@@ -66,6 +67,11 @@ export default function ForestDynamicSampled({
   onInitialReady,
 }) {
   const { camera } = useThree();
+  const { markStart, markEnd } = usePerformanceMonitor("ForestDynamicSampled");
+  useGLBLoadTracker("/models/tree/Spruce_Fir/Spruce1.glb");
+  useGLBLoadTracker("/models/tree/Spruce_Fir/Spruce1LOD.glb");
+  useGLBLoadTracker("/models/cabin/MateriallessRock.glb");
+
   const settings = useMemo(() => {
     if (!config) return DEFAULT_FOREST_PARAMS;
     return { ...DEFAULT_FOREST_PARAMS, ...config };
@@ -76,6 +82,11 @@ export default function ForestDynamicSampled({
   useEffect(() => {
     onInitialReadyRef.current = onInitialReady;
   }, [onInitialReady]);
+
+  useEffect(() => {
+    markStart("glb-loads");
+    markStart("initial-chunks");
+  }, [markStart]);
 
   const {
     seed,
@@ -169,6 +180,12 @@ export default function ForestDynamicSampled({
       m.needsUpdate = true;
     });
   }, [rockParts, rockTint, rockTintIntensity]);
+
+  useEffect(() => {
+    if (highParts.length && lodParts.length && rockParts.length) {
+      markEnd("glb-loads");
+    }
+  }, [highParts.length, lodParts.length, rockParts.length, markEnd]);
 
   // ---------------- Helpers ----------------
   const treeBaseMinY = useMemo(() => {
@@ -571,6 +588,7 @@ export default function ForestDynamicSampled({
       }
     }
     initialReadyNotifiedRef.current = true;
+    markEnd("initial-chunks");
     onInitialReadyRef.current?.();
   });
 

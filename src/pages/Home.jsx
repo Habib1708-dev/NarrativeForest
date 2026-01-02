@@ -7,6 +7,7 @@ import DebugModeIndicator from "../components/DebugModeIndicator";
 import ClickAndDragHint from "../components/ClickAndDragHint";
 import PresetSelector from "../components/PresetSelector";
 import StopCircleOverlay from "../components/StopCircleOverlay";
+import PerformanceMetricsDisplay from "../components/PerformanceMetricsDisplay";
 import { useDebugStore } from "../state/useDebugStore";
 import { useAudioStore } from "../state/useAudioStore";
 import { PRESET_NAMES } from "../utils/presets";
@@ -184,6 +185,7 @@ export default function Home() {
         <Experience />
       </Canvas>
 
+      <PerformanceMetricsDisplay />
       <FreeFlyJoystickOverlay />
     </>
   );

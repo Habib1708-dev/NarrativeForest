@@ -1,7 +1,8 @@
 // src/hooks/InstancedRocks.jsx
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
+import performanceMonitor from "../utils/performanceMonitor";
 
 /**
  * Loads a GLB of rocks and returns an array of parts:
@@ -13,6 +14,12 @@ import { useGLTF } from "@react-three/drei";
  */
 export function useInstancedRocks(url) {
   const { scene } = useGLTF(url);
+
+  useEffect(() => {
+    if (scene) {
+      performanceMonitor.endGLBLoad(url);
+    }
+  }, [scene, url]);
 
   return useMemo(() => {
     scene.updateMatrixWorld(true);
