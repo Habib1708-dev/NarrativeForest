@@ -93,7 +93,7 @@ export default function ForestDynamic({
 
   // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
-  const rockParts = useInstancedRocks("/models/cabin/MateriallessRock.glb");
+  const rockParts = useInstancedRocks("/models/rocks/MateriallessRock.glb");
 
   // Instanced refs
   const treeHighRefs = useRef(highParts.map(() => React.createRef()));

@@ -188,7 +188,7 @@ export default forwardRef(function Cabin(_, ref) {
   );
 
   // -------------------- Rock instanced meshes (baked transforms) --------------------
-  const ROCK_GLB = "/models/cabin/MateriallessRock.glb";
+  const ROCK_GLB = "/models/rocks/MateriallessRock.glb";
   const { scene: rockScene } = useGLTF(ROCK_GLB);
 
   const rockGeoMat = useMemo(() => {
@@ -350,4 +350,4 @@ export default forwardRef(function Cabin(_, ref) {
 
 // Preload assets used here
 useGLTF.preload("/models/cabin/Cabin2.glb");
-useGLTF.preload("/models/cabin/MateriallessRock.glb");
+useGLTF.preload("/models/rocks/MateriallessRock.glb");

@@ -73,7 +73,7 @@ export default function ForestDynamicSampled({
   const { markStart, markEnd } = usePerformanceMonitor("ForestDynamicSampled");
   useGLBLoadTracker("/models/tree/Spruce_Fir/Spruce1_draco.glb"); // Using Draco-compressed version for testing
   useGLBLoadTracker("/models/tree/Spruce_Fir/Spruce1LOD_draco.glb"); // Using Draco-compressed version for testing
-  useGLBLoadTracker("/models/cabin/MateriallessRock.glb");
+  useGLBLoadTracker("/models/rocks/MateriallessRock.glb"); // Using MateriallessRock for testing
 
   const settings = useMemo(() => {
     if (!config) return DEFAULT_FOREST_PARAMS;
@@ -149,7 +149,7 @@ export default function ForestDynamicSampled({
   // ---------------- Assets ----------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_draco.glb"); // Using Draco-compressed version for testing
   const lodParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1LOD_draco.glb"); // Using Draco-compressed version for testing
-  const rockParts = useInstancedRocks("/models/cabin/MateriallessRock.glb");
+  const rockParts = useInstancedRocks("/models/rocks/MateriallessRock.glb"); // Using MateriallessRock for testing
 
   // Instanced refs
   const treeHighRefs = useRef(highParts.map(() => React.createRef()));
