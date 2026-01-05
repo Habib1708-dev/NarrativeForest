@@ -13,8 +13,8 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 import { useCameraStore } from "../state/useCameraStore";
 
 export default forwardRef(function Man(_, ref) {
-  // Load the GLB from /public
-  const { scene, animations } = useGLTF("/models/man/man.glb");
+  // Load the GLB from /public (using Draco-compressed and animation-optimized version)
+  const { scene, animations } = useGLTF("/models/man/man_draco_optimized.glb");
 
   // Clone with SkeletonUtils so skinned animations remain intact
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
@@ -122,7 +122,7 @@ export default forwardRef(function Man(_, ref) {
     });
 
     console.groupCollapsed("👨 Man model loaded");
-    console.log("Source:", "/models/man/man.glb");
+    console.log("Source:", "/models/man/man_draco_optimized.glb");
     console.log("Meshes:", meshes.length, "Unique materials:", materials.size);
     if (meshes.length) {
       console.groupCollapsed("Meshes");
@@ -357,4 +357,4 @@ export default forwardRef(function Man(_, ref) {
   );
 });
 
-useGLTF.preload("/models/man/man.glb");
+useGLTF.preload("/models/man/man_draco_optimized.glb"); // Using Draco-compressed and animation-optimized version

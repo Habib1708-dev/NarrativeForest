@@ -14,7 +14,7 @@ import { useFrame } from "@react-three/fiber";
 import { useCameraStore } from "../state/useCameraStore";
 
 export default forwardRef(function RadioTower(_, ref) {
-  const glbPath = "/models/radioTower/Radio%20tower.glb";
+  const glbPath = "/models/radioTower/Radio%20tower_draco.glb"; // Using Draco-compressed version
   const { scene } = useGLTF(glbPath);
 
   const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
@@ -456,4 +456,4 @@ export default forwardRef(function RadioTower(_, ref) {
   );
 });
 
-useGLTF.preload("/models/radioTower/Radio%20tower.glb");
+useGLTF.preload("/models/radioTower/Radio%20tower_draco.glb"); // Using Draco-compressed version
