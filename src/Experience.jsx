@@ -24,6 +24,7 @@ import Cabin from "./components/Cabin";
 import Man from "./components/Man";
 import Cat from "./components/Cat";
 import CatNoTextures from "./components/CatNoTextures";
+import CatKTX2 from "./components/CatKTX2";
 import Lake from "./components/Lake";
 // import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
@@ -677,7 +678,8 @@ export default function Experience() {
         <Man ref={manRef} />
         {/* Original Cat component - commented out for testing */}
         {/* <Cat ref={catRef} /> */}
-        <CatNoTextures ref={catRef} />
+        {/* <CatNoTextures ref={catRef} /> */}
+        <CatKTX2 ref={catRef} />
         <RadioTower ref={radioTowerRef} />
         <Lake ref={lakeRef} />
 
