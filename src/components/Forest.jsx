@@ -73,7 +73,7 @@ const Forest = forwardRef(function Forest({ terrainMesh, config }, ref) {
   // ---------------------------
   const highParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1.glb");
   const lowParts = useInstancedTree("/models/tree/Spruce_Fir/Spruce1_LOD.glb");
-  const rockParts = useInstancedRocks("/models/rocks/MossRock.glb");
+  const rockParts = useInstancedRocks("/models/rocks/MossRock_ktx2.glb"); // Using KTX2-compressed version
 
   // ---------------------------
   // Materials tint

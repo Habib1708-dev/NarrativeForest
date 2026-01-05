@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
 
-const ROCK_GLB = "/models/rocks/MossRock.glb";
+const ROCK_GLB = "/models/rocks/MossRock_ktx2.glb"; // Using KTX2-compressed version
 const COUNT = 5;
 
 function deg2rad(d) {

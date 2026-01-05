@@ -60,4 +60,5 @@ export function useInstancedRocks(url) {
 }
 
 // Optionally preload your rocks model (paths are /public-relative)
-useGLTF.preload("/models/rocks/MossRock.glb");
+// Using KTX2-compressed version for better performance
+useGLTF.preload("/models/rocks/MossRock_ktx2.glb");
