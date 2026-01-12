@@ -251,13 +251,23 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   };
 
   const acquireGeometry = () => {
-    const pool = geometryPoolRef.current;
-    if (pool.length) return pool.pop();
-
+    // Compute seg at the top to validate pooled geometries
     const seg = Math.max(2, resolution | 0);
     const vertsX = seg + 1;
     const vertsZ = seg + 1;
 
+    // Search pool for geometry with matching seg, dispose mismatched ones
+    const pool = geometryPoolRef.current;
+    while (pool.length > 0) {
+      const geom = pool.pop();
+      if (geom?.userData?._poolMeta?.seg === seg) {
+        return geom;
+      }
+      // Dispose geometry with wrong seg to prevent buffer length mismatches
+      if (geom) geom.dispose();
+    }
+
+    // No matching geometry in pool, create a new one
     const geom = new THREE.BufferGeometry();
     const pos = new Float32Array(vertsX * vertsZ * 3);
     const posAttr = new THREE.BufferAttribute(pos, 3);
@@ -290,7 +300,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       }
     }
     geom.setIndex(new THREE.BufferAttribute(idx, 1));
-    geom.userData._poolMeta = { vertsX, vertsZ };
+    geom.userData._poolMeta = { vertsX, vertsZ, seg };
     return geom;
   };
 
