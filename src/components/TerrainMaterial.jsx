@@ -25,11 +25,11 @@ export function createTerrainMaterial() {
   const params = getTerrainParams();
 
   // Patch the material with onBeforeCompile
-  // CRITICAL: Use arrow function to capture 'material' reference correctly
-  // When material is cloned, each clone gets its own onBeforeCompile that references its own userData
+  // CRITICAL: Use regular function (not arrow) so 'this' refers to the material instance
+  // When material is cloned, each clone's onBeforeCompile uses 'this' to access its own userData
   const prevOnBeforeCompile = material.onBeforeCompile;
   material.onBeforeCompile = function(shader, renderer) {
-    // 'this' refers to the material instance (works correctly with cloned materials)
+    // 'this' refers to the material instance being compiled (works correctly with cloned materials)
     if (prevOnBeforeCompile) prevOnBeforeCompile.call(this, shader, renderer);
 
     // Add terrain height uniforms

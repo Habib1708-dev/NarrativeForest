@@ -401,7 +401,9 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     
     mesh.receiveShadow = true;
     mesh.castShadow = false;
-    mesh.frustumCulled = true;
+    // CRITICAL: Disable frustum culling for GPU terrain
+    // Shader sets transformed = worldPos, so Three.js culling/bounds can be wrong
+    mesh.frustumCulled = false;
     // CRITICAL: Set visible to true immediately for GPU terrain
     // DistanceFade will patch the material and handle fade logic, but tiles must be visible
     // If DistanceFade fails to patch, tiles will still render (better than invisible)
