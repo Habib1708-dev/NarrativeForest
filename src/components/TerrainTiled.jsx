@@ -401,7 +401,10 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     
     mesh.receiveShadow = true;
     mesh.castShadow = false;
-    mesh.frustumCulled = true;
+    // CRITICAL: Disable frustum culling for GPU terrain
+    // GPU-displaced vertices can be outside conservative bounding volumes, causing incorrect culling
+    // TODO: Compute accurate bounds by sampling height function at tile corners/edges
+    mesh.frustumCulled = false;
     // CRITICAL: Set visible to true immediately for GPU terrain
     // DistanceFade will patch the material and handle fade logic, but tiles must be visible
     // If DistanceFade fails to patch, tiles will still render (better than invisible)
@@ -413,9 +416,13 @@ const TerrainTiled = forwardRef(function TerrainTiled(
 
     // Compute conservative bounding volumes (XZ from tile bounds, Y from terrain params)
     // For GPU terrain, we use a safe Y range since we don't compute exact heights on CPU
+    // NOTE: These bounds are conservative and may cause incorrect frustum culling
+    // For now, frustum culling is disabled for GPU terrain to prevent tiles from disappearing
     const params = getTerrainParams();
-    const maxHeight = params.elevation + params.baseHeight + Math.abs(params.worldYOffset) + 5; // conservative upper bound
-    const minHeight = params.worldYOffset - 5; // conservative lower bound
+    // More conservative bounds to ensure all displaced vertices are included
+    // elevation * 2 accounts for abs() in height function, + baseHeight + worldYOffset
+    const maxHeight = params.elevation * 2 + params.baseHeight + Math.abs(params.worldYOffset) + 10;
+    const minHeight = params.worldYOffset - 10;
     
     const box = geom.boundingBox || new THREE.Box3();
     box.min.set(minX, minHeight, minZ);
