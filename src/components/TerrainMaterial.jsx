@@ -109,27 +109,25 @@ vec3 displaceTerrainVertex(vec3 localPos) {
 `
     );
 
-    // Replace position transformation: displace before normal computation
+    // CRITICAL: Replace begin_vertex to inject displacement AFTER Three.js initializes transformed
     // The position attribute contains normalized grid coordinates [0,1] for XZ, Y=0
-    // We compute world position with height, then set transformed to object-space
-    // Since mesh is at world origin, object-space = world-space
+    // We must override transformed AFTER Three.js sets it up in begin_vertex
     shader.vertexShader = shader.vertexShader.replace(
-      "#include <beginnormal_vertex>",
-      `// Displace terrain vertex: convert normalized grid to world position with height
-vec3 terrainWorldPos = displaceTerrainVertex(position);
-// Set transformed to object-space (equals world-space since mesh is at origin)
-transformed = terrainWorldPos;
-
-#include <beginnormal_vertex>
+      "#include <begin_vertex>",
+      `#include <begin_vertex>
+// Override transformed AFTER Three.js setup with terrain displacement
+// transformed is now the world position (since mesh is at origin with no rotation/scale)
+transformed = displaceTerrainVertex(position);
 `
     );
 
     // Replace normal computation to use terrain normal
-    // Compute normal from world position using finite differences
+    // Use transformed (which is now the world position) for normal calculation
     shader.vertexShader = shader.vertexShader.replace(
       "#include <defaultnormal_vertex>",
       `// Compute terrain normal using finite differences
-vec3 terrainNormal = computeTerrainNormal(terrainWorldPos);
+// transformed contains the world position after displacement
+vec3 terrainNormal = computeTerrainNormal(transformed);
 objectNormal = terrainNormal;
 
 #include <defaultnormal_vertex>

@@ -720,7 +720,7 @@ export default function Experience() {
           }}
         />
         <UnifiedCrystalClusters />
-        <Butterfly />
+        {/* <Butterfly /> */}
         <IntroText />
       </Suspense>
 
