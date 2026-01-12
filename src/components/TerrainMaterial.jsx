@@ -25,9 +25,12 @@ export function createTerrainMaterial() {
   const params = getTerrainParams();
 
   // Patch the material with onBeforeCompile
+  // CRITICAL: Use arrow function to capture 'material' reference correctly
+  // When material is cloned, each clone gets its own onBeforeCompile that references its own userData
   const prevOnBeforeCompile = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    if (prevOnBeforeCompile) prevOnBeforeCompile(shader, renderer);
+  material.onBeforeCompile = function(shader, renderer) {
+    // 'this' refers to the material instance (works correctly with cloned materials)
+    if (prevOnBeforeCompile) prevOnBeforeCompile.call(this, shader, renderer);
 
     // Add terrain height uniforms
     shader.uniforms.uTerrainElevation = { value: params.elevation };
@@ -45,22 +48,24 @@ export function createTerrainMaterial() {
     shader.uniforms.uTileSize = { value: 4.0 };
     shader.uniforms.uLatticeStep = { value: 0.1 };
     
-    // Read per-tile uniforms from material.userData (set by updateTerrainTileUniforms)
+    // CRITICAL: Read per-tile uniforms from 'this' (the material instance)
     // Each tile has its own cloned material, so tileUniforms are stored per-material
-    if (material.userData.tileUniforms) {
-      const tileUniforms = material.userData.tileUniforms;
+    // Use 'this' instead of 'material' to ensure we read from the cloned material's userData
+    if (this.userData.tileUniforms) {
+      const tileUniforms = this.userData.tileUniforms;
       shader.uniforms.uTileMin.value.copy(tileUniforms.uTileMin);
       shader.uniforms.uTileSize.value = tileUniforms.uTileSize;
       shader.uniforms.uLatticeStep.value = tileUniforms.uLatticeStep;
     }
     
     // Store uniform references in material for runtime updates
-    if (!material.userData.shaderUniforms) {
-      material.userData.shaderUniforms = {};
+    // Use 'this' to ensure we store in the correct material instance
+    if (!this.userData.shaderUniforms) {
+      this.userData.shaderUniforms = {};
     }
-    material.userData.shaderUniforms.uTileMin = shader.uniforms.uTileMin;
-    material.userData.shaderUniforms.uTileSize = shader.uniforms.uTileSize;
-    material.userData.shaderUniforms.uLatticeStep = shader.uniforms.uLatticeStep;
+    this.userData.shaderUniforms.uTileMin = shader.uniforms.uTileMin;
+    this.userData.shaderUniforms.uTileSize = shader.uniforms.uTileSize;
+    this.userData.shaderUniforms.uLatticeStep = shader.uniforms.uLatticeStep;
 
     // Inject terrain height module after common includes
     shader.vertexShader = shader.vertexShader.replace(

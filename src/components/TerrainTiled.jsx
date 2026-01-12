@@ -375,6 +375,21 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     // Clone material per tile to support per-tile uniforms
     const tileMaterial = baseMaterial.clone();
     
+    // CRITICAL: Set per-tile uniforms BEFORE creating mesh
+    // This ensures tileUniforms are set before onBeforeCompile is called
+    const { minX, minZ, maxX, maxZ } = bounds ?? math.tileBounds(rec.ix, rec.iz);
+    const tileSize = maxX - minX; // Assuming square tiles
+    const seg = Math.max(2, resolution | 0);
+    const latticeStep = tileSize / seg;
+    
+    // Set tile uniforms in material.userData BEFORE mesh creation
+    // This ensures onBeforeCompile can read them when shader compiles
+    tileMaterial.userData.tileUniforms = {
+      uTileMin: new THREE.Vector2(minX, minZ),
+      uTileSize: tileSize,
+      uLatticeStep: latticeStep,
+    };
+    
     const mesh = new THREE.Mesh(geom, tileMaterial);
     
     // CRITICAL: GPU terrain requires identity transform (position=[0,0,0], no rotation/scale)
@@ -392,12 +407,8 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     // If DistanceFade fails to patch, tiles will still render (better than invisible)
     mesh.visible = true;
 
-    // Set per-tile uniforms for GPU displacement
-    const { minX, minZ, maxX, maxZ } = bounds ?? math.tileBounds(rec.ix, rec.iz);
-    const tileSize = maxX - minX; // Assuming square tiles
-    const seg = Math.max(2, resolution | 0);
-    const latticeStep = tileSize / seg;
-    
+    // Also call updateTerrainTileUniforms to update uniforms if shader is already compiled
+    // and to store references in mesh.userData
     updateTerrainTileUniforms(mesh, minX, minZ, tileSize, latticeStep);
 
     // Compute conservative bounding volumes (XZ from tile bounds, Y from terrain params)
