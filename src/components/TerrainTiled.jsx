@@ -344,7 +344,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const dz = (maxZ - minZ) / seg;
 
     // First pass: compute all positions and store heights, track minY/maxY
-    const heights = new Array(vertsX * vertsZ);
+    const heights = new Float32Array(vertsX * vertsZ);
     let p = 0;
     let minY = Infinity;
     let maxY = -Infinity;

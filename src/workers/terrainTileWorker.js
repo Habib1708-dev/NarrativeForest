@@ -17,7 +17,7 @@ const buildTile = (payload) => {
     const dz = (maxZ - minZ) / seg;
 
     // First pass: compute all positions and track minY/maxY for bounding box
-    const heights = new Array(vertsX * vertsZ);
+    const heights = new Float32Array(vertsX * vertsZ);
     let cursor = 0;
     let minY = Infinity;
     let maxY = -Infinity;
