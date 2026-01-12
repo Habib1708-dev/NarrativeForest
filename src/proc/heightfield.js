@@ -99,7 +99,7 @@ function plateauize(h, threshold, smoothing) {
 const params = {
   elevation: 7,
   frequency: 0.004,
-  octaves: 8,
+  octaves: 2,
   seed: 2.2,
   scale: 5,
   plateauHeight: 0.0,
