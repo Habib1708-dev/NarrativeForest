@@ -16,6 +16,7 @@ import {
 } from "../proc/heightfield";
 import { usePerformanceMonitor } from "../utils/usePerformanceMonitor";
 import performanceMonitor from "../utils/performanceMonitor";
+import { createTerrainMaterial, updateTerrainTileUniforms } from "./TerrainMaterial";
 
 /**
  * TerrainTiled — forwardRef so other systems (Forest/Fog) can raycast recursively.
@@ -72,16 +73,14 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     prefetch,
   });
 
-  const sharedMaterial = useMemo(() => {
+  // Base material template - will be cloned per tile for per-tile uniforms
+  const baseMaterial = useMemo(() => {
     if (materialFactory) {
       const mat = materialFactory();
       if (mat?.isMaterial) return mat;
     }
-    return new THREE.MeshStandardMaterial({
-      color: "#0a0a0a",
-      roughness: 1,
-      metalness: 0,
-    });
+    // Use GPU terrain material by default
+    return createTerrainMaterial();
   }, [materialFactory]);
 
   const heightCacheRef = useRef(new Map());
@@ -209,7 +208,10 @@ const TerrainTiled = forwardRef(function TerrainTiled(
           releaseGeometry(geom);
           return;
         }
-        mountTileMesh(rec, geom);
+        // For GPU terrain, we ignore worker-generated positions/normals
+        // Worker path is kept for fallback but GPU path doesn't use it
+        const bounds = math.tileBounds(rec.ix, rec.iz);
+        mountTileMesh(rec, geom, bounds);
       } else if (data.type === "build-error") {
         // Ensure key is a string to prevent type mismatches
         if (typeof data.key !== "string") {
@@ -279,13 +281,34 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       if (geom) geom.dispose();
     }
 
-    // No matching geometry in pool, create a new one
+    // Create flat grid geometry: positions in [0, tileSize] range, Y=0
+    // GPU shader will displace vertices
     const geom = new THREE.BufferGeometry();
     const pos = new Float32Array(vertsX * vertsZ * 3);
     const posAttr = new THREE.BufferAttribute(pos, 3);
+    
+    // Fill with flat grid coordinates (normalized to [0,1] range)
+    // Actual world coordinates computed in shader using uTileMin + localPos * uTileSize
+    let p = 0;
+    for (let z = 0; z < vertsZ; z++) {
+      for (let x = 0; x < vertsX; x++) {
+        // Store normalized coordinates [0,1] for X and Z, Y=0
+        pos[p++] = x / seg; // normalized X: [0, 1]
+        pos[p++] = 0.0;     // Y: flat plane, GPU will displace
+        pos[p++] = z / seg; // normalized Z: [0, 1]
+      }
+    }
+    
     geom.setAttribute("position", posAttr);
 
+    // Normals will be computed in GPU shader, but we need the attribute
     const norm = new Float32Array(vertsX * vertsZ * 3);
+    // Initialize to up vector (will be overwritten by shader)
+    for (let i = 0; i < norm.length; i += 3) {
+      norm[i] = 0;
+      norm[i + 1] = 1;
+      norm[i + 2] = 0;
+    }
     const normAttr = new THREE.BufferAttribute(norm, 3);
     geom.setAttribute("normal", normAttr);
 
@@ -321,14 +344,46 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     geometryPoolRef.current.push(geom);
   };
 
-  const mountTileMesh = (rec, geom) => {
-    // Normals and bounding volumes are already computed, skip compute calls
-
-    const mesh = new THREE.Mesh(geom, sharedMaterial);
+  const mountTileMesh = (rec, geom, bounds) => {
+    // Clone material per tile to support per-tile uniforms
+    const tileMaterial = baseMaterial.clone();
+    
+    const mesh = new THREE.Mesh(geom, tileMaterial);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.frustumCulled = true;
     mesh.visible = false; // stay hidden until DistanceFade patches fade logic
+
+    // Set per-tile uniforms for GPU displacement
+    const { minX, minZ, maxX, maxZ } = bounds ?? math.tileBounds(rec.ix, rec.iz);
+    const tileSize = maxX - minX; // Assuming square tiles
+    const seg = Math.max(2, resolution | 0);
+    const latticeStep = tileSize / seg;
+    
+    updateTerrainTileUniforms(mesh, minX, minZ, tileSize, latticeStep);
+
+    // Compute conservative bounding volumes (XZ from tile bounds, Y from terrain params)
+    // For GPU terrain, we use a safe Y range since we don't compute exact heights on CPU
+    const params = getTerrainParams();
+    const maxHeight = params.elevation + params.baseHeight + Math.abs(params.worldYOffset) + 5; // conservative upper bound
+    const minHeight = params.worldYOffset - 5; // conservative lower bound
+    
+    const box = geom.boundingBox || new THREE.Box3();
+    box.min.set(minX, minHeight, minZ);
+    box.max.set(maxX, maxHeight, maxZ);
+    geom.boundingBox = box;
+
+    const centerX = (minX + maxX) * 0.5;
+    const centerY = (minHeight + maxHeight) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
+    const dxBox = maxX - minX;
+    const dyBox = maxHeight - minHeight;
+    const dzBox = maxZ - minZ;
+    const radius = Math.sqrt(dxBox * dxBox + dyBox * dyBox + dzBox * dzBox) * 0.5;
+    const sphere = geom.boundingSphere || new THREE.Sphere();
+    sphere.center.set(centerX, centerY, centerZ);
+    sphere.radius = radius;
+    geom.boundingSphere = sphere;
 
     groupRef.current?.add(mesh);
     rec.mesh = mesh;
@@ -352,111 +407,9 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   };
 
   const buildTileGeometry = (ix, iz, boundsOverride) => {
-    const { minX, minZ, maxX, maxZ } =
-      boundsOverride ?? math.tileBounds(ix, iz);
-    const seg = Math.max(2, resolution | 0);
+    // For GPU terrain, we just create a flat grid geometry
+    // Heights and normals are computed in the GPU shader
     const geom = acquireGeometry();
-    const { vertsX, vertsZ } = geom.userData._poolMeta;
-
-    const pos = geom.attributes.position.array;
-    const norm = geom.attributes.normal.array;
-    const dx = (maxX - minX) / seg;
-    const dz = (maxZ - minZ) / seg;
-
-    // First pass: compute all positions and store heights, track minY/maxY
-    const heights = new Float32Array(vertsX * vertsZ);
-    let p = 0;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (let z = 0; z < vertsZ; z++) {
-      const wz = minZ + z * dz;
-      for (let x = 0; x < vertsX; x++) {
-        const wx = minX + x * dx;
-        const wy = sampleHeightCached(wx, wz);
-        heights[z * vertsX + x] = wy;
-        if (wy < minY) minY = wy;
-        if (wy > maxY) maxY = wy;
-        pos[p++] = wx;
-        pos[p++] = wy;
-        pos[p++] = wz;
-      }
-    }
-
-    // Second pass: compute normals using finite differences
-    for (let z = 0; z < vertsZ; z++) {
-      for (let x = 0; x < vertsX; x++) {
-        const idx = z * vertsX + x;
-        let ddx, ddz;
-
-        // Compute gradient in X direction using central differences
-        if (x === 0) {
-          // Left edge: forward difference
-          const h0 = heights[idx];
-          const h1 = heights[z * vertsX + (x + 1)];
-          ddx = (h1 - h0) / dx;
-        } else if (x === vertsX - 1) {
-          // Right edge: backward difference
-          const h0 = heights[idx];
-          const h1 = heights[z * vertsX + (x - 1)];
-          ddx = (h0 - h1) / dx;
-        } else {
-          // Interior: central difference
-          const h1 = heights[z * vertsX + (x + 1)];
-          const h0 = heights[z * vertsX + (x - 1)];
-          ddx = (h1 - h0) / (2 * dx);
-        }
-
-        // Compute gradient in Z direction using central differences
-        if (z === 0) {
-          // Top edge: forward difference
-          const h0 = heights[idx];
-          const h1 = heights[(z + 1) * vertsX + x];
-          ddz = (h1 - h0) / dz;
-        } else if (z === vertsZ - 1) {
-          // Bottom edge: backward difference
-          const h0 = heights[idx];
-          const h1 = heights[(z - 1) * vertsX + x];
-          ddz = (h0 - h1) / dz;
-        } else {
-          // Interior: central difference
-          const h1 = heights[(z + 1) * vertsX + x];
-          const h0 = heights[(z - 1) * vertsX + x];
-          ddz = (h1 - h0) / (2 * dz);
-        }
-
-        // Compute normal vector: normal = normalize([-ddx, 1, -ddz])
-        const nx = -ddx;
-        const ny = 1;
-        const nz = -ddz;
-        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-        const invLen = len > 0 ? 1 / len : 1;
-
-        const normalIdx = idx * 3;
-        norm[normalIdx] = nx * invLen;
-        norm[normalIdx + 1] = ny * invLen;
-        norm[normalIdx + 2] = nz * invLen;
-      }
-    }
-
-    // Compute bounding box from known tile bounds and tracked Y range
-    const box = geom.boundingBox || new THREE.Box3();
-    box.min.set(minX, minY, minZ);
-    box.max.set(maxX, maxY, maxZ);
-    geom.boundingBox = box;
-
-    // Compute bounding sphere from bounding box
-    const centerX = (minX + maxX) * 0.5;
-    const centerY = (minY + maxY) * 0.5;
-    const centerZ = (minZ + maxZ) * 0.5;
-    const dxBox = maxX - minX;
-    const dyBox = maxY - minY;
-    const dzBox = maxZ - minZ;
-    const radius = Math.sqrt(dxBox * dxBox + dyBox * dyBox + dzBox * dzBox) * 0.5;
-    const sphere = geom.boundingSphere || new THREE.Sphere();
-    sphere.center.set(centerX, centerY, centerZ);
-    sphere.radius = radius;
-    geom.boundingSphere = sphere;
-
     geom.attributes.position.needsUpdate = true;
     geom.attributes.normal.needsUpdate = true;
     return geom;
@@ -579,7 +532,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
 
       rec.state = "building";
       const geom = buildTileGeometry(rec.ix, rec.iz, job.bounds);
-      mountTileMesh(rec, geom);
+      mountTileMesh(rec, geom, job.bounds);
     }
   });
 
