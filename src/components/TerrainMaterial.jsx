@@ -12,16 +12,11 @@ import terrainHeightGlsl from "../shaders/includes/terrainHeight.glsl?raw";
  * - Computes normals using finite differences
  */
 export function createTerrainMaterial() {
-  // TEMPORARY: Bright material for visibility sanity check
-  // If terrain appears with this, shader is compiling correctly and issue is lighting/color
   const material = new THREE.MeshStandardMaterial({
-    color: "#ffffff",
+    color: "#0a0a0a",
     roughness: 1,
     metalness: 0,
-    emissive: new THREE.Color("#333333"),
-    emissiveIntensity: 1,
   });
-  material.side = THREE.DoubleSide;
 
   // Mark as terrain material for uniform updates
   material.userData.isTerrainMaterial = true;
