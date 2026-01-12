@@ -171,6 +171,33 @@ const TerrainTiled = forwardRef(function TerrainTiled(
         targetNorm.set(incomingNorm);
         geom.attributes.position.needsUpdate = true;
         geom.attributes.normal.needsUpdate = true;
+
+        // Set bounding volumes directly from worker-computed values
+        if (data.boundingBox) {
+          const box = geom.boundingBox || new THREE.Box3();
+          box.min.set(
+            data.boundingBox.minX,
+            data.boundingBox.minY,
+            data.boundingBox.minZ
+          );
+          box.max.set(
+            data.boundingBox.maxX,
+            data.boundingBox.maxY,
+            data.boundingBox.maxZ
+          );
+          geom.boundingBox = box;
+        }
+        if (data.boundingSphere) {
+          const sphere = geom.boundingSphere || new THREE.Sphere();
+          sphere.center.set(
+            data.boundingSphere.center.x,
+            data.boundingSphere.center.y,
+            data.boundingSphere.center.z
+          );
+          sphere.radius = data.boundingSphere.radius;
+          geom.boundingSphere = sphere;
+        }
+
         const rec = tiles.current.get(data.key);
         if (!rec || rec.state !== "building") {
           releaseGeometry(geom);
@@ -269,9 +296,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   };
 
   const mountTileMesh = (rec, geom) => {
-    // Normals are already computed in the worker, skip computeVertexNormals()
-    geom.computeBoundingBox();
-    geom.computeBoundingSphere();
+    // Normals and bounding volumes are already computed, skip compute calls
 
     const mesh = new THREE.Mesh(geom, sharedMaterial);
     mesh.receiveShadow = true;
@@ -312,15 +337,19 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const dx = (maxX - minX) / seg;
     const dz = (maxZ - minZ) / seg;
 
-    // First pass: compute all positions and store heights
+    // First pass: compute all positions and store heights, track minY/maxY
     const heights = new Array(vertsX * vertsZ);
     let p = 0;
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (let z = 0; z < vertsZ; z++) {
       const wz = minZ + z * dz;
       for (let x = 0; x < vertsX; x++) {
         const wx = minX + x * dx;
         const wy = sampleHeightCached(wx, wz);
         heights[z * vertsX + x] = wy;
+        if (wy < minY) minY = wy;
+        if (wy > maxY) maxY = wy;
         pos[p++] = wx;
         pos[p++] = wy;
         pos[p++] = wz;
@@ -382,6 +411,25 @@ const TerrainTiled = forwardRef(function TerrainTiled(
         norm[normalIdx + 2] = nz * invLen;
       }
     }
+
+    // Compute bounding box from known tile bounds and tracked Y range
+    const box = geom.boundingBox || new THREE.Box3();
+    box.min.set(minX, minY, minZ);
+    box.max.set(maxX, maxY, maxZ);
+    geom.boundingBox = box;
+
+    // Compute bounding sphere from bounding box
+    const centerX = (minX + maxX) * 0.5;
+    const centerY = (minY + maxY) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
+    const dxBox = maxX - minX;
+    const dyBox = maxY - minY;
+    const dzBox = maxZ - minZ;
+    const radius = Math.sqrt(dxBox * dxBox + dyBox * dyBox + dzBox * dzBox) * 0.5;
+    const sphere = geom.boundingSphere || new THREE.Sphere();
+    sphere.center.set(centerX, centerY, centerZ);
+    sphere.radius = radius;
+    geom.boundingSphere = sphere;
 
     geom.attributes.position.needsUpdate = true;
     geom.attributes.normal.needsUpdate = true;

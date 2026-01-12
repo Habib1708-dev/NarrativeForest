@@ -16,20 +16,50 @@ const buildTile = (payload) => {
     const dx = (maxX - minX) / seg;
     const dz = (maxZ - minZ) / seg;
 
-    // First pass: compute all positions
+    // First pass: compute all positions and track minY/maxY for bounding box
     const heights = new Array(vertsX * vertsZ);
     let cursor = 0;
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (let z = 0; z < vertsZ; z++) {
       const wz = minZ + z * dz;
       for (let x = 0; x < vertsX; x++) {
         const wx = minX + x * dx;
         const wy = heightAt(wx, wz);
         heights[z * vertsX + x] = wy;
+        if (wy < minY) minY = wy;
+        if (wy > maxY) maxY = wy;
         positions[cursor++] = wx;
         positions[cursor++] = wy;
         positions[cursor++] = wz;
       }
     }
+
+    // Compute bounding box from known tile bounds and tracked Y range
+    const boundingBox = {
+      minX,
+      minY,
+      minZ,
+      maxX,
+      maxY,
+      maxZ,
+    };
+
+    // Compute bounding sphere from bounding box
+    // Center is the midpoint of the bounding box
+    const centerX = (minX + maxX) * 0.5;
+    const centerY = (minY + maxY) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
+    // Radius is half the diagonal of the bounding box
+    const dxBox = maxX - minX;
+    const dyBox = maxY - minY;
+    const dzBox = maxZ - minZ;
+    const radius = Math.sqrt(dxBox * dxBox + dyBox * dyBox + dzBox * dzBox) * 0.5;
+
+    const boundingSphere = {
+      center: { x: centerX, y: centerY, z: centerZ },
+      radius,
+    };
 
     // Second pass: compute normals using finite differences
     for (let z = 0; z < vertsZ; z++) {
@@ -93,6 +123,8 @@ const buildTile = (payload) => {
         key,
         positions: positions.buffer,
         normals: normals.buffer,
+        boundingBox,
+        boundingSphere,
       },
       [positions.buffer, normals.buffer]
     );
