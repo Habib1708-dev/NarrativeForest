@@ -432,14 +432,15 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     }
   };
 
-  const flushPendingWorkerJobs = () => {
+  // Use function declaration (hoisted) so it can be called before its declaration
+  function flushPendingWorkerJobs() {
     if (!pendingWorkerJobsRef.current.size) return;
     const pending = Array.from(pendingWorkerJobsRef.current.values());
     pendingWorkerJobsRef.current.clear();
     for (let i = pending.length - 1; i >= 0; i -= 1) {
       buildQueue.current.unshift(pending[i]);
     }
-  };
+  }
 
   const buildTileGeometry = (ix, iz, boundsOverride) => {
     // For GPU terrain, we just create a flat grid geometry
