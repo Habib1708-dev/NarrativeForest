@@ -57,6 +57,23 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   const firstTileStartedRef = useRef(false);
   const firstTileDoneRef = useRef(false);
 
+  // Base material template - will be cloned per tile for per-tile uniforms
+  const baseMaterial = useMemo(() => {
+    if (materialFactory) {
+      const mat = materialFactory();
+      if (mat?.isMaterial) return mat;
+    }
+    // Use GPU terrain material by default
+    return createTerrainMaterial();
+  }, [materialFactory]);
+
+  // CRITICAL: Detect if we're using GPU terrain material
+  // GPU terrain uses normalized [0,1] grid and must NOT use worker
+  // Must be declared before canUseWorker to avoid "used before initialization" error
+  const gpuTerrainEnabled = useMemo(() => {
+    return baseMaterial?.userData?.isTerrainMaterial === true;
+  }, [baseMaterial]);
+
   // CRITICAL: Disable worker when GPU terrain is enabled
   // GPU terrain uses normalized [0,1] grid - worker would overwrite it with world positions
   const canUseWorker = useMemo(() => {
@@ -79,22 +96,6 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     dropRadius,
     prefetch,
   });
-
-  // Base material template - will be cloned per tile for per-tile uniforms
-  const baseMaterial = useMemo(() => {
-    if (materialFactory) {
-      const mat = materialFactory();
-      if (mat?.isMaterial) return mat;
-    }
-    // Use GPU terrain material by default
-    return createTerrainMaterial();
-  }, [materialFactory]);
-
-  // CRITICAL: Detect if we're using GPU terrain material
-  // GPU terrain uses normalized [0,1] grid and must NOT use worker
-  const gpuTerrainEnabled = useMemo(() => {
-    return baseMaterial?.userData?.isTerrainMaterial === true;
-  }, [baseMaterial]);
 
   const heightCacheRef = useRef(new Map());
   useEffect(() => {
@@ -200,30 +201,33 @@ const TerrainTiled = forwardRef(function TerrainTiled(
           geom.attributes.normal.needsUpdate = true;
         }
 
-        // Set bounding volumes directly from worker-computed values
-        if (data.boundingBox) {
-          const box = geom.boundingBox || new THREE.Box3();
-          box.min.set(
-            data.boundingBox.minX,
-            data.boundingBox.minY,
-            data.boundingBox.minZ
-          );
-          box.max.set(
-            data.boundingBox.maxX,
-            data.boundingBox.maxY,
-            data.boundingBox.maxZ
-          );
-          geom.boundingBox = box;
-        }
-        if (data.boundingSphere) {
-          const sphere = geom.boundingSphere || new THREE.Sphere();
-          sphere.center.set(
-            data.boundingSphere.center.x,
-            data.boundingSphere.center.y,
-            data.boundingSphere.center.z
-          );
-          sphere.radius = data.boundingSphere.radius;
-          geom.boundingSphere = sphere;
+        // Set bounding volumes from worker-computed values (CPU mode only)
+        // In GPU mode, ignore worker bounds and use conservative bounds from mountTileMesh
+        if (!gpuTerrainEnabled) {
+          if (data.boundingBox) {
+            const box = geom.boundingBox || new THREE.Box3();
+            box.min.set(
+              data.boundingBox.minX,
+              data.boundingBox.minY,
+              data.boundingBox.minZ
+            );
+            box.max.set(
+              data.boundingBox.maxX,
+              data.boundingBox.maxY,
+              data.boundingBox.maxZ
+            );
+            geom.boundingBox = box;
+          }
+          if (data.boundingSphere) {
+            const sphere = geom.boundingSphere || new THREE.Sphere();
+            sphere.center.set(
+              data.boundingSphere.center.x,
+              data.boundingSphere.center.y,
+              data.boundingSphere.center.z
+            );
+            sphere.radius = data.boundingSphere.radius;
+            geom.boundingSphere = sphere;
+          }
         }
 
         const rec = tiles.current.get(data.key);
