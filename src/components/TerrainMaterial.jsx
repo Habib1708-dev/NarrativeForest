@@ -121,16 +121,24 @@ transformed = displaceTerrainVertex(position);
 `
     );
 
-    // Replace normal computation to use terrain normal
+    // CRITICAL: Completely replace defaultnormal_vertex - do NOT include it after setting normals
     // Use transformed (which is now the world position) for normal calculation
     shader.vertexShader = shader.vertexShader.replace(
       "#include <defaultnormal_vertex>",
       `// Compute terrain normal using finite differences
 // transformed contains the world position after displacement
 vec3 terrainNormal = computeTerrainNormal(transformed);
-objectNormal = terrainNormal;
+vec3 objectNormal = terrainNormal;
 
-#include <defaultnormal_vertex>
+// Transform normal to world space (matching Three.js defaultnormal_vertex behavior)
+vec3 transformedNormal = objectNormal;
+#ifdef FLIP_SIDED
+  transformedNormal = -transformedNormal;
+#endif
+#ifdef USE_TANGENT
+  vec3 transformedTangent = normalize(tangent.xyz);
+  vec3 transformedBitangent = normalize(cross(transformedNormal, transformedTangent) * tangent.w);
+#endif
 `
     );
   };
