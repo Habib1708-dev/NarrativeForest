@@ -269,7 +269,13 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const normAttr = new THREE.BufferAttribute(norm, 3);
     geom.setAttribute("normal", normAttr);
 
-    const idx = new Uint32Array(seg * seg * 6);
+    // Use Uint16Array when vertex count < 65536 to reduce memory usage
+    const vertexCount = vertsX * vertsZ;
+    const indexCount = seg * seg * 6;
+    const idx =
+      vertexCount < 65536
+        ? new Uint16Array(indexCount)
+        : new Uint32Array(indexCount);
     let t = 0;
     for (let z = 0; z < seg; z++) {
       for (let x = 0; x < seg; x++) {
