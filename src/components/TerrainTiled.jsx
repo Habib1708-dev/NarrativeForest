@@ -145,6 +145,12 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       const data = event.data;
       if (!data) return;
       if (data.type === "build-complete") {
+        // Ensure key is a string to prevent type mismatches
+        if (typeof data.key !== "string") {
+          console.error("TerrainTiled: received non-string key from worker", data.key);
+          workerErrorCountRef.current += 1;
+          return;
+        }
         const job = pendingWorkerJobsRef.current.get(data.key);
         pendingWorkerJobsRef.current.delete(data.key);
         if (!job) return;
@@ -205,6 +211,12 @@ const TerrainTiled = forwardRef(function TerrainTiled(
         }
         mountTileMesh(rec, geom);
       } else if (data.type === "build-error") {
+        // Ensure key is a string to prevent type mismatches
+        if (typeof data.key !== "string") {
+          console.error("TerrainTiled: received non-string key in error from worker", data.key);
+          workerErrorCountRef.current += 1;
+          return;
+        }
         workerErrorCountRef.current += 1;
         const job = pendingWorkerJobsRef.current.get(data.key);
         pendingWorkerJobsRef.current.delete(data.key);
@@ -453,6 +465,11 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   useEffect(() => {
     // Enqueue newly required tiles
     required.forEach((key) => {
+      // Ensure key is a string (tile keys must be strings like "ix,iz")
+      if (typeof key !== "string") {
+        console.error("TerrainTiled: required set contains non-string key", key, typeof key);
+        return;
+      }
       if (tiles.current.has(key)) return;
       const [ix, iz] = math.parse(key);
       const bounds = math.tileBounds(ix, iz);
@@ -520,6 +537,11 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     while (q.length && (unlimited || performance.now() - frameStart < budget)) {
       const job = q.shift();
       if (!job) break;
+      // Ensure job.key is a string
+      if (typeof job.key !== "string") {
+        console.error("TerrainTiled: job has non-string key", job.key, typeof job.key);
+        continue;
+      }
       const rec = tiles.current.get(job.key);
       if (!rec || rec.state !== "queued") continue;
 
@@ -531,6 +553,13 @@ const TerrainTiled = forwardRef(function TerrainTiled(
 
         rec.state = "building";
         rec.lastTouched = performance.now();
+        // Ensure key is a string before sending to worker
+        if (typeof rec.key !== "string") {
+          console.error("TerrainTiled: tile key is not a string", rec.key, typeof rec.key);
+          rec.state = "queued";
+          q.unshift(job);
+          continue;
+        }
         pendingWorkerJobsRef.current.set(rec.key, job);
         workerRef.current.postMessage({
           type: "build",
