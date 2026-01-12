@@ -87,7 +87,13 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   const heightCacheRef = useRef(new Map());
   useEffect(() => {
     heightCacheRef.current.clear();
-  }, [sampleHeight, tileSize, resolution]);
+  }, [sampleHeight, tileSize, resolution, anchorMinX, anchorMinZ]);
+
+  // Calculate lattice step size for cache key generation
+  const latticeStep = useMemo(() => {
+    const seg = Math.max(2, resolution | 0);
+    return tileSize / seg;
+  }, [tileSize, resolution]);
 
   const geometryPoolRef = useRef([]);
   useEffect(() => {
@@ -199,11 +205,19 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     };
   }, [canUseWorker]);
 
-  const precisionFactor = 1e5;
+  // Convert world coordinates to lattice coordinates and pack into integer key
   const sampleHeightCached = (x, z) => {
-    const keyX = Math.round(x * precisionFactor);
-    const keyZ = Math.round(z * precisionFactor);
-    const key = keyX + ":" + keyZ;
+    // Convert to lattice coordinates: ix = round((x - anchorMinX) / step)
+    const ix = Math.round((x - anchorMinX) / latticeStep);
+    const iz = Math.round((z - anchorMinZ) / latticeStep);
+    
+    // Pack two integers into a single number using multiplication
+    // Using 0x1000000 (2^24) as multiplier gives ±8M range per coordinate
+    // Add offset (2^23) to handle negative coordinates safely
+    // JavaScript numbers can safely represent integers up to 2^53, so this is safe
+    const OFFSET = 0x800000; // 2^23, to shift negatives to positive range
+    const key = (ix + OFFSET) * 0x1000000 + (iz + OFFSET);
+    
     const cache = heightCacheRef.current;
     if (cache.has(key)) return cache.get(key);
     const value = sampleHeight(x, z);
