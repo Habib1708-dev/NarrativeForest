@@ -1,10 +1,14 @@
 // Shared terrain height function matching heightfield.js exactly
 // This module must produce bit-exact results with the CPU version
+//
+// NOTE: Simplex noise implementation is included here (inside the guard) to avoid
+// conflicts with other shaders that may include simplexNoise2d.glsl separately.
+// The #ifndef guard ensures this file can be included multiple times safely.
 
 #ifndef TERRAIN_HEIGHT_GLSL
 #define TERRAIN_HEIGHT_GLSL
 
-// Simplex 2D noise implementation (inlined)
+// Simplex 2D noise implementation (inlined, self-contained)
 vec4 mod289(vec4 x) {
   return x - floor(x * (1.0 / 289.0)) * 289.0;
 }

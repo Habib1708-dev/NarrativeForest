@@ -57,12 +57,19 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   const firstTileStartedRef = useRef(false);
   const firstTileDoneRef = useRef(false);
 
+  // CRITICAL: Disable worker when GPU terrain is enabled
+  // GPU terrain uses normalized [0,1] grid - worker would overwrite it with world positions
   const canUseWorker = useMemo(() => {
+    // GPU terrain mode: never use worker
+    if (gpuTerrainEnabled) {
+      return false;
+    }
+    // CPU fallback mode: use worker if available
     if (typeof window === "undefined" || typeof window.Worker === "undefined") {
       return false;
     }
     return sampleHeight === defaultHeightSampler;
-  }, [sampleHeight]);
+  }, [sampleHeight, gpuTerrainEnabled]);
 
   const { required, retention, math } = useInfiniteTiles({
     tileSize,
@@ -82,6 +89,12 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     // Use GPU terrain material by default
     return createTerrainMaterial();
   }, [materialFactory]);
+
+  // CRITICAL: Detect if we're using GPU terrain material
+  // GPU terrain uses normalized [0,1] grid and must NOT use worker
+  const gpuTerrainEnabled = useMemo(() => {
+    return baseMaterial?.userData?.isTerrainMaterial === true;
+  }, [baseMaterial]);
 
   const heightCacheRef = useRef(new Map());
   useEffect(() => {
@@ -159,23 +172,33 @@ const TerrainTiled = forwardRef(function TerrainTiled(
           return;
         }
         const geom = acquireGeometry();
-        const targetPos = geom.attributes.position.array;
-        const targetNorm = geom.attributes.normal.array;
-        const incomingPos = new Float32Array(data.positions);
-        const incomingNorm = new Float32Array(data.normals);
-        if (
-          targetPos.length !== incomingPos.length ||
-          targetNorm.length !== incomingNorm.length
-        ) {
-          releaseGeometry(geom);
-          workerErrorCountRef.current += 1;
-          buildQueue.current.unshift(job);
-          return;
+        
+        // CRITICAL: In GPU terrain mode, do NOT overwrite normalized grid with worker data
+        // Worker generates world positions, but GPU terrain needs normalized [0,1] coordinates
+        if (gpuTerrainEnabled) {
+          // GPU mode: ignore worker position/normal data, use flat normalized geometry
+          // Geometry already has normalized [0,1] positions from acquireGeometry()
+          // Just use the worker completion as a signal that the job is done
+        } else {
+          // CPU fallback mode: use worker-generated positions and normals
+          const targetPos = geom.attributes.position.array;
+          const targetNorm = geom.attributes.normal.array;
+          const incomingPos = new Float32Array(data.positions);
+          const incomingNorm = new Float32Array(data.normals);
+          if (
+            targetPos.length !== incomingPos.length ||
+            targetNorm.length !== incomingNorm.length
+          ) {
+            releaseGeometry(geom);
+            workerErrorCountRef.current += 1;
+            buildQueue.current.unshift(job);
+            return;
+          }
+          targetPos.set(incomingPos);
+          targetNorm.set(incomingNorm);
+          geom.attributes.position.needsUpdate = true;
+          geom.attributes.normal.needsUpdate = true;
         }
-        targetPos.set(incomingPos);
-        targetNorm.set(incomingNorm);
-        geom.attributes.position.needsUpdate = true;
-        geom.attributes.normal.needsUpdate = true;
 
         // Set bounding volumes directly from worker-computed values
         if (data.boundingBox) {
@@ -244,7 +267,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       workerRef.current = null;
       flushPendingWorkerJobs();
     };
-  }, [canUseWorker]);
+  }, [canUseWorker, gpuTerrainEnabled]);
 
   // Convert world coordinates to lattice coordinates and pack into BigInt key
   const sampleHeightCached = (x, z) => {
@@ -349,6 +372,14 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const tileMaterial = baseMaterial.clone();
     
     const mesh = new THREE.Mesh(geom, tileMaterial);
+    
+    // CRITICAL: GPU terrain requires identity transform (position=[0,0,0], no rotation/scale)
+    // The shader computes world coordinates directly, so mesh must be at origin
+    // DO NOT set mesh.position, mesh.rotation, or mesh.scale - they must remain identity
+    mesh.position.set(0, 0, 0);
+    mesh.rotation.set(0, 0, 0);
+    mesh.scale.set(1, 1, 1);
+    
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.frustumCulled = true;

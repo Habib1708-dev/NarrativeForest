@@ -110,31 +110,36 @@ vec3 displaceTerrainVertex(vec3 localPos) {
 
     // CRITICAL: Replace begin_vertex to inject displacement AFTER Three.js initializes transformed
     // The position attribute contains normalized grid coordinates [0,1] for XZ, Y=0
-    // We compute world coordinates for height sampling, then set transformed to object space
-    // NOTE: Currently assumes mesh has identity transform (at origin, no rotation/scale)
-    // For future transform support, would need to convert worldPos back to object space
+    // 
+    // COORDINATE SPACE CONSTRAINT (Option A - Enforced):
+    // Tile meshes MUST remain at identity transform (position=[0,0,0], no rotation, no scale).
+    // The shader computes world coordinates directly and sets transformed to world space.
+    // If tiles/group are ever moved/rotated/scaled, this will break and Option B must be implemented.
+    //
+    // We compute world coordinates for height sampling, then set transformed to world space
+    // (which equals object space since mesh has identity transform).
     shader.vertexShader = shader.vertexShader.replace(
       "#include <begin_vertex>",
       `#include <begin_vertex>
-// Compute world coordinates for terrain height sampling
+// Compute world coordinates for terrain height sampling (reused for normal calculation)
 vec3 worldPos = displaceTerrainVertex(position);
-// Set transformed to object space coordinates
-// Since mesh is at origin with identity transform, worldPos = objectPos
-// For future: if mesh has transform, convert worldPos to object space via inverse modelMatrix
+// Set transformed to world space coordinates
+// CONSTRAINT: Mesh must have identity transform (at origin, no rotation/scale)
+// For future transform support: convert worldPos to object space via inverse modelMatrix
 transformed = worldPos;
 `
     );
 
     // SAFE: Inject terrain normal assignment AFTER defaultnormal_vertex
     // Do NOT redeclare objectNormal - just assign to it
+    // Reuse worldPos computed above (no duplicate computation)
     // Let Three.js handle the rest of the normal pipeline (normal_vertex, etc.)
     shader.vertexShader = shader.vertexShader.replace(
       "#include <defaultnormal_vertex>",
       `#include <defaultnormal_vertex>
-// Override objectNormal with terrain normal (computed from world position)
-// Compute world position again for normal calculation
-vec3 worldPosForNormal = displaceTerrainVertex(position);
-objectNormal = computeTerrainNormal(worldPosForNormal);
+// Override objectNormal with terrain normal (reuse worldPos from begin_vertex)
+// worldPos is already computed above, so we reuse it here
+objectNormal = computeTerrainNormal(worldPos);
 `
     );
   };
