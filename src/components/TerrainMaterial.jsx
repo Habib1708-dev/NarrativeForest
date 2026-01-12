@@ -29,20 +29,6 @@ export function createTerrainMaterial() {
   material.onBeforeCompile = (shader, renderer) => {
     if (prevOnBeforeCompile) prevOnBeforeCompile(shader, renderer);
 
-    // Get tile uniforms from mesh userData (set by updateTerrainTileUniforms)
-    // This is accessed via the renderer's current render item
-    let tileUniforms = { uTileMin: new THREE.Vector2(), uTileSize: 4.0, uLatticeStep: 0.1 };
-    
-    // Try to get tile uniforms from current render item
-    if (renderer && renderer.info && renderer.info.render) {
-      const renderList = renderer.info.render.frame;
-      if (renderList && renderList.items) {
-        // Find the current mesh being rendered
-        // This is a bit hacky but necessary for per-mesh uniforms with onBeforeCompile
-        // We'll use a different approach: store in material and update per-frame
-      }
-    }
-
     // Add terrain height uniforms
     shader.uniforms.uTerrainElevation = { value: params.elevation };
     shader.uniforms.uTerrainFrequency = { value: params.frequency };
@@ -54,12 +40,21 @@ export function createTerrainMaterial() {
     shader.uniforms.uTerrainBaseHeight = { value: params.baseHeight };
     shader.uniforms.uTerrainWorldYOffset = { value: params.worldYOffset };
 
-    // Per-tile uniforms (default values, updated per-mesh)
+    // Per-tile uniforms (default values, will be overridden if tileUniforms exist)
     shader.uniforms.uTileMin = { value: new THREE.Vector2() };
     shader.uniforms.uTileSize = { value: 4.0 };
     shader.uniforms.uLatticeStep = { value: 0.1 };
     
-    // Store uniform references in material for per-mesh updates
+    // Read per-tile uniforms from material.userData (set by updateTerrainTileUniforms)
+    // Each tile has its own cloned material, so tileUniforms are stored per-material
+    if (material.userData.tileUniforms) {
+      const tileUniforms = material.userData.tileUniforms;
+      shader.uniforms.uTileMin.value.copy(tileUniforms.uTileMin);
+      shader.uniforms.uTileSize.value = tileUniforms.uTileSize;
+      shader.uniforms.uLatticeStep.value = tileUniforms.uLatticeStep;
+    }
+    
+    // Store uniform references in material for runtime updates
     if (!material.userData.shaderUniforms) {
       material.userData.shaderUniforms = {};
     }
@@ -149,22 +144,31 @@ vec3 transformedNormal = objectNormal;
 /**
  * Updates terrain material uniforms for a specific tile.
  * Call this after creating a mesh with the terrain material.
- * Stores uniforms in mesh.userData so they persist across shader recompiles.
+ * 
+ * Strategy: Each tile has its own cloned material, so we store tile uniforms
+ * in both mesh.userData (for reference) and material.userData (for onBeforeCompile access).
  */
 export function updateTerrainTileUniforms(mesh, tileMinX, tileMinZ, tileSize, latticeStep) {
   if (!mesh.material || !mesh.material.userData.isTerrainMaterial) {
     return;
   }
 
-  // Store tile uniforms in mesh userData for access during onBeforeCompile
-  mesh.userData.tileUniforms = {
+  const material = mesh.material;
+  const tileUniforms = {
     uTileMin: new THREE.Vector2(tileMinX, tileMinZ),
     uTileSize: tileSize,
     uLatticeStep: latticeStep,
   };
 
-  // Update uniforms via material.userData.shaderUniforms (set during onBeforeCompile)
-  const material = mesh.material;
+  // Store in mesh.userData for reference (optional, but kept for consistency)
+  mesh.userData.tileUniforms = tileUniforms;
+
+  // CRITICAL: Store in material.userData for onBeforeCompile to read
+  // Since each tile has its own cloned material, this is per-tile data
+  material.userData.tileUniforms = tileUniforms;
+
+  // Also update uniforms directly if shader is already compiled
+  // This handles the case where shader was compiled before tileUniforms were set
   if (material.userData.shaderUniforms) {
     const uniforms = material.userData.shaderUniforms;
     if (uniforms.uTileMin) {
