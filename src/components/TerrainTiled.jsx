@@ -387,7 +387,10 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.frustumCulled = true;
-    mesh.visible = false; // stay hidden until DistanceFade patches fade logic
+    // CRITICAL: Set visible to true immediately for GPU terrain
+    // DistanceFade will patch the material and handle fade logic, but tiles must be visible
+    // If DistanceFade fails to patch, tiles will still render (better than invisible)
+    mesh.visible = true;
 
     // Set per-tile uniforms for GPU displacement
     const { minX, minZ, maxX, maxZ } = bounds ?? math.tileBounds(rec.ix, rec.iz);
