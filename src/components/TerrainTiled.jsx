@@ -232,18 +232,16 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     };
   }, [canUseWorker]);
 
-  // Convert world coordinates to lattice coordinates and pack into integer key
+  // Convert world coordinates to lattice coordinates and pack into BigInt key
   const sampleHeightCached = (x, z) => {
     // Convert to lattice coordinates: ix = round((x - anchorMinX) / step)
     const ix = Math.round((x - anchorMinX) / latticeStep);
     const iz = Math.round((z - anchorMinZ) / latticeStep);
     
-    // Pack two integers into a single number using multiplication
-    // Using 0x1000000 (2^24) as multiplier gives ±8M range per coordinate
-    // Add offset (2^23) to handle negative coordinates safely
-    // JavaScript numbers can safely represent integers up to 2^53, so this is safe
-    const OFFSET = 0x800000; // 2^23, to shift negatives to positive range
-    const key = (ix + OFFSET) * 0x1000000 + (iz + OFFSET);
+    // Pack two integers into BigInt to avoid collisions with large coordinates
+    // Uses 32 bits for each coordinate, giving essentially no collision risk
+    // BigInt is slower than number but avoids string allocations and guarantees correctness
+    const key = (BigInt(ix) << 32n) ^ (BigInt(iz) & 0xffffffffn);
     
     const cache = heightCacheRef.current;
     if (cache.has(key)) return cache.get(key);
