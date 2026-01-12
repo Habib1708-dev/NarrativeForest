@@ -401,10 +401,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     
     mesh.receiveShadow = true;
     mesh.castShadow = false;
-    // CRITICAL: Disable frustum culling for GPU terrain
-    // GPU-displaced vertices can be outside conservative bounding volumes, causing incorrect culling
-    // TODO: Compute accurate bounds by sampling height function at tile corners/edges
-    mesh.frustumCulled = false;
+    mesh.frustumCulled = true;
     // CRITICAL: Set visible to true immediately for GPU terrain
     // DistanceFade will patch the material and handle fade logic, but tiles must be visible
     // If DistanceFade fails to patch, tiles will still render (better than invisible)
