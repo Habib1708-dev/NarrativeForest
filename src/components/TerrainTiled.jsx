@@ -142,22 +142,29 @@ const TerrainTiled = forwardRef(function TerrainTiled(
         const job = pendingWorkerJobsRef.current.get(data.key);
         pendingWorkerJobsRef.current.delete(data.key);
         if (!job) return;
-        if (!data.positions) {
+        if (!data.positions || !data.normals) {
           workerErrorCountRef.current += 1;
           buildQueue.current.unshift(job);
           return;
         }
         const geom = acquireGeometry();
-        const target = geom.attributes.position.array;
-        const incoming = new Float32Array(data.positions);
-        if (target.length !== incoming.length) {
+        const targetPos = geom.attributes.position.array;
+        const targetNorm = geom.attributes.normal.array;
+        const incomingPos = new Float32Array(data.positions);
+        const incomingNorm = new Float32Array(data.normals);
+        if (
+          targetPos.length !== incomingPos.length ||
+          targetNorm.length !== incomingNorm.length
+        ) {
           releaseGeometry(geom);
           workerErrorCountRef.current += 1;
           buildQueue.current.unshift(job);
           return;
         }
-        target.set(incoming);
+        targetPos.set(incomingPos);
+        targetNorm.set(incomingNorm);
         geom.attributes.position.needsUpdate = true;
+        geom.attributes.normal.needsUpdate = true;
         const rec = tiles.current.get(data.key);
         if (!rec || rec.state !== "building") {
           releaseGeometry(geom);
@@ -217,6 +224,10 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const posAttr = new THREE.BufferAttribute(pos, 3);
     geom.setAttribute("position", posAttr);
 
+    const norm = new Float32Array(vertsX * vertsZ * 3);
+    const normAttr = new THREE.BufferAttribute(norm, 3);
+    geom.setAttribute("normal", normAttr);
+
     const idx = new Uint32Array(seg * seg * 6);
     let t = 0;
     for (let z = 0; z < seg; z++) {
@@ -244,7 +255,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   };
 
   const mountTileMesh = (rec, geom) => {
-    geom.computeVertexNormals();
+    // Normals are already computed in the worker, skip computeVertexNormals()
     geom.computeBoundingBox();
     geom.computeBoundingSphere();
 
@@ -283,22 +294,83 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const { vertsX, vertsZ } = geom.userData._poolMeta;
 
     const pos = geom.attributes.position.array;
+    const norm = geom.attributes.normal.array;
     const dx = (maxX - minX) / seg;
     const dz = (maxZ - minZ) / seg;
 
+    // First pass: compute all positions and store heights
+    const heights = new Array(vertsX * vertsZ);
     let p = 0;
     for (let z = 0; z < vertsZ; z++) {
       const wz = minZ + z * dz;
       for (let x = 0; x < vertsX; x++) {
         const wx = minX + x * dx;
         const wy = sampleHeightCached(wx, wz);
+        heights[z * vertsX + x] = wy;
         pos[p++] = wx;
         pos[p++] = wy;
         pos[p++] = wz;
       }
     }
 
+    // Second pass: compute normals using finite differences
+    for (let z = 0; z < vertsZ; z++) {
+      for (let x = 0; x < vertsX; x++) {
+        const idx = z * vertsX + x;
+        let ddx, ddz;
+
+        // Compute gradient in X direction using central differences
+        if (x === 0) {
+          // Left edge: forward difference
+          const h0 = heights[idx];
+          const h1 = heights[z * vertsX + (x + 1)];
+          ddx = (h1 - h0) / dx;
+        } else if (x === vertsX - 1) {
+          // Right edge: backward difference
+          const h0 = heights[idx];
+          const h1 = heights[z * vertsX + (x - 1)];
+          ddx = (h0 - h1) / dx;
+        } else {
+          // Interior: central difference
+          const h1 = heights[z * vertsX + (x + 1)];
+          const h0 = heights[z * vertsX + (x - 1)];
+          ddx = (h1 - h0) / (2 * dx);
+        }
+
+        // Compute gradient in Z direction using central differences
+        if (z === 0) {
+          // Top edge: forward difference
+          const h0 = heights[idx];
+          const h1 = heights[(z + 1) * vertsX + x];
+          ddz = (h1 - h0) / dz;
+        } else if (z === vertsZ - 1) {
+          // Bottom edge: backward difference
+          const h0 = heights[idx];
+          const h1 = heights[(z - 1) * vertsX + x];
+          ddz = (h0 - h1) / dz;
+        } else {
+          // Interior: central difference
+          const h1 = heights[(z + 1) * vertsX + x];
+          const h0 = heights[(z - 1) * vertsX + x];
+          ddz = (h1 - h0) / (2 * dz);
+        }
+
+        // Compute normal vector: normal = normalize([-ddx, 1, -ddz])
+        const nx = -ddx;
+        const ny = 1;
+        const nz = -ddz;
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        const invLen = len > 0 ? 1 / len : 1;
+
+        const normalIdx = idx * 3;
+        norm[normalIdx] = nx * invLen;
+        norm[normalIdx + 1] = ny * invLen;
+        norm[normalIdx + 2] = nz * invLen;
+      }
+    }
+
     geom.attributes.position.needsUpdate = true;
+    geom.attributes.normal.needsUpdate = true;
     return geom;
   };
 
