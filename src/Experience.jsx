@@ -42,7 +42,6 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 // import ForestDynamic from "./components/ForestDynamic";
 // import ForestDynamic from "./components/ForestDynamic";
 import ForestDynamicSampled from "./components/ForestDynamicSampled";
-import "./three-bvh-setup";
 import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";

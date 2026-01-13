@@ -200,8 +200,9 @@ export default function ForestDynamic({
   const coldCacheRef = useRef(new Map());
   const buildQueueRef = useRef([]);
   const dropTimesRef = useRef(new Map());
-  const raycasterRef = useRef(new THREE.Raycaster());
-  raycasterRef.current.firstHitOnly = true;
+  // Raycasting removed - component is not actively used (replaced by ForestDynamicSampled)
+  // const raycasterRef = useRef(new THREE.Raycaster());
+  // raycasterRef.current.firstHitOnly = true;
 
   const needsRefreshRef = useRef(false);
   const scheduleRefresh = () => {

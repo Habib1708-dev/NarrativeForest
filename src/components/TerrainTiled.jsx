@@ -20,7 +20,6 @@ import { createTerrainMaterial, updateTerrainTileUniforms } from "./TerrainMater
 
 /**
  * TerrainTiled — forwardRef so other systems (Forest/Fog) can raycast recursively.
- * Each tile geometry gets a BVH if available (three-mesh-bvh) for fast raycasts.
  */
 const TerrainTiled = forwardRef(function TerrainTiled(
   {

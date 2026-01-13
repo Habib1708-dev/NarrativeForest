@@ -1317,7 +1317,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     updateUniformAll("uCoolMix", coolMixRef.current);
 
-    // Throttle hover/raycast work to ~6 Hz to reduce per-frame cost
+    // Throttle hover detection work to ~6 Hz to reduce per-frame cost (uses NDC projection, not raycasting)
     hoverAccumRef.current += dt;
     const HOVER_STEP = 1 / 6; // ~6 times per second
     if (hoverAccumRef.current < HOVER_STEP) return;

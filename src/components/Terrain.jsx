@@ -7,11 +7,7 @@ import React, {
   useEffect,
 } from "react";
 import * as THREE from "three";
-import { computeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
 import { setTerrainParams } from "../proc/heightfield";
-
-THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const DEFAULT_TERRAIN_PARAMS = Object.freeze({
   elevation: 7,
@@ -165,7 +161,6 @@ export default forwardRef(function Terrain({ config, ...props }, ref) {
     geom.attributes.position.needsUpdate = true;
     geom.computeVertexNormals();
     geom.attributes.normal.needsUpdate = true;
-    geom.computeBoundsTree();
     geom.computeBoundingBox();
     geom.computeBoundingSphere();
     return geom;
