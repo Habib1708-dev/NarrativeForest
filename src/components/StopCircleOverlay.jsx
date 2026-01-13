@@ -26,6 +26,8 @@ export default function StopCircleOverlay() {
   const [habibTextVisible, setHabibTextVisible] = useState(false);
   const [hasEnteredFreeFly, setHasEnteredFreeFly] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 50, y: 50 });
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [shouldUnmount, setShouldUnmount] = useState(false);
   useEffect(() => {
     const updateViewport = () => {
       setIsMobile(window.innerWidth <= 900);
@@ -94,16 +96,25 @@ export default function StopCircleOverlay() {
     };
   }, []);
 
-  // If user skips straight to freeflight via navbar, fade out the welcome overlay
+  // If user skips straight to freeflight via navbar, fade out everything and unmount
   useEffect(() => {
     if (cameraMode !== "freeFly") return;
 
     setHasEnteredFreeFly(true);
     setHabibTextVisible(false);
+    setIsFadingOut(true);
 
+    // Fade out welcome overlay if it's showing
     if (showWelcomeOverlay && !isWelcomeFadingOut) {
       setIsWelcomeFadingOut(true);
     }
+
+    // Unmount the entire component after fade-out completes
+    const unmountTimeout = setTimeout(() => {
+      setShouldUnmount(true);
+    }, 900); // Wait for both content and background fade-outs to complete (400ms + 500ms)
+
+    return () => clearTimeout(unmountTimeout);
   }, [cameraMode, showWelcomeOverlay, isWelcomeFadingOut]);
 
   // First phase: content fades out, then trigger background fade
@@ -206,6 +217,9 @@ export default function StopCircleOverlay() {
   const EPS = 1e-4;
   const shouldRender =
     t4 !== null && t5 !== null && typeof t4 === "number" && t >= t4 - EPS;
+
+  // Unmount completely if fade-out is complete
+  if (shouldUnmount) return null;
 
   if (!shouldRender && !showWelcomeOverlay) return null;
 
@@ -684,6 +698,8 @@ export default function StopCircleOverlay() {
         top: 0,
         pointerEvents: "none",
         zIndex: 50,
+        opacity: isFadingOut ? 0 : 1,
+        transition: "opacity 800ms ease-out",
       }}
     >
       {showWelcomeOverlay && (

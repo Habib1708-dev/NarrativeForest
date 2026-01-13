@@ -2,15 +2,19 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { Html } from "@react-three/drei";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
+import { useCameraStore } from "../state/useCameraStore";
 
 const TITLE_TEXT = "Habib Khalaf";
 const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
 
 export default function IntroText() {
   const { camera } = useThree();
+  const cameraMode = useCameraStore((state) => state.mode);
   const [shouldRender, setShouldRender] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [fadeInOpacity, setFadeInOpacity] = useState(0);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [shouldUnmount, setShouldUnmount] = useState(false);
 
   // Total characters for both lines
   const totalChars = TITLE_TEXT.length + SUBTITLE_TEXT.length;
@@ -33,9 +37,22 @@ export default function IntroText() {
     };
   }, []);
 
+  // Handle fade-out when entering freeFly mode
+  useEffect(() => {
+    if (cameraMode === "freeFly" && (shouldRender || isVisible)) {
+      setIsFadingOut(true);
+      setFadeInOpacity(0);
+      // Unmount after fade-out animation completes
+      const unmountTimeout = setTimeout(() => {
+        setShouldUnmount(true);
+      }, 800); // Match the fade-out transition duration
+      return () => clearTimeout(unmountTimeout);
+    }
+  }, [cameraMode, shouldRender, isVisible]);
+
   // Handle 1 second delay and fade-in animation
   useEffect(() => {
-    if (!shouldRender) return;
+    if (!shouldRender || isFadingOut) return;
 
     let delayTimeout;
     let fadeTimeout;
@@ -54,7 +71,7 @@ export default function IntroText() {
       if (delayTimeout) clearTimeout(delayTimeout);
       if (fadeTimeout) clearTimeout(fadeTimeout);
     };
-  }, [shouldRender]);
+  }, [shouldRender, isFadingOut]);
 
   const [charStates, setCharStates] = useState(
     // Each char: { offset, opacity, scale, blur }
@@ -146,8 +163,8 @@ export default function IntroText() {
     textTransform: "uppercase",
   };
 
-  // Don't render until Explore button is clicked and delay has passed
-  if (!shouldRender || !isVisible) {
+  // Don't render if unmounting or if Explore button hasn't been clicked and delay hasn't passed
+  if (shouldUnmount || !shouldRender || !isVisible) {
     return null;
   }
 
@@ -167,6 +184,7 @@ export default function IntroText() {
           position: "relative",
           opacity: fadeInOpacity,
           transition: "opacity 800ms ease-in",
+          pointerEvents: isFadingOut ? "none" : "none",
         }}
       >
         {/* Title line */}
