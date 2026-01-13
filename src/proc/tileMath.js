@@ -1,3 +1,4 @@
+// src/proc/tileMath.js
 export function makeTileMath({
   tileSize = 4,
   anchorMinX = -10,

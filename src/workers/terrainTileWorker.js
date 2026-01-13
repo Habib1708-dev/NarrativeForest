@@ -1,3 +1,4 @@
+// src/workers/terrainTileWorker.js
 import { heightAt, setTerrainParams } from "../proc/heightfield";
 
 const ctx = self;

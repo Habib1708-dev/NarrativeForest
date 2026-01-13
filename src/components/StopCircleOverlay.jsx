@@ -754,6 +754,9 @@ export default function StopCircleOverlay() {
                 onClick={() => {
                   if (!showWelcomeOverlay) return;
                   setIsWelcomeFadingOut(true);
+                  // Dispatch event to signal that Explore button was clicked
+                  window.__exploreButtonClicked = true;
+                  window.dispatchEvent(new Event("explore-button-clicked"));
                 }}
                 style={{
                   border: "1px solid rgba(255,255,255,0.35)",

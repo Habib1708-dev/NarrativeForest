@@ -61,10 +61,6 @@ export default function Experience() {
   const rebuildArch = useCameraStore((s) => s.rebuildArch);
   const setTerrainCollider = useCameraStore((s) => s.setTerrainCollider);
 
-  useEffect(() => {
-    // Signal that the forest (scene) is ready
-    window.dispatchEvent(new Event("forest-ready"));
-  }, []);
 
   useFrame(() => {
     if (!firstFrameRef.current) return;
@@ -717,6 +713,8 @@ export default function Experience() {
           onInitialReady={() => {
             performanceMonitor.markTimeToInteractive();
             performanceMonitor.markTotalLoadTime();
+            // Signal that the forest (scene) is ready - trees have been rendered
+            window.dispatchEvent(new Event("forest-ready"));
           }}
         />
         <UnifiedCrystalClusters />

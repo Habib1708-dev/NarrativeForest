@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { Html } from "@react-three/drei";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
@@ -8,9 +8,53 @@ const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
 
 export default function IntroText() {
   const { camera } = useThree();
+  const [shouldRender, setShouldRender] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const [fadeInOpacity, setFadeInOpacity] = useState(0);
 
   // Total characters for both lines
   const totalChars = TITLE_TEXT.length + SUBTITLE_TEXT.length;
+
+  // Listen for Explore button click event
+  useEffect(() => {
+    const handleExploreClick = () => {
+      setShouldRender(true);
+    };
+
+    window.addEventListener("explore-button-clicked", handleExploreClick);
+
+    // Check if event was already fired (for page refresh scenarios)
+    if (typeof window !== "undefined" && window.__exploreButtonClicked) {
+      setShouldRender(true);
+    }
+
+    return () => {
+      window.removeEventListener("explore-button-clicked", handleExploreClick);
+    };
+  }, []);
+
+  // Handle 1 second delay and fade-in animation
+  useEffect(() => {
+    if (!shouldRender) return;
+
+    let delayTimeout;
+    let fadeTimeout;
+
+    // Wait 1 second before showing the text
+    delayTimeout = setTimeout(() => {
+      setIsVisible(true);
+      // Start with opacity 0, then trigger fade-in after a tiny delay to ensure transition works
+      setFadeInOpacity(0);
+      fadeTimeout = setTimeout(() => {
+        setFadeInOpacity(1);
+      }, 10); // Small delay to ensure CSS transition is triggered
+    }, 1000);
+
+    return () => {
+      if (delayTimeout) clearTimeout(delayTimeout);
+      if (fadeTimeout) clearTimeout(fadeTimeout);
+    };
+  }, [shouldRender]);
 
   const [charStates, setCharStates] = useState(
     // Each char: { offset, opacity, scale, blur }
@@ -102,11 +146,17 @@ export default function IntroText() {
     textTransform: "uppercase",
   };
 
+  // Don't render until Explore button is clicked and delay has passed
+  if (!shouldRender || !isVisible) {
+    return null;
+  }
+
   return (
     <group position={position} quaternion={camera.quaternion.clone()}>
       <Html
         center
         transform={false}
+        zIndexRange={[100, 0]}
         style={{
           pointerEvents: "none",
           userSelect: "none",
@@ -115,6 +165,8 @@ export default function IntroText() {
           alignItems: "center",
           gap: "0.5rem",
           position: "relative",
+          opacity: fadeInOpacity,
+          transition: "opacity 800ms ease-in",
         }}
       >
         {/* Title line */}
