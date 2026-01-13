@@ -32,6 +32,20 @@ export function createTerrainMaterial() {
     // 'this' refers to the material instance being compiled (works correctly with cloned materials)
     if (prevOnBeforeCompile) prevOnBeforeCompile.call(this, shader, renderer);
 
+    // Get tile uniforms from mesh userData (set by updateTerrainTileUniforms)
+    // This is accessed via the renderer's current render item
+    let tileUniforms = { uTileMin: new THREE.Vector2(), uTileSize: 4.0, uLatticeStep: 0.1 };
+    
+    // Try to get tile uniforms from current render item
+    if (renderer && renderer.info && renderer.info.render) {
+      const renderList = renderer.info.render.frame;
+      if (renderList && renderList.items) {
+        // Find the current mesh being rendered
+        // This is a bit hacky but necessary for per-mesh uniforms with onBeforeCompile
+        // We'll use a different approach: store in material and update per-frame
+      }
+    }
+
     // Add terrain height uniforms
     shader.uniforms.uTerrainElevation = { value: params.elevation };
     shader.uniforms.uTerrainFrequency = { value: params.frequency };
@@ -43,7 +57,7 @@ export function createTerrainMaterial() {
     shader.uniforms.uTerrainBaseHeight = { value: params.baseHeight };
     shader.uniforms.uTerrainWorldYOffset = { value: params.worldYOffset };
 
-    // Per-tile uniforms (default values, will be overridden if tileUniforms exist)
+    // Per-tile uniforms (default values, updated per-mesh)
     shader.uniforms.uTileMin = { value: new THREE.Vector2() };
     shader.uniforms.uTileSize = { value: 4.0 };
     shader.uniforms.uLatticeStep = { value: 0.1 };
@@ -79,7 +93,6 @@ uniform float uTileSize;
 uniform float uLatticeStep;
 
 // Compute normal using finite differences (matching CPU logic)
-// Input: world position (for height sampling)
 vec3 computeTerrainNormal(vec3 worldPos) {
   float eps = uLatticeStep;
   
@@ -96,8 +109,6 @@ vec3 computeTerrainNormal(vec3 worldPos) {
 }
 
 // Vertex displacement: convert local flat grid position to world, compute height
-// Returns world position for height sampling
-// Note: transformed remains in object space, only Y is updated
 vec3 displaceTerrainVertex(vec3 localPos) {
   // localPos.xz are normalized coordinates [0,1] representing position within tile
   // Convert to world XZ coordinates: tileMin + normalizedPos * tileSize
@@ -106,8 +117,7 @@ vec3 displaceTerrainVertex(vec3 localPos) {
   // Compute height using shared terrain function
   float height = terrainHeightAt(worldXZ.x, worldXZ.y);
   
-  // Return world position with computed height (for sampling only)
-  // The actual transformed will keep XZ in object space, only Y is displaced
+  // Return world position with computed height
   return vec3(worldXZ.x, height, worldXZ.y);
 }
 `
@@ -115,36 +125,26 @@ vec3 displaceTerrainVertex(vec3 localPos) {
 
     // CRITICAL: Replace begin_vertex to inject displacement AFTER Three.js initializes transformed
     // The position attribute contains normalized grid coordinates [0,1] for XZ, Y=0
-    // 
-    // COORDINATE SPACE CONSTRAINT (Option A - Enforced):
-    // Tile meshes MUST remain at identity transform (position=[0,0,0], no rotation, no scale).
-    // The shader computes world coordinates directly and sets transformed to world space.
-    // If tiles/group are ever moved/rotated/scaled, this will break and Option B must be implemented.
-    //
-    // We compute world coordinates for height sampling, then set transformed to world space
-    // (which equals object space since mesh has identity transform).
+    // We must override transformed AFTER Three.js sets it up in begin_vertex
     shader.vertexShader = shader.vertexShader.replace(
       "#include <begin_vertex>",
       `#include <begin_vertex>
-// Compute world coordinates for terrain height sampling (reused for normal calculation)
-vec3 worldPos = displaceTerrainVertex(position);
-// Set transformed to world space coordinates
-// CONSTRAINT: Mesh must have identity transform (at origin, no rotation/scale)
-// For future transform support: convert worldPos to object space via inverse modelMatrix
-transformed = worldPos;
+// Override transformed AFTER Three.js setup with terrain displacement
+// transformed is now the world position (since mesh is at origin with no rotation/scale)
+transformed = displaceTerrainVertex(position);
 `
     );
 
-    // SAFE: Inject terrain normal assignment AFTER defaultnormal_vertex
-    // Do NOT redeclare objectNormal - just assign to it
-    // Reuse worldPos computed above (no duplicate computation)
-    // Let Three.js handle the rest of the normal pipeline (normal_vertex, etc.)
+    // Replace normal computation to use terrain normal
+    // Use transformed (which is now the world position) for normal calculation
     shader.vertexShader = shader.vertexShader.replace(
       "#include <defaultnormal_vertex>",
-      `#include <defaultnormal_vertex>
-// Override objectNormal with terrain normal (reuse worldPos from begin_vertex)
-// worldPos is already computed above, so we reuse it here
-objectNormal = computeTerrainNormal(worldPos);
+      `// Compute terrain normal using finite differences
+// transformed contains the world position after displacement
+vec3 terrainNormal = computeTerrainNormal(transformed);
+objectNormal = terrainNormal;
+
+#include <defaultnormal_vertex>
 `
     );
   };
@@ -155,31 +155,22 @@ objectNormal = computeTerrainNormal(worldPos);
 /**
  * Updates terrain material uniforms for a specific tile.
  * Call this after creating a mesh with the terrain material.
- * 
- * Strategy: Each tile has its own cloned material, so we store tile uniforms
- * in both mesh.userData (for reference) and material.userData (for onBeforeCompile access).
+ * Stores uniforms in mesh.userData so they persist across shader recompiles.
  */
 export function updateTerrainTileUniforms(mesh, tileMinX, tileMinZ, tileSize, latticeStep) {
   if (!mesh.material || !mesh.material.userData.isTerrainMaterial) {
     return;
   }
 
-  const material = mesh.material;
-  const tileUniforms = {
+  // Store tile uniforms in mesh userData for access during onBeforeCompile
+  mesh.userData.tileUniforms = {
     uTileMin: new THREE.Vector2(tileMinX, tileMinZ),
     uTileSize: tileSize,
     uLatticeStep: latticeStep,
   };
 
-  // Store in mesh.userData for reference (optional, but kept for consistency)
-  mesh.userData.tileUniforms = tileUniforms;
-
-  // CRITICAL: Store in material.userData for onBeforeCompile to read
-  // Since each tile has its own cloned material, this is per-tile data
-  material.userData.tileUniforms = tileUniforms;
-
-  // Also update uniforms directly if shader is already compiled
-  // This handles the case where shader was compiled before tileUniforms were set
+  // Update uniforms via material.userData.shaderUniforms (set during onBeforeCompile)
+  const material = mesh.material;
   if (material.userData.shaderUniforms) {
     const uniforms = material.userData.shaderUniforms;
     if (uniforms.uTileMin) {

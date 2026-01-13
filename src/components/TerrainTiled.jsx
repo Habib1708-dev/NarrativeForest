@@ -57,36 +57,12 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   const firstTileStartedRef = useRef(false);
   const firstTileDoneRef = useRef(false);
 
-  // Base material template - will be cloned per tile for per-tile uniforms
-  const baseMaterial = useMemo(() => {
-    if (materialFactory) {
-      const mat = materialFactory();
-      if (mat?.isMaterial) return mat;
-    }
-    // Use GPU terrain material by default
-    return createTerrainMaterial();
-  }, [materialFactory]);
-
-  // CRITICAL: Detect if we're using GPU terrain material
-  // GPU terrain uses normalized [0,1] grid and must NOT use worker
-  // Must be declared before canUseWorker to avoid "used before initialization" error
-  const gpuTerrainEnabled = useMemo(() => {
-    return baseMaterial?.userData?.isTerrainMaterial === true;
-  }, [baseMaterial]);
-
-  // CRITICAL: Disable worker when GPU terrain is enabled
-  // GPU terrain uses normalized [0,1] grid - worker would overwrite it with world positions
   const canUseWorker = useMemo(() => {
-    // GPU terrain mode: never use worker
-    if (gpuTerrainEnabled) {
-      return false;
-    }
-    // CPU fallback mode: use worker if available
     if (typeof window === "undefined" || typeof window.Worker === "undefined") {
       return false;
     }
     return sampleHeight === defaultHeightSampler;
-  }, [sampleHeight, gpuTerrainEnabled]);
+  }, [sampleHeight]);
 
   const { required, retention, math } = useInfiniteTiles({
     tileSize,
@@ -96,6 +72,16 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     dropRadius,
     prefetch,
   });
+
+  // Base material template - will be cloned per tile for per-tile uniforms
+  const baseMaterial = useMemo(() => {
+    if (materialFactory) {
+      const mat = materialFactory();
+      if (mat?.isMaterial) return mat;
+    }
+    // Use GPU terrain material by default
+    return createTerrainMaterial();
+  }, [materialFactory]);
 
   const heightCacheRef = useRef(new Map());
   useEffect(() => {
@@ -173,61 +159,48 @@ const TerrainTiled = forwardRef(function TerrainTiled(
           return;
         }
         const geom = acquireGeometry();
-        
-        // CRITICAL: In GPU terrain mode, do NOT overwrite normalized grid with worker data
-        // Worker generates world positions, but GPU terrain needs normalized [0,1] coordinates
-        if (gpuTerrainEnabled) {
-          // GPU mode: ignore worker position/normal data, use flat normalized geometry
-          // Geometry already has normalized [0,1] positions from acquireGeometry()
-          // Just use the worker completion as a signal that the job is done
-        } else {
-          // CPU fallback mode: use worker-generated positions and normals
-          const targetPos = geom.attributes.position.array;
-          const targetNorm = geom.attributes.normal.array;
-          const incomingPos = new Float32Array(data.positions);
-          const incomingNorm = new Float32Array(data.normals);
-          if (
-            targetPos.length !== incomingPos.length ||
-            targetNorm.length !== incomingNorm.length
-          ) {
-            releaseGeometry(geom);
-            workerErrorCountRef.current += 1;
-            buildQueue.current.unshift(job);
-            return;
-          }
-          targetPos.set(incomingPos);
-          targetNorm.set(incomingNorm);
-          geom.attributes.position.needsUpdate = true;
-          geom.attributes.normal.needsUpdate = true;
+        const targetPos = geom.attributes.position.array;
+        const targetNorm = geom.attributes.normal.array;
+        const incomingPos = new Float32Array(data.positions);
+        const incomingNorm = new Float32Array(data.normals);
+        if (
+          targetPos.length !== incomingPos.length ||
+          targetNorm.length !== incomingNorm.length
+        ) {
+          releaseGeometry(geom);
+          workerErrorCountRef.current += 1;
+          buildQueue.current.unshift(job);
+          return;
         }
+        targetPos.set(incomingPos);
+        targetNorm.set(incomingNorm);
+        geom.attributes.position.needsUpdate = true;
+        geom.attributes.normal.needsUpdate = true;
 
-        // Set bounding volumes from worker-computed values (CPU mode only)
-        // In GPU mode, ignore worker bounds and use conservative bounds from mountTileMesh
-        if (!gpuTerrainEnabled) {
-          if (data.boundingBox) {
-            const box = geom.boundingBox || new THREE.Box3();
-            box.min.set(
-              data.boundingBox.minX,
-              data.boundingBox.minY,
-              data.boundingBox.minZ
-            );
-            box.max.set(
-              data.boundingBox.maxX,
-              data.boundingBox.maxY,
-              data.boundingBox.maxZ
-            );
-            geom.boundingBox = box;
-          }
-          if (data.boundingSphere) {
-            const sphere = geom.boundingSphere || new THREE.Sphere();
-            sphere.center.set(
-              data.boundingSphere.center.x,
-              data.boundingSphere.center.y,
-              data.boundingSphere.center.z
-            );
-            sphere.radius = data.boundingSphere.radius;
-            geom.boundingSphere = sphere;
-          }
+        // Set bounding volumes directly from worker-computed values
+        if (data.boundingBox) {
+          const box = geom.boundingBox || new THREE.Box3();
+          box.min.set(
+            data.boundingBox.minX,
+            data.boundingBox.minY,
+            data.boundingBox.minZ
+          );
+          box.max.set(
+            data.boundingBox.maxX,
+            data.boundingBox.maxY,
+            data.boundingBox.maxZ
+          );
+          geom.boundingBox = box;
+        }
+        if (data.boundingSphere) {
+          const sphere = geom.boundingSphere || new THREE.Sphere();
+          sphere.center.set(
+            data.boundingSphere.center.x,
+            data.boundingSphere.center.y,
+            data.boundingSphere.center.z
+          );
+          sphere.radius = data.boundingSphere.radius;
+          geom.boundingSphere = sphere;
         }
 
         const rec = tiles.current.get(data.key);
@@ -271,7 +244,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       workerRef.current = null;
       flushPendingWorkerJobs();
     };
-  }, [canUseWorker, gpuTerrainEnabled]);
+  }, [canUseWorker]);
 
   // Convert world coordinates to lattice coordinates and pack into BigInt key
   const sampleHeightCached = (x, z) => {
@@ -391,14 +364,6 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     };
     
     const mesh = new THREE.Mesh(geom, tileMaterial);
-    
-    // CRITICAL: GPU terrain requires identity transform (position=[0,0,0], no rotation/scale)
-    // The shader computes world coordinates directly, so mesh must be at origin
-    // DO NOT set mesh.position, mesh.rotation, or mesh.scale - they must remain identity
-    mesh.position.set(0, 0, 0);
-    mesh.rotation.set(0, 0, 0);
-    mesh.scale.set(1, 1, 1);
-    
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     // CRITICAL: Disable frustum culling for GPU terrain
