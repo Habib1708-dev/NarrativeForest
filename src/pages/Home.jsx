@@ -8,6 +8,7 @@ import ClickAndDragHint from "../components/ClickAndDragHint";
 import PresetSelector from "../components/PresetSelector";
 import StopCircleOverlay from "../components/StopCircleOverlay";
 import PerformanceMetricsDisplay from "../components/PerformanceMetricsDisplay";
+import CanvasErrorBoundary from "../components/CanvasErrorBoundary";
 import { useDebugStore } from "../state/useDebugStore";
 import { useAudioStore } from "../state/useAudioStore";
 import { PRESET_NAMES } from "../utils/presets";
@@ -176,14 +177,34 @@ export default function Home() {
         onPresetChange={handlePresetChange}
       />
 
-      <Canvas
-        camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
-        shadows
-        gl={{ antialias: true }}
-        dpr={[1, 2]}
-      >
-        <Experience />
-      </Canvas>
+      <CanvasErrorBoundary>
+        <Canvas
+          camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
+          shadows
+          gl={{ 
+            antialias: true,
+            preserveDrawingBuffer: false,
+            powerPreference: "high-performance",
+            failIfMajorPerformanceCaveat: false
+          }}
+          dpr={[1, 2]}
+          onCreated={({ gl }) => {
+            // Handle WebGL context loss
+            const canvas = gl.domElement;
+            const handleContextLost = (event) => {
+              event.preventDefault();
+              // Context loss is handled gracefully
+            };
+            const handleContextRestored = () => {
+              // Context restored, app will recover automatically
+            };
+            canvas.addEventListener('webglcontextlost', handleContextLost);
+            canvas.addEventListener('webglcontextrestored', handleContextRestored);
+          }}
+        >
+          <Experience />
+        </Canvas>
+      </CanvasErrorBoundary>
 
       <PerformanceMetricsDisplay />
       <FreeFlyJoystickOverlay />

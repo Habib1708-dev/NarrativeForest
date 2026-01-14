@@ -59,6 +59,51 @@ export default function Experience() {
   const setArchConfig = useCameraStore((s) => s.setArchConfig);
   const rebuildArch = useCameraStore((s) => s.rebuildArch);
   const setTerrainCollider = useCameraStore((s) => s.setTerrainCollider);
+  
+  // Check if WebGL context is valid
+  const [isWebGLValid, setIsWebGLValid] = useState(true);
+  
+  useEffect(() => {
+    if (!gl) {
+      setIsWebGLValid(false);
+      return;
+    }
+    
+    const checkContext = () => {
+      try {
+        const webglContext = gl.getContext();
+        if (!webglContext || webglContext.isContextLost()) {
+          setIsWebGLValid(false);
+          return;
+        }
+        setIsWebGLValid(true);
+      } catch (e) {
+        setIsWebGLValid(false);
+      }
+    };
+    
+    checkContext();
+    
+    const canvas = gl.domElement;
+    if (canvas) {
+      const handleContextLost = (event) => {
+        event.preventDefault();
+        setIsWebGLValid(false);
+      };
+      
+      const handleContextRestored = () => {
+        setIsWebGLValid(true);
+      };
+      
+      canvas.addEventListener("webglcontextlost", handleContextLost);
+      canvas.addEventListener("webglcontextrestored", handleContextRestored);
+      
+      return () => {
+        canvas.removeEventListener("webglcontextlost", handleContextLost);
+        canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+      };
+    }
+  }, [gl]);
 
 
   useFrame(() => {
@@ -731,35 +776,49 @@ export default function Experience() {
         debugTint={false}
       />
 
-      <EffectComposer
-        multisampling={0}
-        frameBufferType={THREE.HalfFloatType}
-        depthBuffer={true}
-      >
-        <Bloom
-          intensity={1.35}
-          luminanceThreshold={0.7}
-          luminanceSmoothing={0.08}
-          kernelSize={KernelSize.LARGE}
-          mipmapBlur
-        />
-        <BrightnessContrast brightness={-globalDarken} contrast={0} />
-        {blurEnabled && (
-          <DistanceBlurEffect
-            focusDistance={blurFocusDistance}
-            focusRange={blurFocusRange}
-            blurStrength={blurStrength}
-            cameraNear={camera.near}
-            cameraFar={camera.far}
-          />
-        )}
-        {grainEnabled && (
-          <NoiseJitterEffect
-            grainStrength={grainStrength}
-            grainSize={grainSize}
-          />
-        )}
-      </EffectComposer>
+      {isWebGLValid && gl && camera && (() => {
+        // Double-check WebGL context is valid before rendering EffectComposer
+        try {
+          const webglContext = gl.getContext();
+          if (!webglContext || webglContext.isContextLost()) {
+            return null;
+          }
+        } catch (e) {
+          return null;
+        }
+        
+        return (
+          <EffectComposer
+            multisampling={0}
+            frameBufferType={THREE.HalfFloatType}
+            depthBuffer={true}
+          >
+            <Bloom
+              intensity={1.35}
+              luminanceThreshold={0.7}
+              luminanceSmoothing={0.08}
+              kernelSize={KernelSize.LARGE}
+              mipmapBlur
+            />
+            <BrightnessContrast brightness={-globalDarken} contrast={0} />
+            {blurEnabled && (
+              <DistanceBlurEffect
+                focusDistance={blurFocusDistance}
+                focusRange={blurFocusRange}
+                blurStrength={blurStrength}
+                cameraNear={camera.near}
+                cameraFar={camera.far}
+              />
+            )}
+            {grainEnabled && (
+              <NoiseJitterEffect
+                grainStrength={grainStrength}
+                grainSize={grainSize}
+              />
+            )}
+          </EffectComposer>
+        );
+      })()}
 
       {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
       <CameraControllerR3F />

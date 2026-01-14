@@ -6,7 +6,6 @@ const FADE_DURATION = 2000;
 
 export default function LoadingScreen() {
   const { active } = useProgress();
-  const [hasStarted, setHasStarted] = useState(false);
   const [isForestReady, setIsForestReady] = useState(false);
   const [isSceneSettled, setIsSceneSettled] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
@@ -26,16 +25,6 @@ export default function LoadingScreen() {
   }, []);
 
   useEffect(() => {
-    if (active && !hasStarted) {
-      setHasStarted(true);
-    }
-  }, [active, hasStarted]);
-
-  useEffect(() => {
-    if (!hasStarted) {
-      return undefined;
-    }
-
     let stabilizeTimeout;
 
     if (!active && isForestReady) {
@@ -54,7 +43,7 @@ export default function LoadingScreen() {
         clearTimeout(stabilizeTimeout);
       }
     };
-  }, [active, hasStarted, isForestReady]);
+  }, [active, isForestReady]);
 
   useEffect(() => {
     if (!isSceneSettled) {

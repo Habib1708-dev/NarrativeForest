@@ -8,7 +8,7 @@ const TITLE_TEXT = "Habib Khalaf";
 const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
 
 export default function IntroText() {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const cameraMode = useCameraStore((state) => state.mode);
   const [shouldRender, setShouldRender] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -94,22 +94,44 @@ export default function IntroText() {
 
   // Calculate the position once at mount (static, not sticky)
   const position = useMemo(() => {
-    const direction = new Vector3();
-    camera.getWorldDirection(direction).normalize();
-    initialCamDir.current = direction.clone();
-    initialCamPos.current = camera.position.clone();
-    return camera.position.clone().add(direction.clone().multiplyScalar(2));
-  }, []);
+    if (!camera || !gl) return null;
+    // Check if WebGL context is valid
+    try {
+      const webglContext = gl.getContext();
+      if (!webglContext || webglContext.isContextLost()) return null;
+    } catch (e) {
+      return null; // Context not available
+    }
+    try {
+      const direction = new Vector3();
+      camera.getWorldDirection(direction).normalize();
+      initialCamDir.current = direction.clone();
+      initialCamPos.current = camera.position.clone();
+      return camera.position.clone().add(direction.clone().multiplyScalar(2));
+    } catch (error) {
+      // Silently handle WebGL context loss
+      return null;
+    }
+  }, [camera, gl]);
 
   useFrame(() => {
-    if (!initialCamPos.current || !initialCamDir.current) return;
+    if (!camera || !gl || !initialCamPos.current || !initialCamDir.current) return;
+    
+    // Check if WebGL context is still valid
+    try {
+      const webglContext = gl.getContext();
+      if (!webglContext || webglContext.isContextLost()) return;
+    } catch (e) {
+      return; // Context lost or not available
+    }
 
-    // Calculate forward movement (dot product with initial direction)
-    const displacement = new Vector3().subVectors(
-      camera.position,
-      initialCamPos.current
-    );
-    const forwardDistance = displacement.dot(initialCamDir.current);
+    try {
+      // Calculate forward movement (dot product with initial direction)
+      const displacement = new Vector3().subVectors(
+        camera.position,
+        initialCamPos.current
+      );
+      const forwardDistance = displacement.dot(initialCamDir.current);
 
     // Only trigger on forward movement (positive distance)
     const progress = Math.max(0, forwardDistance);
@@ -150,6 +172,10 @@ export default function IntroText() {
     });
 
     setCharStates(newStates);
+    } catch (error) {
+      // Silently handle WebGL context loss during animation
+      // Don't log to avoid console spam
+    }
   });
 
   // Split states for title and subtitle
@@ -163,8 +189,8 @@ export default function IntroText() {
     textTransform: "uppercase",
   };
 
-  // Don't render if unmounting or if Explore button hasn't been clicked and delay hasn't passed
-  if (shouldUnmount || !shouldRender || !isVisible) {
+  // Don't render if unmounting, WebGL context unavailable, or if Explore button hasn't been clicked and delay hasn't passed
+  if (shouldUnmount || !shouldRender || !isVisible || !camera || !gl || !position) {
     return null;
   }
 
