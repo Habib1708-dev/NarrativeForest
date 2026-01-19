@@ -800,8 +800,9 @@ export default function Experience() {
               intensity={1.35}
               luminanceThreshold={0.7}
               luminanceSmoothing={0.08}
-              kernelSize={KernelSize.LARGE}
-              mipmapBlur
+              kernelSize={KernelSize.VERY_SMALL}
+              resolutionScale={0.5}
+              // mipmapBlur
             />
             <BrightnessContrast brightness={-globalDarken} contrast={0} />
             {blurEnabled && (
