@@ -615,8 +615,6 @@ export default function ForestDynamicSampled({
           key={`fds-th-${i}`}
           ref={treeHighRefs.current[i]}
           args={treeHighArgs[i]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
@@ -627,8 +625,6 @@ export default function ForestDynamicSampled({
           key={`fds-tlod-${i}`}
           ref={treeLodRefs.current[i]}
           args={treeLodArgs[i]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
@@ -639,8 +635,6 @@ export default function ForestDynamicSampled({
           key={`fds-rk-${i}`}
           ref={rockRefsArray[i]}
           args={rockArgs[i]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}

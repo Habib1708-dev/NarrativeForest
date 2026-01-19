@@ -664,8 +664,6 @@ function ChunkInstanced({
           key={`th-${i}`}
           ref={treeHighRefs.current[i]}
           args={[p.geometry, p.material, treeCapacity]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
@@ -676,8 +674,6 @@ function ChunkInstanced({
           key={`tm-${i}`}
           ref={treeMedRefs.current[i]}
           args={[p.geometry, p.material, treeCapacity]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
@@ -690,8 +686,6 @@ function ChunkInstanced({
             key={`rk-${i}`}
             ref={rockRefs.current[i]}
             args={[p.geometry, p.material, cap]}
-            castShadow={false}
-            receiveShadow
             frustumCulled={false}
           />
         );

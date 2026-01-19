@@ -157,8 +157,6 @@ export default forwardRef(function MossRockInstances(props, ref) {
       <instancedMesh
         ref={instRef}
         args={[geometry, material, COUNT]}
-        castShadow={false}
-        receiveShadow
       />
     </group>
   );

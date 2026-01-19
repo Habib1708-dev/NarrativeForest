@@ -320,8 +320,6 @@ export default forwardRef(function Cabin(_, ref) {
         <instancedMesh
           ref={instRef}
           args={[rockGeoMat.geometry, rockGeoMat.material, COUNT]}
-          castShadow={false}
-          receiveShadow
         />
       )}
 

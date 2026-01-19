@@ -363,8 +363,6 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     };
     
     const mesh = new THREE.Mesh(geom, tileMaterial);
-    mesh.receiveShadow = true;
-    mesh.castShadow = false;
     // CRITICAL: Disable frustum culling for GPU terrain
     // Shader sets transformed = worldPos, so Three.js culling/bounds can be wrong
     mesh.frustumCulled = false;

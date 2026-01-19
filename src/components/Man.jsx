@@ -106,8 +106,6 @@ export default forwardRef(function Man(_, ref) {
 
     cloned.traverse((o) => {
       if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
         o.frustumCulled = false;
 
         const mat = Array.isArray(o.material) ? o.material : [o.material];

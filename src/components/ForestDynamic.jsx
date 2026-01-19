@@ -518,8 +518,6 @@ export default function ForestDynamic({
           key={`fd-th-${i}`}
           ref={treeHighRefs.current[i]}
           args={[p.geometry, p.material, TREE_CAP]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
@@ -530,8 +528,6 @@ export default function ForestDynamic({
           key={`fd-rk-${i}`}
           ref={rockRefsArray[i]}
           args={[p.geometry, p.material, ROCK_CAP_PER_PART]}
-          castShadow={false}
-          receiveShadow
           frustumCulled={false}
         />
       ))}
