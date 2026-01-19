@@ -25,7 +25,8 @@ import Man from "./components/Man";
 import Cat from "./components/Cat";
 import CatNoTextures from "./components/CatNoTextures";
 import CatKTX2 from "./components/CatKTX2";
-import Lake from "./components/Lake";
+// import Lake from "./components/Lake"; // Commented out for performance testing
+import FakeLake from "./components/FakeLake"; // Using fake lake for performance testing
 // import FogParticleSystem from "./components/FogParticleSystem";
 import RadioTower from "./components/RadioTower";
 import DistanceFade from "./fog/DistanceFade";
@@ -721,7 +722,9 @@ export default function Experience() {
         {/* <CatNoTextures ref={catRef} /> */}
         <CatKTX2 ref={catRef} />
         <RadioTower ref={radioTowerRef} />
-        <Lake ref={lakeRef} />
+        {/* Using FakeLake for performance testing - maintains same exclusion zone API */}
+        <FakeLake ref={lakeRef} />
+        {/* <Lake ref={lakeRef} /> */}
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
         {/* <FogParticleSystem
