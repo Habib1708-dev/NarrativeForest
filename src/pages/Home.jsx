@@ -181,7 +181,6 @@ export default function Home() {
         <Canvas
           camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
           gl={{ 
-            antialias: true,
             preserveDrawingBuffer: false,
             powerPreference: "high-performance",
             failIfMajorPerformanceCaveat: false
