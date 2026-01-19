@@ -14,6 +14,7 @@ export default function StopCircleOverlay() {
   const t = useCameraStore((state) => state.t ?? 0);
   const waypoints = useCameraStore((state) => state.waypoints || []);
   const cameraMode = useCameraStore((state) => state.mode);
+  const setEnabled = useCameraStore((state) => state.setEnabled);
 
   const [isMobile, setIsMobile] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(() =>
@@ -770,6 +771,8 @@ export default function StopCircleOverlay() {
                 onClick={() => {
                   if (!showWelcomeOverlay) return;
                   setIsWelcomeFadingOut(true);
+                  // Enable scrolling when Explore button is clicked
+                  setEnabled(true);
                   // Dispatch event to signal that Explore button was clicked
                   window.__exploreButtonClicked = true;
                   window.dispatchEvent(new Event("explore-button-clicked"));

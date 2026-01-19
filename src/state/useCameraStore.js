@@ -741,6 +741,9 @@ export const useCameraStore = create((set, get) => {
           )
       : seedWaypoints;
 
+  // Check if Explore button was already clicked (for page refresh scenarios)
+  const wasExploreButtonClicked = isBrowser && window.__exploreButtonClicked === true;
+
   return {
     waypoints: initialWaypoints,
     archConfig: defaultArchConfig,
@@ -781,7 +784,7 @@ export const useCameraStore = create((set, get) => {
     terrainCollider: null,
 
     // flags
-    enabled: true, // Start with narrative camera enabled by default (user mode)
+    enabled: wasExploreButtonClicked, // Disabled until Explore button is clicked (or already clicked on page refresh)
     paused: false,
     locked: false,
 

@@ -210,7 +210,6 @@ export default function IntroText() {
           position: "relative",
           opacity: fadeInOpacity,
           transition: "opacity 800ms ease-in",
-          pointerEvents: isFadingOut ? "none" : "none",
         }}
       >
         {/* Title line */}

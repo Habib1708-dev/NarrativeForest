@@ -89,7 +89,7 @@ export default function CameraControllerR3F() {
     "Narrative/Camera",
     {
       enabled: {
-        value: true, // Start enabled by default
+        value: enabled, // Use current store value (disabled until Explore button clicked)
         onChange: (v) => useCameraStore.getState().setEnabled(v),
       },
       GlobalSS: {
@@ -228,8 +228,9 @@ export default function CameraControllerR3F() {
       }
       lastSegRef.current = seg;
     }
-    // Apply pose only when enabled and not locked/paused
-    if (enabled && !(locked || paused)) {
+    // Apply pose always (enabled only controls scrolling, not camera positioning)
+    // Lock/pause still prevents updates during those states
+    if (!(locked || paused)) {
       const { position, quaternion, fov } = getPose();
       camera.position.copy(position);
       camera.quaternion.copy(quaternion);
