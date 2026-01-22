@@ -1317,96 +1317,25 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
     }
     updateUniformAll("uCoolMix", coolMixRef.current);
 
-    // Throttle hover detection work to ~6 Hz to reduce per-frame cost (uses NDC projection, not raycasting)
-    hoverAccumRef.current += dt;
-    const HOVER_STEP = 1 / 6; // ~6 times per second
-    if (hoverAccumRef.current < HOVER_STEP) return;
-    const dtHover = hoverAccumRef.current;
-    hoverAccumRef.current = 0;
-
-    // Hover colors (scaled by heat)
+    // Hover detection disabled - always use base colors
     const sA = materialA?.userData?.shader;
     const sB = materialB?.userData?.shader;
     const sC = materialC?.userData?.shader;
     if (!sA || !sB || !sC) return;
 
-    // Skip hover detection when crystals are not visible (dissolved out)
-    // Progress < 0 means crystals are fully dissolved and invisible
-    const isVisible = progressRef.current >= 0.0;
-    const hovered = isVisible
-      ? anyHoveredFor(meshARef.current, geoA?.boundingSphere?.radius || 1) ||
-        anyHoveredFor(meshBRef.current, geoB?.boundingSphere?.radius || 1) ||
-        anyHoveredFor(meshCRef.current, geoC?.boundingSphere?.radius || 1)
-      : false;
+    // Disable hover detection - always set hover mix to 0 and use base colors
+    hoverMixRef.current = 0;
+    sA.uniforms.uU_UniformFactor.value = 0;
+    sB.uniforms.uU_UniformFactor.value = 0;
+    sC.uniforms.uU_UniformFactor.value = 0;
 
-    const wasHovered = prevHoveredRef.current;
-    prevHoveredRef.current = hovered;
-
-    const easeK = 1 - Math.exp(-unifiedHover.U_hoverEase * dtHover);
-    if (unifiedHover.U_hoverEnabled && hovered) {
-      hoverMixRef.current += (1 - hoverMixRef.current) * easeK;
-    } else {
-      const coolRate =
-        unifiedHover.U_coolTime > 0
-          ? dtHover / Math.max(1e-3, unifiedHover.U_coolTime)
-          : 1.0;
-      hoverMixRef.current = Math.max(0, hoverMixRef.current - coolRate);
-    }
-
-    // Hover should not depend on heat/cool; keep uCoolMix only for edge glow.
-    const effectiveMix = Math.min(1, Math.max(0, hoverMixRef.current));
-    sA.uniforms.uU_UniformFactor.value = effectiveMix;
-    sB.uniforms.uU_UniformFactor.value = effectiveMix;
-    sC.uniforms.uU_UniformFactor.value = effectiveMix;
-
-    // If cooled and not hovering, snap back to base palette
-    if ((!unifiedHover.U_hoverEnabled || !hovered) && effectiveMix <= 1e-4) {
-      sA.uniforms.uU_ColorA.value.copy(baseA.current);
-      sA.uniforms.uU_ColorB.value.copy(baseB.current);
-      sB.uniforms.uU_ColorA.value.copy(baseA.current);
-      sB.uniforms.uU_ColorB.value.copy(baseB.current);
-      sC.uniforms.uU_ColorA.value.copy(baseA.current);
-      sC.uniforms.uU_ColorB.value.copy(baseB.current);
-      return;
-    }
-
-    // Hover palette cycling
-    if (unifiedHover.U_hoverEnabled && hovered && !wasHovered)
-      segTRef.current = 0;
-    if (unifiedHover.U_hoverEnabled && hovered) {
-      const dur = Math.max(0.05, unifiedHover.U_cycleTime);
-      segTRef.current += dtHover / dur;
-      if (segTRef.current >= 1.0) {
-        segIdxRef.current = (segIdxRef.current + 1) % 3;
-        segTRef.current -= 1.0;
-      }
-    }
-
-    const t = segTRef.current;
-    const tSmooth = t * t * (3 - 2 * t);
-    const fromIdx = segIdxRef.current;
-    const toIdx = (fromIdx + 1) % 3;
-
-    const [fromBot, fromTop] = getPair(fromIdx);
-    const [toBot, toTop] = getPair(toIdx);
-
-    lerpFromBot.copy(fromBot);
-    lerpFromTop.copy(fromTop);
-    targetBot.copy(toBot);
-    targetTop.copy(toTop);
-
-    curHoverBot.copy(lerpFromBot).lerp(targetBot, tSmooth);
-    curHoverTop.copy(lerpFromTop).lerp(targetTop, tSmooth);
-
-    outA.copy(baseA.current).lerp(curHoverBot, effectiveMix);
-    outB.copy(baseB.current).lerp(curHoverTop, effectiveMix);
-
-    sA.uniforms.uU_ColorA.value.copy(outA);
-    sA.uniforms.uU_ColorB.value.copy(outB);
-    sB.uniforms.uU_ColorA.value.copy(outA);
-    sB.uniforms.uU_ColorB.value.copy(outB);
-    sC.uniforms.uU_ColorA.value.copy(outA);
-    sC.uniforms.uU_ColorB.value.copy(outB);
+    // Always use base palette (hover disabled)
+    sA.uniforms.uU_ColorA.value.copy(baseA.current);
+    sA.uniforms.uU_ColorB.value.copy(baseB.current);
+    sB.uniforms.uU_ColorA.value.copy(baseA.current);
+    sB.uniforms.uU_ColorB.value.copy(baseB.current);
+    sC.uniforms.uU_ColorA.value.copy(baseA.current);
+    sC.uniforms.uU_ColorB.value.copy(baseB.current);
   });
 
   if (!geoA || !geoB || !geoC) return null;
