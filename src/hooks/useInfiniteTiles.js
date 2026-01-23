@@ -3,6 +3,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { makeTileMath, ringSet, addPrefetch, setDiff } from "../proc/tileMath";
 
+// Reusable Vector3 to avoid per-call allocations
+const _forward = new THREE.Vector3();
+
 /**
  * Infinite grid indices with hysteresis + forward prefetch.
  */
@@ -32,15 +35,15 @@ export function useInfiniteTiles({
   const recompute = () => {
     const [ix, iz] = math.worldToTile(camera.position.x, camera.position.z);
 
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    if (forward.lengthSq() > 0) forward.normalize();
+    _forward.set(0, 0, 0);
+    camera.getWorldDirection(_forward);
+    _forward.y = 0;
+    if (_forward.lengthSq() > 0) _forward.normalize();
 
     const req0 = ringSet(ix, iz, loadRadius, math.key);
     const req =
       prefetch > 0
-        ? addPrefetch(req0, ix, iz, forward, [[loadRadius, prefetch]], math.key)
+        ? addPrefetch(req0, ix, iz, _forward, [[loadRadius, prefetch]], math.key)
         : req0;
     const keep = ringSet(ix, iz, dropRadius, math.key);
 
