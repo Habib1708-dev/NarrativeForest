@@ -4,6 +4,9 @@ import { useThree, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
 import { useCameraStore } from "../state/useCameraStore";
 
+// Reusable Vector3 to avoid per-frame allocations
+const _displacement = new Vector3();
+
 const TITLE_TEXT = "Habib Khalaf";
 const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
 
@@ -84,6 +87,11 @@ export default function IntroText() {
   const initialCamPos = useRef(null);
   const initialCamDir = useRef(null);
 
+  // Track last progress to avoid unnecessary updates
+  const lastProgressRef = useRef(-1);
+  // Mutable ref for charStates to avoid creating new arrays
+  const charStatesRef = useRef(charStates);
+
   // Staggered delays for each character (like the CSS animation-delay)
   const CHAR_DELAY = 0.028; // ~28ms converted to distance units
   const charDelays = useRef(
@@ -116,7 +124,7 @@ export default function IntroText() {
 
   useFrame(() => {
     if (!camera || !gl || !initialCamPos.current || !initialCamDir.current) return;
-    
+
     // Check if WebGL context is still valid
     try {
       const webglContext = gl.getContext();
@@ -126,55 +134,70 @@ export default function IntroText() {
     }
 
     try {
-      // Calculate forward movement (dot product with initial direction)
-      const displacement = new Vector3().subVectors(
-        camera.position,
-        initialCamPos.current
-      );
-      const forwardDistance = displacement.dot(initialCamDir.current);
+      // Calculate forward movement using reusable Vector3
+      _displacement.subVectors(camera.position, initialCamPos.current);
+      const forwardDistance = _displacement.dot(initialCamDir.current);
 
-    // Only trigger on forward movement (positive distance)
-    const progress = Math.max(0, forwardDistance);
-    const animationDistance = 0.5; // Distance over which the animation plays
+      // Only trigger on forward movement (positive distance)
+      const progress = Math.max(0, forwardDistance);
 
-    // Calculate per-character states matching sticky-evaporate keyframes
-    const newStates = charDelays.current.map((delay) => {
-      // Adjust progress based on staggered delay
-      const adjustedProgress = Math.max(0, progress - delay);
-      const t = Math.min(1, adjustedProgress / animationDistance);
+      // Skip update if progress hasn't changed significantly
+      if (Math.abs(progress - lastProgressRef.current) < 0.001) return;
+      lastProgressRef.current = progress;
 
-      // Match the CSS keyframes easing (ease-out curve)
-      const eased = 1 - Math.pow(1 - t, 2);
+      const animationDistance = 0.5; // Distance over which the animation plays
 
-      // At 0%: opacity 1, translateY 0, scale 1, blur 0
-      // At 60%: opacity 0.4, translateY -8px, scale 0.98, blur 1px
-      // At 100%: opacity 0, translateY -16px, scale 0.96, blur 2px
+      // Calculate per-character states, mutating in place
+      let anyChange = false;
+      const states = charStatesRef.current;
 
-      let opacity, offset, scale, blur;
+      for (let i = 0; i < charDelays.current.length; i++) {
+        const delay = charDelays.current[i];
+        // Adjust progress based on staggered delay
+        const adjustedProgress = Math.max(0, progress - delay);
+        const t = Math.min(1, adjustedProgress / animationDistance);
 
-      if (eased <= 0.6) {
-        // 0% to 60%
-        const subT = eased / 0.6;
-        opacity = 1 - 0.6 * subT;
-        offset = 8 * subT;
-        scale = 1 - 0.02 * subT;
-        blur = 1 * subT;
-      } else {
-        // 60% to 100%
-        const subT = (eased - 0.6) / 0.4;
-        opacity = 0.4 - 0.4 * subT;
-        offset = 8 + 8 * subT;
-        scale = 0.98 - 0.02 * subT;
-        blur = 1 + 1 * subT;
+        // Match the CSS keyframes easing (ease-out curve)
+        const eased = 1 - Math.pow(1 - t, 2);
+
+        let opacity, offset, scale, blur;
+
+        if (eased <= 0.6) {
+          // 0% to 60%
+          const subT = eased / 0.6;
+          opacity = 1 - 0.6 * subT;
+          offset = 8 * subT;
+          scale = 1 - 0.02 * subT;
+          blur = 1 * subT;
+        } else {
+          // 60% to 100%
+          const subT = (eased - 0.6) / 0.4;
+          opacity = 0.4 - 0.4 * subT;
+          offset = 8 + 8 * subT;
+          scale = 0.98 - 0.02 * subT;
+          blur = 1 + 1 * subT;
+        }
+
+        // Check if values changed before mutating
+        const state = states[i];
+        if (
+          Math.abs(state.offset - offset) > 0.01 ||
+          Math.abs(state.opacity - opacity) > 0.01
+        ) {
+          state.offset = offset;
+          state.opacity = opacity;
+          state.scale = scale;
+          state.blur = blur;
+          anyChange = true;
+        }
       }
 
-      return { offset, opacity, scale, blur };
-    });
-
-    setCharStates(newStates);
+      // Only trigger React re-render if something actually changed
+      if (anyChange) {
+        setCharStates([...states]); // Shallow copy to trigger re-render
+      }
     } catch (error) {
       // Silently handle WebGL context loss during animation
-      // Don't log to avoid console spam
     }
   });
 

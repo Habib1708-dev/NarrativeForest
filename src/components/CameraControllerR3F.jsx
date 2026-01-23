@@ -4,7 +4,6 @@ import * as THREE from "three";
 import { useControls, folder } from "leva";
 import { useCameraStore } from "../state/useCameraStore";
 import { useDebugStore } from "../state/useDebugStore";
-import { yawPitchFromQuaternion } from "../utils/cameraInterp";
 
 // Minimal gizmos: spheres at waypoint positions and optional lines to lookAt targets
 function CameraWaypointGizmos() {
@@ -206,26 +205,12 @@ export default function CameraControllerR3F() {
     { collapsed: false, hidden: !isDebugMode }
   );
 
-  const lastLogRef = useRef({ pos: new THREE.Vector3(), yaw: 0, pitch: 0 });
-  const stillTimerRef = useRef(0);
-  const stillLoggedRef = useRef(false);
-
-  useFrame((_, dt) => {
-    // Track current segment for logging
+  useFrame(() => {
+    // Track current segment
     const tNow = useCameraStore.getState().t ?? 0;
     tRef.current = tNow;
     const seg = getSegmentIndex(tNow);
     if (seg !== lastSegRef.current) {
-      const wps = useCameraStore.getState().waypoints;
-      const a = wps[seg];
-      const b = wps[seg + 1];
-      if (a && b) {
-        console.log(
-          `[Camera segment] ${seg}: ${a.name ?? `wp-${seg}`} -> ${
-            b.name ?? `wp-${seg + 1}`
-          }`
-        );
-      }
       lastSegRef.current = seg;
     }
     // Apply pose always (enabled only controls scrolling, not camera positioning)
@@ -238,37 +223,6 @@ export default function CameraControllerR3F() {
         camera.fov = fov;
         camera.updateProjectionMatrix();
       }
-    }
-
-    // Detect stillness on the current camera regardless of enabled
-    const lp = lastLogRef.current.pos;
-    const dyawpitch = yawPitchFromQuaternion(camera.quaternion);
-    const curPos = camera.position;
-    const dPos = lp.distanceTo(curPos);
-    const dyaw = Math.abs(dyawpitch.yaw - lastLogRef.current.yaw);
-    const dpitch = Math.abs(dyawpitch.pitch - lastLogRef.current.pitch);
-    const MOV_EPS = 1e-4;
-    const ROT_EPS = 1e-4;
-    if (dPos < MOV_EPS && dyaw < ROT_EPS && dpitch < ROT_EPS) {
-      stillTimerRef.current += dt;
-      if (stillTimerRef.current > 0.3 && !stillLoggedRef.current) {
-        const yawDeg = (dyawpitch.yaw * 180) / Math.PI;
-        const pitchDeg = (dyawpitch.pitch * 180) / Math.PI;
-        console.log(
-          `[Camera still] pos=(${curPos.x.toFixed(3)}, ${curPos.y.toFixed(
-            3
-          )}, ${curPos.z.toFixed(3)}), yawDeg=${yawDeg.toFixed(
-            1
-          )}, pitchDeg=${pitchDeg.toFixed(1)}`
-        );
-        stillLoggedRef.current = true;
-      }
-    } else {
-      stillTimerRef.current = 0;
-      stillLoggedRef.current = false;
-      lp.copy(curPos);
-      lastLogRef.current.yaw = dyawpitch.yaw;
-      lastLogRef.current.pitch = dyawpitch.pitch;
     }
   });
 

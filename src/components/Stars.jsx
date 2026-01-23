@@ -5,6 +5,8 @@ import { useFrame } from "@react-three/fiber";
 
 export default function Stars() {
   const groupRef = useRef();
+  // Cache uniform references to avoid per-frame traversal
+  const uniformsRef = useRef({ cutoffEnabled: null, cutoffY: null });
 
   const {
     radius,
@@ -120,6 +122,9 @@ export default function Stars() {
         shader.uniforms.uNF_CutoffY = { value: cutoffY };
         target.userData.uNF_CutoffEnabled = shader.uniforms.uNF_CutoffEnabled;
         target.userData.uNF_CutoffY = shader.uniforms.uNF_CutoffY;
+        // Cache uniform references for direct access in useFrame
+        uniformsRef.current.cutoffEnabled = shader.uniforms.uNF_CutoffEnabled;
+        uniformsRef.current.cutoffY = shader.uniforms.uNF_CutoffY;
       };
 
       target.needsUpdate = true;
@@ -137,19 +142,15 @@ export default function Stars() {
     speed,
   ]);
 
-  // Update uniforms each frame based on controls
+  // Update uniforms each frame using cached references (no traversal)
   useFrame(() => {
-    const root = groupRef.current;
-    if (!root) return;
-    root.traverse((obj) => {
-      const mat = obj?.material;
-      const target = Array.isArray(mat) ? mat?.[0] : mat;
-      const ud = target?.userData;
-      if (!ud) return;
-      if (ud.uNF_CutoffEnabled)
-        ud.uNF_CutoffEnabled.value = cutoffEnabled ? 1 : 0;
-      if (ud.uNF_CutoffY) ud.uNF_CutoffY.value = cutoffY;
-    });
+    const uniforms = uniformsRef.current;
+    if (uniforms.cutoffEnabled) {
+      uniforms.cutoffEnabled.value = cutoffEnabled ? 1 : 0;
+    }
+    if (uniforms.cutoffY) {
+      uniforms.cutoffY.value = cutoffY;
+    }
   });
 
   return (
