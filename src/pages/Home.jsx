@@ -185,7 +185,7 @@ export default function Home() {
             powerPreference: "high-performance",
             failIfMajorPerformanceCaveat: false
           }}
-          dpr={[1, 2]}
+          dpr={[1, 1.5]}
           onCreated={({ gl }) => {
             // Handle WebGL context loss
             const canvas = gl.domElement;

@@ -235,13 +235,13 @@ const BAKED_C = [
 function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
   const mat = useMemo(() => {
     const m = new THREE.MeshPhysicalMaterial({
-      transmission: 1.0,
+      transmission: 0.7,
       thickness: unified.U_thickness,
-      ior: unified.U_ior,
+      ior: 1.3,
       roughness: unified.U_roughness,
       metalness: 0.0,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.02,
+      clearcoat: 0.3,
+      clearcoatRoughness: 0.1,
       specularIntensity: 1.0,
       color: new THREE.Color("#ffffff"),
       attenuationColor: new THREE.Color("#ffffff"),
