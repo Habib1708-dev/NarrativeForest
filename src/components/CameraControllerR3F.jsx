@@ -9,34 +9,41 @@ import { useDebugStore } from "../state/useDebugStore";
 function CameraWaypointGizmos() {
   const waypoints = useCameraStore((s) => s.waypoints);
   const gizmos = useCameraStore((s) => s.gizmos);
+
+  // Memoize Float32Arrays to avoid per-render allocations
+  const lineArrays = useMemo(() => {
+    return waypoints.map((w) => {
+      if (!("lookAt" in w.orientation)) return null;
+      return new Float32Array([
+        w.position[0],
+        w.position[1],
+        w.position[2],
+        w.orientation.lookAt[0],
+        w.orientation.lookAt[1],
+        w.orientation.lookAt[2],
+      ]);
+    });
+  }, [waypoints]);
+
   return (
     <group>
       {waypoints.map((w, idx) => {
         const key = w.name ?? `wp-${idx}`;
         const show = gizmos[key] ?? false;
         if (!show) return null;
-        const hasLookAt = "lookAt" in w.orientation;
+        const lineArray = lineArrays[idx];
         return (
           <group key={key}>
             <mesh position={w.position}>
               <sphereGeometry args={[0.05, 8, 8]} />
               <meshBasicMaterial color={"#6cf"} />
             </mesh>
-            {hasLookAt && (
+            {lineArray && (
               <line>
                 <bufferGeometry>
                   <bufferAttribute
                     attach="attributes-position"
-                    array={
-                      new Float32Array([
-                        w.position[0],
-                        w.position[1],
-                        w.position[2],
-                        w.orientation.lookAt[0],
-                        w.orientation.lookAt[1],
-                        w.orientation.lookAt[2],
-                      ])
-                    }
+                    array={lineArray}
                     count={2}
                     itemSize={3}
                   />

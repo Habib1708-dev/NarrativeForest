@@ -130,17 +130,9 @@ export default function Stars() {
       target.needsUpdate = true;
       patched = true;
     });
-  }, [
-    cutoffEnabled,
-    cutoffY,
-    radius,
-    depth,
-    count,
-    factor,
-    saturation,
-    fade,
-    speed,
-  ]);
+    // Only re-run when DreiStars props change (which recreates the material).
+    // cutoffEnabled/cutoffY are excluded - useFrame updates uniforms every frame.
+  }, [radius, depth, count, factor, saturation, fade, speed]);
 
   // Update uniforms each frame using cached references (no traversal)
   useFrame(() => {

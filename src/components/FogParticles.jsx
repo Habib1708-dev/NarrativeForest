@@ -435,14 +435,13 @@ export default function FogParticles({
     <group ref={groupRef} position={[0, 0, 0]}>
       {instances.map(({ position, scaleJitter }, i) => {
         const s = scaleFalloffWithSize ? size * scaleJitter : size;
-        const pos = [position[0], position[1], position[2]];
 
         if (fallback) {
           // Minimal fallback (no prepass soft), still premultiplied
           return (
             <Billboard
               key={i}
-              position={pos}
+              position={position}
               follow
               ref={(el) => (billboardRefs.current[i] = el)}
             >
@@ -465,7 +464,7 @@ export default function FogParticles({
         return (
           <Billboard
             key={i}
-            position={pos}
+            position={position}
             follow
             ref={(el) => (billboardRefs.current[i] = el)}
           >
