@@ -1,44 +1,21 @@
 import React, { useEffect, useRef } from "react";
 import { Stars as DreiStars } from "@react-three/drei";
-import { useControls } from "leva";
-import { useFrame } from "@react-three/fiber";
+
+// Hardcoded defaults for maximum performance (no leva overhead, no per-frame updates)
+const STARS_CONFIG = {
+  radius: 360,
+  depth: 2,
+  count: 10000,
+  factor: 12,
+  saturation: 0,
+  fade: true,
+  speed: 0,
+  cutoffEnabled: true,
+  cutoffY: 1.3,
+};
 
 export default function Stars() {
   const groupRef = useRef();
-  // Cache uniform references to avoid per-frame traversal
-  const uniformsRef = useRef({ cutoffEnabled: null, cutoffY: null });
-
-  const {
-    radius,
-    depth,
-    count,
-    factor,
-    saturation,
-    fade,
-    speed,
-    cutoffEnabled,
-    cutoffY,
-  } = useControls(
-    "Sky / Stars",
-    {
-      radius: { value: 360, min: 1, max: 2000, step: 1 },
-      depth: { value: 2, min: 1, max: 50, step: 1 },
-      count: { value: 10000, min: 0, max: 10000, step: 50 },
-      factor: { value: 12, min: 0, max: 20, step: 0.1 },
-      saturation: { value: 0, min: 0, max: 1, step: 0.01 },
-      fade: { value: true },
-      speed: { value: 0, min: 0, max: 1, step: 0.01 },
-      cutoffEnabled: { value: true, label: "Cutoff by height" },
-      cutoffY: {
-        value: 1.3,
-        min: -200,
-        max: 200,
-        step: 0.1,
-        label: "Cutoff Y",
-      },
-    },
-    { collapsed: true }
-  );
 
   // Patch the Drei Stars shader to discard stars below cutoffY
   useEffect(() => {
@@ -118,43 +95,25 @@ export default function Stars() {
           }
         }
 
-        shader.uniforms.uNF_CutoffEnabled = { value: cutoffEnabled ? 1 : 0 };
-        shader.uniforms.uNF_CutoffY = { value: cutoffY };
-        target.userData.uNF_CutoffEnabled = shader.uniforms.uNF_CutoffEnabled;
-        target.userData.uNF_CutoffY = shader.uniforms.uNF_CutoffY;
-        // Cache uniform references for direct access in useFrame
-        uniformsRef.current.cutoffEnabled = shader.uniforms.uNF_CutoffEnabled;
-        uniformsRef.current.cutoffY = shader.uniforms.uNF_CutoffY;
+        shader.uniforms.uNF_CutoffEnabled = { value: STARS_CONFIG.cutoffEnabled ? 1 : 0 };
+        shader.uniforms.uNF_CutoffY = { value: STARS_CONFIG.cutoffY };
       };
 
       target.needsUpdate = true;
       patched = true;
     });
-    // Only re-run when DreiStars props change (which recreates the material).
-    // cutoffEnabled/cutoffY are excluded - useFrame updates uniforms every frame.
-  }, [radius, depth, count, factor, saturation, fade, speed]);
-
-  // Update uniforms each frame using cached references (no traversal)
-  useFrame(() => {
-    const uniforms = uniformsRef.current;
-    if (uniforms.cutoffEnabled) {
-      uniforms.cutoffEnabled.value = cutoffEnabled ? 1 : 0;
-    }
-    if (uniforms.cutoffY) {
-      uniforms.cutoffY.value = cutoffY;
-    }
-  });
+  }, []);
 
   return (
     <group ref={groupRef}>
       <DreiStars
-        radius={radius}
-        depth={depth}
-        count={count}
-        factor={factor}
-        saturation={saturation}
-        fade={fade}
-        speed={speed}
+        radius={STARS_CONFIG.radius}
+        depth={STARS_CONFIG.depth}
+        count={STARS_CONFIG.count}
+        factor={STARS_CONFIG.factor}
+        saturation={STARS_CONFIG.saturation}
+        fade={STARS_CONFIG.fade}
+        speed={STARS_CONFIG.speed}
       />
     </group>
   );
