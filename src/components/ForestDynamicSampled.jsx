@@ -342,6 +342,9 @@ export default function ForestDynamicSampled({
     Math.floor(z / chunkSize),
   ];
 
+  // Frame counter for throttling retention checks
+  const frameCountRef = useRef(0);
+
   const neighborhood = (cx, cz, R) => {
     const out = [];
     for (let dz = -R; dz <= R; dz++)
@@ -383,45 +386,138 @@ export default function ForestDynamicSampled({
     return { next, viewSet: new Set(Object.keys(next)) };
   };
 
-  // Recompute when entering a new chunk
+  // ==================== CONSOLIDATED useFrame ====================
+  // Combines: camera tracking, retention management, build queue, initial ready check
+  // This reduces callback overhead from 4 separate hooks to 1
   useFrame(() => {
-    if (!terrainGroup) return;
+    frameCountRef.current++;
+    const now = performance.now();
 
-    const childrenCount = terrainGroup.children?.length ?? 0;
-    if (childrenCount !== prevChildrenCountRef.current) {
-      prevChildrenCountRef.current = childrenCount;
-      scheduleRefresh();
+    // === Phase 1: Camera tracking & mode computation ===
+    if (terrainGroup) {
+      const childrenCount = terrainGroup.children?.length ?? 0;
+      if (childrenCount !== prevChildrenCountRef.current) {
+        prevChildrenCountRef.current = childrenCount;
+        scheduleRefresh();
+      }
+
+      camXZ.current.set(camera.position.x, 0, camera.position.z);
+      const [ccx, ccz] = worldToChunk(camXZ.current.x, camXZ.current.z);
+      if (ccx !== lastCellRef.current.cx || ccz !== lastCellRef.current.cz) {
+        lastCellRef.current = { cx: ccx, cz: ccz };
+
+        const { next, viewSet } = computeModes(ccx, ccz);
+
+        for (const k of viewSet) {
+          if (!cacheRef.current.has(k)) {
+            const restored = coldCacheRef.current.get(k);
+            if (restored) {
+              cacheRef.current.set(k, restored);
+              coldCacheRef.current.delete(k);
+              scheduleRefresh();
+            } else {
+              // Parse chunk coordinates from key
+              const commaIdx = k.indexOf(",");
+              const x = parseInt(k.slice(0, commaIdx), 10);
+              const z = parseInt(k.slice(commaIdx + 1), 10);
+              buildQueueRef.current.push({ key: k, cx: x, cz: z, enqueuedAt: now });
+            }
+          }
+          dropTimesRef.current.delete(k);
+        }
+
+        modesRef.current = next;
+        for (const k of cacheRef.current.keys()) {
+          if (!viewSet.has(k)) dropTimesRef.current.set(k, now);
+        }
+
+        scheduleRefresh();
+      }
     }
 
-    camXZ.current.set(camera.position.x, 0, camera.position.z);
-    const [ccx, ccz] = worldToChunk(camXZ.current.x, camXZ.current.z);
-    if (ccx === lastCellRef.current.cx && ccz === lastCellRef.current.cz)
-      return;
-    lastCellRef.current = { cx: ccx, cz: ccz };
+    // === Phase 2: Retention management (throttled - every 10 frames) ===
+    if (frameCountRef.current % 10 === 0 && dropTimesRef.current.size > 0) {
+      const cooldown = retentionSeconds * 1000;
+      dropTimesRef.current.forEach((t0, key) => {
+        if (now - t0 >= cooldown) {
+          const rec = cacheRef.current.get(key);
+          if (rec) {
+            coldCacheRef.current.set(key, rec);
+            cacheRef.current.delete(key);
+            scheduleRefresh();
+          }
+          dropTimesRef.current.delete(key);
+        }
+      });
+    }
 
-    const { next, viewSet } = computeModes(ccx, ccz);
+    // === Phase 3: Build queue processing ===
+    if (buildQueueRef.current.length) {
+      let budget = raysPerFrame;
+      if (!Number.isFinite(budget) || budget <= 0) budget = 1;
 
-    const now = performance.now();
-    for (const k of viewSet) {
-      if (!cacheRef.current.has(k)) {
-        const restored = coldCacheRef.current.get(k);
-        if (restored) {
-          cacheRef.current.set(k, restored);
-          coldCacheRef.current.delete(k);
-          scheduleRefresh();
-        } else {
-          const [x, z] = k.split(",").map((n) => parseInt(n, 10));
-          buildQueueRef.current.push({ key: k, cx: x, cz: z, enqueuedAt: now });
+      while (budget > 0 && buildQueueRef.current.length) {
+        const job = buildQueueRef.current.shift();
+        const { key, cx, cz } = job;
+        if (cacheRef.current.has(key)) continue;
+
+        const staleCold = coldCacheRef.current.get(key);
+        if (staleCold) {
+          releaseChunkRecord(staleCold);
+          coldCacheRef.current.delete(key);
+        }
+
+        const result = buildChunkSampled(cx, cz, {
+          chunkSize,
+          treeMinSpacing,
+          rockMinSpacing,
+          treeTargetPerChunk,
+          rockTargetPerChunk,
+          treeScaleMin,
+          treeScaleMax,
+          rockScaleMin,
+          rockScaleMax,
+          seed,
+          treeBaseMinY,
+          rockBottomPerPart,
+          insideExclusion,
+          sampleHeight,
+        });
+
+        budget -= Math.max(1, result.cost);
+
+        cacheRef.current.set(key, {
+          trees: result.treeMatrices,
+          rocksByPart: result.rockMatricesByPart,
+          built: true,
+        });
+        scheduleRefresh();
+      }
+    }
+
+    // === Phase 4: Initial ready check ===
+    if (!initialReadyNotifiedRef.current) {
+      const modes = modesRef.current;
+      let hasAnyModes = false;
+      for (const _ in modes) {
+        hasAnyModes = true;
+        break;
+      }
+      if (hasAnyModes && buildQueueRef.current.length === 0) {
+        let allCached = true;
+        for (const key in modes) {
+          if (!cacheRef.current.has(key)) {
+            allCached = false;
+            break;
+          }
+        }
+        if (allCached) {
+          initialReadyNotifiedRef.current = true;
+          markEnd("initial-chunks");
+          onInitialReadyRef.current?.();
         }
       }
-      dropTimesRef.current.delete(k);
     }
-
-    modesRef.current = next;
-    for (const k of cacheRef.current.keys())
-      if (!viewSet.has(k)) dropTimesRef.current.set(k, performance.now());
-
-    scheduleRefresh();
   });
 
   useEffect(() => {
@@ -432,70 +528,6 @@ export default function ForestDynamicSampled({
       dropTimesRef.current.clear();
     };
   }, []);
-
-  // Drop chunks outside retention window after cooldown
-  useFrame(() => {
-    if (!Object.keys(modesRef.current).length) return;
-    const now = performance.now();
-    const cooldown = retentionSeconds * 1000;
-    dropTimesRef.current.forEach((t0, key) => {
-      if (now - t0 >= cooldown) {
-        const rec = cacheRef.current.get(key);
-        if (rec) {
-          coldCacheRef.current.set(key, rec);
-          cacheRef.current.delete(key);
-          scheduleRefresh();
-        }
-        dropTimesRef.current.delete(key);
-      }
-    });
-  });
-
-  // Build cadence — budget derived from raysPerFrame setting
-  useFrame(() => {
-    if (!buildQueueRef.current.length) return;
-
-    let budget = raysPerFrame;
-    if (!Number.isFinite(budget) || budget <= 0) budget = 1;
-
-    while (budget > 0 && buildQueueRef.current.length) {
-      const job = buildQueueRef.current.shift();
-      const { key, cx, cz } = job;
-      if (cacheRef.current.has(key)) continue;
-
-      const staleCold = coldCacheRef.current.get(key);
-      if (staleCold) {
-        releaseChunkRecord(staleCold);
-        coldCacheRef.current.delete(key);
-      }
-
-      const result = buildChunkSampled(cx, cz, {
-        chunkSize,
-        treeMinSpacing,
-        rockMinSpacing,
-        treeTargetPerChunk,
-        rockTargetPerChunk,
-        treeScaleMin,
-        treeScaleMax,
-        rockScaleMin,
-        rockScaleMax,
-        seed,
-        treeBaseMinY,
-        rockBottomPerPart,
-        insideExclusion,
-        sampleHeight,
-      });
-
-      budget -= Math.max(1, result.cost);
-
-      cacheRef.current.set(key, {
-        trees: result.treeMatrices,
-        rocksByPart: result.rockMatricesByPart,
-        built: true,
-      });
-      scheduleRefresh();
-    }
-  });
 
   // Rebuild overlapping chunks immediately when exclusion changes (instant cleanup)
   useEffect(() => {
@@ -538,13 +570,23 @@ export default function ForestDynamicSampled({
 
   // Aggregate matrices from active chunks → upload to instanced meshes
   function applyInstancing() {
-    if (!Object.keys(modesRef.current).length) return;
+    const modes = modesRef.current;
+    // Check if modes is empty without creating an array
+    let hasAnyModes = false;
+    for (const _ in modes) {
+      hasAnyModes = true;
+      break;
+    }
+    if (!hasAnyModes) return;
 
     const nearImmediateTrees = [];
     const nearBufferTrees = [];
     const rocksByPart = rockParts.map(() => []);
 
-    for (const [key, mode] of Object.entries(modesRef.current)) {
+    // Use for-in instead of Object.entries to avoid iterator allocation
+    for (const key in modes) {
+      if (!Object.hasOwn(modes, key)) continue;
+      const mode = modes[key];
       const rec = cacheRef.current.get(key);
       if (!rec) continue;
 
@@ -584,26 +626,13 @@ export default function ForestDynamicSampled({
     });
   }
 
+  // Apply instancing at priority 1 (runs after main render loop)
+  // This must stay separate to ensure instance matrices are uploaded after all updates
   useFrame(() => {
     if (!needsRefreshRef.current) return;
     needsRefreshRef.current = false;
     applyInstancing();
   }, 1);
-
-  useFrame(() => {
-    if (initialReadyNotifiedRef.current) return;
-    const modeEntries = Object.keys(modesRef.current || {});
-    if (!modeEntries.length) return;
-    if (buildQueueRef.current.length > 0) return;
-    for (const key of modeEntries) {
-      if (!cacheRef.current.has(key)) {
-        return;
-      }
-    }
-    initialReadyNotifiedRef.current = true;
-    markEnd("initial-chunks");
-    onInitialReadyRef.current?.();
-  });
 
   if (!highParts.length || !lodParts.length || !rockParts.length) return null;
 
