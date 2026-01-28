@@ -414,9 +414,13 @@ df_vViewDist = length(mvPosition.xyz);
     if (!fullSceneScanNeededRef.current) return;
 
     if (warmupFramesRef.current > 0) {
-      runPatchPass();
       warmupFramesRef.current -= 1;
-      if (!fullSceneScanNeededRef.current) warmupFramesRef.current = 0;
+      // Only run patch pass every 10 frames during warmup to reduce CPU load
+      // This reduces scene traversals from 120 to 12 while still catching late-mounting assets
+      if (warmupFramesRef.current % 10 === 0) {
+        runPatchPass();
+        if (!fullSceneScanNeededRef.current) warmupFramesRef.current = 0;
+      }
       return;
     }
     // After warmup, only run when manually requested
