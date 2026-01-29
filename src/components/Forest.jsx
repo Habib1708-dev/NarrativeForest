@@ -546,12 +546,15 @@ function ChunkInstanced({
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
+    const euler = new THREE.Euler();
     for (let i = 0; i < treeTransforms.length; i++) {
       const t = treeTransforms[i];
       p.fromArray(t.position);
-      q.setFromEuler(new THREE.Euler(0, t.rotation, 0));
+      euler.set(0, t.rotation, 0);
+      q.setFromEuler(euler);
       s.setScalar(t.scale);
-      list[i] = m4.clone().compose(p, q, s);
+      m4.compose(p, q, s);
+      list[i] = m4.clone();
     }
     return list;
   }, [treeTransforms]);
@@ -563,6 +566,7 @@ function ChunkInstanced({
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
+    const euler = new THREE.Euler();
 
     for (let i = 0; i < rockTransforms.length; i++) {
       const t = rockTransforms[i];
@@ -573,9 +577,11 @@ function ChunkInstanced({
       p.fromArray(t.position);
       const rx = t.rotation[0],
         ry = t.rotation[1];
-      q.setFromEuler(new THREE.Euler(rx, ry, 0));
+      euler.set(rx, ry, 0);
+      q.setFromEuler(euler);
       s.set(t.scale, t.scale, t.scale);
-      lists[partIndex].push(m4.clone().compose(p, q, s));
+      m4.compose(p, q, s);
+      lists[partIndex].push(m4.clone());
     }
     return lists;
   }, [rockTransforms, rockParts]);

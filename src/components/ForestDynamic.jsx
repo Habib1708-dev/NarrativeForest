@@ -299,7 +299,9 @@ export default function ForestDynamic({
     assign(neighborhood(cx, cz, MID_R), "med");
     assign(neighborhood(cx, cz, NEAR_R), "high");
 
-    return { next, viewSet: new Set(Object.keys(next)) };
+    const viewSet = new Set();
+    for (const k in next) viewSet.add(k);
+    return { next, viewSet };
   };
 
   // Recompute when entering a new chunk
@@ -352,7 +354,9 @@ export default function ForestDynamic({
 
   // Drop chunks outside retention window after cooldown
   useFrame(() => {
-    if (!Object.keys(modesRef.current).length) return;
+    let hasModes = false;
+    for (const _ in modesRef.current) { hasModes = true; break; }
+    if (!hasModes) return;
     const now = performance.now();
     const cooldown = retentionSeconds * 1000;
     dropTimesRef.current.forEach((t0, key) => {
@@ -452,14 +456,17 @@ export default function ForestDynamic({
 
   // Aggregate matrices from active chunks → upload to instanced meshes
   function applyInstancing() {
-    if (!Object.keys(modesRef.current).length) return;
+    let hasAnyMode = false;
+    for (const _ in modesRef.current) { hasAnyMode = true; break; }
+    if (!hasAnyMode) return;
 
     const nearTrees = []; // always rendered
     const midTrees = []; // rendered only if renderMidTrees = true
     const farTrees = []; // outer ring
     const rocksByPart = rockParts.map(() => []);
 
-    for (const [key, mode] of Object.entries(modesRef.current)) {
+    for (const key in modesRef.current) {
+      const mode = modesRef.current[key];
       const rec = cacheRef.current.get(key);
       if (!rec) continue;
 

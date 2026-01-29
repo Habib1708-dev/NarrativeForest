@@ -485,10 +485,12 @@ export default function Experience() {
     // Complete transition - keep the overrides permanently as the new values
     if (rawProgress >= 1.0) {
       transition.isTransitioning = false;
-      console.log("Transition complete!");
-      console.log("Final values actually applied:");
-      console.table(updates);
-      console.log("========================================\n");
+      if (process.env.NODE_ENV !== "production") {
+        console.log("Transition complete!");
+        console.log("Final values actually applied:");
+        console.table(updates);
+        console.log("========================================\n");
+      }
       // Don't clear overrides - they become the permanent values
       // This way the scene stays at the preset values
     }
@@ -509,10 +511,12 @@ export default function Experience() {
 
       const targetPreset = PRESETS[presetControl.preset];
       if (targetPreset) {
-        console.log(`\n🎨 ======== PRESET: ${presetControl.preset} ========`);
-        console.log("📋 Target values that will be applied:");
-        console.table(targetPreset);
-        console.log("🔄 Starting transition...\n");
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`\n🎨 ======== PRESET: ${presetControl.preset} ========`);
+          console.log("📋 Target values that will be applied:");
+          console.table(targetPreset);
+          console.log("🔄 Starting transition...\n");
+        }
         // Use activeValues (current displayed values) as start
         transitionRef.current = {
           isTransitioning: true,
@@ -532,12 +536,14 @@ export default function Experience() {
       const targetPreset = PRESETS[presetName];
 
       if (targetPreset) {
-        console.log(
-          `\n🎨 ======== USER SELECTED PRESET: ${presetName} ========`
-        );
-        console.log("📋 Target values that will be applied:");
-        console.table(targetPreset);
-        console.log("🔄 Starting transition...\n");
+        if (process.env.NODE_ENV !== "production") {
+          console.log(
+            `\n🎨 ======== USER SELECTED PRESET: ${presetName} ========`
+          );
+          console.log("📋 Target values that will be applied:");
+          console.table(targetPreset);
+          console.log("🔄 Starting transition...\n");
+        }
 
         // Trigger transition
         transitionRef.current = {

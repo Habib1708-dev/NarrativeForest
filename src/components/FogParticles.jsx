@@ -5,6 +5,14 @@ import { useTexture, Billboard } from "@react-three/drei";
 import { useControls } from "leva";
 import * as THREE from "three";
 
+// Pre-allocated arrays for useFrame to avoid per-frame GC pressure
+const _occ = [];
+const _layerStash = [];
+const _cutoutMeshes = [];
+const _visStash = []; // Flat pairs: [node, visible, node, visible, ...]
+const _matSwapStash = []; // Flat pairs: [node, material, node, material, ...]
+const _newMats = []; // Reusable array for material swapping
+
 /**
  * FogParticles — single-pass soft billboards with prepass depth.
  * Adds "smart occlusion" that attenuates particles where scene geometry is in front,
@@ -193,14 +201,13 @@ export default function FogParticles({
   const getObject = (o) => (o && o.isObject3D ? o : o?.current || null);
   const setSubtreeToLayer = (root, layer, stash) => {
     root.traverse((node) => {
-      stash.push([node, node.layers.mask]);
+      stash.push(node, node.layers.mask);
       node.layers.set(layer);
     });
   };
   const restoreLayers = (stash) => {
-    for (let i = 0; i < stash.length; i++) {
-      const [node, mask] = stash[i];
-      node.layers.mask = mask;
+    for (let i = 0; i < stash.length; i += 2) {
+      stash[i].layers.mask = stash[i + 1];
     }
     stash.length = 0;
   };
@@ -223,10 +230,11 @@ export default function FogParticles({
   // Prepass + rotation
   useFrame((_, dt) => {
     if (rt) {
-      const occ = [];
+      // Clear and reuse pre-allocated array
+      _occ.length = 0;
       for (let i = 0; i < occluders.length; i++) {
         const obj = getObject(occluders[i]);
-        if (obj) occ.push(obj);
+        if (obj) _occ.push(obj);
       }
 
       // Mirror world camera
@@ -241,53 +249,70 @@ export default function FogParticles({
 
       const prevOverride = scene.overrideMaterial;
       const prevTarget = gl.getRenderTarget();
-      const layerStash = [];
+      _layerStash.length = 0;
 
       try {
-        for (let i = 0; i < occ.length; i++)
-          setSubtreeToLayer(occ[i], PREPASS_LAYER, layerStash);
+        for (let i = 0; i < _occ.length; i++)
+          setSubtreeToLayer(_occ[i], PREPASS_LAYER, _layerStash);
 
         // Hide cutouts for the opaque depth pass
-        const cutoutMeshes = [];
-        for (let i = 0; i < occ.length; i++) {
-          occ[i].traverse((node) => {
-            if (isCutoutMesh(node)) cutoutMeshes.push(node);
+        _cutoutMeshes.length = 0;
+        for (let i = 0; i < _occ.length; i++) {
+          _occ[i].traverse((node) => {
+            if (isCutoutMesh(node)) _cutoutMeshes.push(node);
           });
         }
 
-        const visStash = [];
-        for (const n of cutoutMeshes) {
-          visStash.push([n, n.visible]);
+        // Store as flat pairs to avoid sub-array allocation
+        _visStash.length = 0;
+        for (let i = 0; i < _cutoutMeshes.length; i++) {
+          const n = _cutoutMeshes[i];
+          _visStash.push(n, n.visible);
           n.visible = false;
         }
         scene.overrideMaterial = depthMatOpaque;
         gl.setRenderTarget(rt);
         gl.clear(true, true, true);
         gl.render(scene, depthCam);
-        for (const [n, v] of visStash) n.visible = v;
+        // Restore visibility from flat pairs
+        for (let i = 0; i < _visStash.length; i += 2) {
+          _visStash[i].visible = _visStash[i + 1];
+        }
 
         // Cutout pass with depth-only mats
         scene.overrideMaterial = null;
-        const matSwapStash = [];
-        for (const n of cutoutMeshes) {
+        _matSwapStash.length = 0;
+        for (let i = 0; i < _cutoutMeshes.length; i++) {
+          const n = _cutoutMeshes[i];
           const srcMats = Array.isArray(n.material) ? n.material : [n.material];
-          const newMats = srcMats.map((m) => getCutoutDepthMat(m));
-          matSwapStash.push([n, n.material]);
-          n.material = Array.isArray(n.material) ? newMats : newMats[0];
+          // Avoid .map() - use manual for loop with reusable array
+          _newMats.length = 0;
+          for (let j = 0; j < srcMats.length; j++) {
+            _newMats.push(getCutoutDepthMat(srcMats[j]));
+          }
+          _matSwapStash.push(n, n.material);
+          n.material = Array.isArray(n.material) ? _newMats.slice() : _newMats[0];
         }
         gl.render(scene, depthCam);
-        for (const [n, orig] of matSwapStash) n.material = orig;
+        // Restore materials from flat pairs
+        for (let i = 0; i < _matSwapStash.length; i += 2) {
+          _matSwapStash[i].material = _matSwapStash[i + 1];
+        }
       } finally {
-        restoreLayers(layerStash);
+        restoreLayers(_layerStash);
         gl.setRenderTarget(prevTarget || null);
         scene.overrideMaterial = prevOverride || null;
       }
     }
 
-    // rotation
+    // rotation - replace forEach with for loop
     angleRef.current += rotationSpeedZ * dt;
     const angle = angleRef.current;
-    meshRefs.current.forEach((m) => m && (m.rotation.z = angle));
+    const meshes = meshRefs.current;
+    for (let i = 0; i < meshes.length; i++) {
+      const m = meshes[i];
+      if (m) m.rotation.z = angle;
+    }
   }, -2);
 
   // Instance positions

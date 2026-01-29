@@ -416,13 +416,28 @@ export default function CustomSky({
   const activeRef = useRef(null); // holds current envelope timeline or null
   const activeThunderSoundsRef = useRef([]); // array of currently playing thunder sounds
 
-  // Cleanup function for thunder sounds
+  // Audio object pool to avoid per-strike allocations
+  const THUNDER_POOL_SIZE = 4;
+  const thunderPoolRef = useRef([]);
+
   useEffect(() => {
+    const pool = [];
+    for (let i = 0; i < THUNDER_POOL_SIZE; i++) {
+      const audio = new Audio("/audio/loud-thunder-192165.mp3");
+      audio.preload = "auto";
+      audio._inUse = false;
+      pool.push(audio);
+    }
+    thunderPoolRef.current = pool;
     return () => {
-      // Stop all active thunder sounds on unmount
-      activeThunderSoundsRef.current.forEach((audio) => {
-        audio.pause();
-      });
+      // Stop all pooled and active thunder sounds on unmount
+      for (let i = 0; i < pool.length; i++) {
+        pool[i].pause();
+        pool[i].src = "";
+      }
+      for (let i = 0; i < activeThunderSoundsRef.current.length; i++) {
+        activeThunderSoundsRef.current[i].pause();
+      }
       activeThunderSoundsRef.current = [];
     };
   }, []);
@@ -606,33 +621,30 @@ export default function CustomSky({
           const duration = env.reduce((a, s) => a + s.dur, 0);
           activeRef.current = { t0: now, env, duration };
 
-          // Play thunder sound with volume based on lightning peak intensity
-          // Create a NEW audio instance for each strike so they can overlap
-          const thunderAudio = new Audio("/audio/loud-thunder-192165.mp3");
+          // Play thunder sound from pool (avoids per-strike Audio allocation)
+          const pool = thunderPoolRef.current;
+          let thunderAudio = null;
+          for (let pi = 0; pi < pool.length; pi++) {
+            if (!pool[pi]._inUse) { thunderAudio = pool[pi]; break; }
+          }
+          if (!thunderAudio) thunderAudio = pool[0]; // reuse oldest if all busy
+
           const peak = env._peak ?? flashPeakGain;
-          // Normalize peak to 0-1 range (assuming peak range is 1-10)
           const normalizedPeak = Math.min(1, Math.max(0, (peak - 1) / 9));
-          // Set volume (0.3 to 1.0 based on intensity)
           const volume = 0.3 + normalizedPeak * 0.7;
           thunderAudio.volume = volume;
+          thunderAudio.currentTime = 0;
+          thunderAudio._inUse = true;
 
-          // Add to active sounds array
-          activeThunderSoundsRef.current.push(thunderAudio);
-
-          // Remove from array when finished
-          thunderAudio.addEventListener("ended", () => {
-            const index = activeThunderSoundsRef.current.indexOf(thunderAudio);
-            if (index > -1) {
-              activeThunderSoundsRef.current.splice(index, 1);
-            }
-          });
+          const handleEnded = () => {
+            thunderAudio._inUse = false;
+            thunderAudio.removeEventListener("ended", handleEnded);
+          };
+          thunderAudio.addEventListener("ended", handleEnded);
 
           thunderAudio.play().catch(() => {
-            // Audio play failed (autoplay policy), remove from active array
-            const index = activeThunderSoundsRef.current.indexOf(thunderAudio);
-            if (index > -1) {
-              activeThunderSoundsRef.current.splice(index, 1);
-            }
+            thunderAudio._inUse = false;
+            thunderAudio.removeEventListener("ended", handleEnded);
           });
         }
       }

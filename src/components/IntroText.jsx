@@ -91,6 +91,9 @@ export default function IntroText() {
   const lastProgressRef = useRef(-1);
   // Mutable ref for charStates to avoid creating new arrays
   const charStatesRef = useRef(charStates);
+  // Throttle React re-renders — 20fps is fine for text animation
+  const lastRenderTimeRef = useRef(0);
+  const RENDER_THROTTLE_MS = 50;
 
   // Staggered delays for each character (like the CSS animation-delay)
   const CHAR_DELAY = 0.028; // ~28ms converted to distance units
@@ -192,9 +195,13 @@ export default function IntroText() {
         }
       }
 
-      // Only trigger React re-render if something actually changed
+      // Only trigger React re-render if something changed, throttled to avoid 60fps DOM updates
       if (anyChange) {
-        setCharStates([...states]); // Shallow copy to trigger re-render
+        const now = performance.now();
+        if (now - lastRenderTimeRef.current >= RENDER_THROTTLE_MS) {
+          lastRenderTimeRef.current = now;
+          setCharStates([...states]);
+        }
       }
     } catch (error) {
       // Silently handle WebGL context loss during animation
