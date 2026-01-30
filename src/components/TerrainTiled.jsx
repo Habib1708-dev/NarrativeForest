@@ -94,6 +94,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
   }, [tileSize, resolution]);
 
   const geometryPoolRef = useRef([]);
+  const materialPoolRef = useRef([]);
   useEffect(() => {
     const pool = geometryPoolRef.current;
     pool.forEach((geom) => geom.dispose());
@@ -103,6 +104,12 @@ const TerrainTiled = forwardRef(function TerrainTiled(
       geometryPoolRef.current = [];
     };
   }, [resolution]);
+  useEffect(() => {
+    return () => {
+      materialPoolRef.current.forEach((mat) => mat.dispose());
+      materialPoolRef.current = [];
+    };
+  }, [baseMaterial]);
 
   useEffect(() => {
     if (!firstTileStartedRef.current) {
@@ -245,17 +252,16 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     };
   }, [canUseWorker]);
 
-  // Convert world coordinates to lattice coordinates and pack into BigInt key
+  // Convert world coordinates to lattice coordinates and use string key
   const sampleHeightCached = (x, z) => {
     // Convert to lattice coordinates: ix = round((x - anchorMinX) / step)
     const ix = Math.round((x - anchorMinX) / latticeStep);
     const iz = Math.round((z - anchorMinZ) / latticeStep);
-    
-    // Pack two integers into BigInt to avoid collisions with large coordinates
-    // Uses 32 bits for each coordinate, giving essentially no collision risk
-    // BigInt is slower than number but avoids string allocations and guarantees correctness
-    const key = (BigInt(ix) << 32n) ^ (BigInt(iz) & 0xffffffffn);
-    
+
+    // Use string key — avoids BigInt overhead (5-10x slower than Number ops)
+    // Collision-free since ix and iz are integers separated by comma
+    const key = ix + "," + iz;
+
     const cache = heightCacheRef.current;
     if (cache.has(key)) return cache.get(key);
     const value = sampleHeight(x, z);
@@ -343,9 +349,20 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     geometryPoolRef.current.push(geom);
   };
 
+  const acquireMaterial = () => {
+    const pool = materialPoolRef.current;
+    if (pool.length > 0) return pool.pop();
+    return baseMaterial.clone();
+  };
+
+  const releaseMaterial = (mat) => {
+    if (!mat) return;
+    materialPoolRef.current.push(mat);
+  };
+
   const mountTileMesh = (rec, geom, bounds) => {
-    // Clone material per tile to support per-tile uniforms
-    const tileMaterial = baseMaterial.clone();
+    // Acquire material from pool (or clone if pool empty)
+    const tileMaterial = acquireMaterial();
     
     // CRITICAL: Set per-tile uniforms BEFORE creating mesh
     // This ensures tileUniforms are set before onBeforeCompile is called
@@ -486,7 +503,9 @@ const TerrainTiled = forwardRef(function TerrainTiled(
         if (rec.mesh) {
           groupRef.current?.remove(rec.mesh);
           releaseGeometry(rec.mesh.geometry);
+          releaseMaterial(rec.mesh.material);
           rec.mesh.geometry = null;
+          rec.mesh.material = null;
         }
         pendingWorkerJobsRef.current.delete(rec.key);
         tiles.current.delete(rec.key);

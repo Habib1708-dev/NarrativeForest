@@ -1,10 +1,43 @@
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useControls, folder, button } from "leva";
 import { DISTANCE_FADE_TILE_READY_EVENT } from "../utils/distanceFadeEvents";
+import { useDebugStore } from "../state/useDebugStore";
 
 const DISTANCE_FADE_SKIP_FLAG = "distanceFadeSkip";
+
+// Debug-only Leva panel — only mounts when isDebugMode is true
+function DistanceFadeDebugPanel({ propDefaults, onChange, onRepatch }) {
+  const controls = useControls(
+    "Distance Fade",
+    {
+      enabled: { value: propDefaults.enabled },
+      distStart: { value: propDefaults.distStart, min: 0, max: 200, step: 0.1 },
+      distEnd: { value: propDefaults.distEnd, min: 0, max: 200, step: 0.1 },
+      clipStart: { value: propDefaults.clipStart, min: 0, max: 1, step: 0.01 },
+      clipEnd: { value: propDefaults.clipEnd, min: 0, max: 1, step: 0.01 },
+      "Debug / Diagnostics": folder({
+        forceKill: { value: propDefaults.forceKill },
+        debugTint: { value: propDefaults.debugTint },
+        RepatchNow: button(() => onRepatch?.()),
+      }),
+    },
+    { collapsed: false }
+  );
+  useEffect(() => {
+    onChange(controls);
+  }, [
+    controls.enabled,
+    controls.distStart,
+    controls.distEnd,
+    controls.clipStart,
+    controls.clipEnd,
+    controls.forceKill,
+    controls.debugTint,
+  ]);
+  return null;
+}
 
 /**
  * DistanceFade — bulletproof patcher with on-the-fly Leva controls.
@@ -24,52 +57,47 @@ export default function DistanceFade({
   debugTint = false,
 }) {
   const { scene, gl } = useThree();
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
   const patched = useRef(new WeakSet());
   const patchedMeshesRef = useRef(new WeakSet());
   const fullSceneScanNeededRef = useRef(true);
   const didLog = useRef(false);
   const stats = useRef({ count: 0, byType: new Map() });
 
-  // ---- Leva controls (live) ----
-  const controls = useControls(
-    "Distance Fade",
-    {
-      enabled: { value: enabled },
-      distStart: { value: distStart, min: 0, max: 200, step: 0.1 },
-      distEnd: { value: distEnd, min: 0, max: 200, step: 0.1 },
-      clipStart: { value: clipStart, min: 0, max: 1, step: 0.01 },
-      clipEnd: { value: clipEnd, min: 0, max: 1, step: 0.01 },
-      "Debug / Diagnostics": folder({
-        forceKill: { value: forceKill },
-        debugTint: { value: debugTint },
-        RepatchNow: button(() => {
-          // manual patch trigger
-          didLog.current = false;
-          fullSceneScanNeededRef.current = true;
-          runPatchPass(true);
-        }),
-      }),
-    },
-    { collapsed: false }
-  );
+  // Debug overrides from Leva panel (null when not debugging)
+  const [debugControls, setDebugControls] = useState(null);
+  useEffect(() => {
+    if (!isDebugMode) setDebugControls(null);
+  }, [isDebugMode]);
+
+  // Active control values: debug overrides or prop defaults
+  const c = debugControls ?? {
+    enabled,
+    distStart,
+    distEnd,
+    clipStart,
+    clipEnd,
+    forceKill,
+    debugTint,
+  };
 
   // Normalize / clamp relationships to avoid degenerate ranges
-  const effEnabled = !!controls.enabled;
+  const effEnabled = !!c.enabled;
   const effDistStart = Math.max(
     0,
-    Math.min(controls.distStart, controls.distEnd - 1e-6)
+    Math.min(c.distStart, c.distEnd - 1e-6)
   );
-  const effDistEnd = Math.max(effDistStart + 1e-6, controls.distEnd);
+  const effDistEnd = Math.max(effDistStart + 1e-6, c.distEnd);
   const effClipStart = Math.max(
     0,
-    Math.min(controls.clipStart, controls.clipEnd - 1e-6)
+    Math.min(c.clipStart, c.clipEnd - 1e-6)
   );
   const effClipEnd = Math.min(
     1,
-    Math.max(effClipStart + 1e-6, controls.clipEnd)
+    Math.max(effClipStart + 1e-6, c.clipEnd)
   );
-  const effForceKill = !!controls.forceKill;
-  const effDebugTint = !!controls.debugTint;
+  const effForceKill = !!c.forceKill;
+  const effDebugTint = !!c.debugTint;
 
   // uniforms (stable object)
   const uniforms = useMemo(
@@ -85,28 +113,16 @@ export default function DistanceFade({
     []
   );
 
-  // Live-sync Leva → uniforms
+  // Consolidated uniform sync (replaces 7 individual useEffect hooks)
   useEffect(() => {
     uniforms.uDF_Enable.value = effEnabled ? 1.0 : 0.0;
-  }, [effEnabled]);
-  useEffect(() => {
     uniforms.uDF_DistStart.value = effDistStart;
-  }, [effDistStart]);
-  useEffect(() => {
     uniforms.uDF_DistEnd.value = effDistEnd;
-  }, [effDistEnd]);
-  useEffect(() => {
     uniforms.uDF_ClipStart.value = effClipStart;
-  }, [effClipStart]);
-  useEffect(() => {
     uniforms.uDF_ClipEnd.value = effClipEnd;
-  }, [effClipEnd]);
-  useEffect(() => {
     uniforms.uDF_ForceKill.value = effForceKill ? 1.0 : 0.0;
-  }, [effForceKill]);
-  useEffect(() => {
     uniforms.uDF_DebugTint.value = effDebugTint ? 1.0 : 0.0;
-  }, [effDebugTint]);
+  }, [effEnabled, effDistStart, effDistEnd, effClipStart, effClipEnd, effForceKill, effDebugTint]);
 
   const GLSL_SHARED = `
 uniform float uDF_Enable;
@@ -374,14 +390,14 @@ df_vViewDist = length(mvPosition.xyz);
   useEffect(() => {
     if (!effEnabled) return;
     fullSceneScanNeededRef.current = true;
-    warmupFramesRef.current = 120;
+    warmupFramesRef.current = 60;
     didLog.current = false;
     const t = setTimeout(() => runPatchPass(true), 50);
     return () => clearTimeout(t);
   }, [effEnabled, scene]);
 
   // Warm-up: patch for a short window to catch late-mounting assets (GLTF/Suspense)
-  const warmupFramesRef = useRef(120); // ~2s at 60fps
+  const warmupFramesRef = useRef(60); // ~1s at 60fps (reduced from 120)
   const pendingMeshesRef = useRef([]);
 
   useEffect(() => {
@@ -415,9 +431,9 @@ df_vViewDist = length(mvPosition.xyz);
 
     if (warmupFramesRef.current > 0) {
       warmupFramesRef.current -= 1;
-      // Only run patch pass every 10 frames during warmup to reduce CPU load
-      // This reduces scene traversals from 120 to 12 while still catching late-mounting assets
-      if (warmupFramesRef.current % 10 === 0) {
+      // Only run patch pass every 15 frames during warmup to reduce CPU load
+      // This reduces scene traversals from 60 to 4 while still catching late-mounting assets
+      if (warmupFramesRef.current % 15 === 0) {
         runPatchPass();
         if (!fullSceneScanNeededRef.current) warmupFramesRef.current = 0;
       }
@@ -426,6 +442,13 @@ df_vViewDist = length(mvPosition.xyz);
     // After warmup, only run when manually requested
     if (fullSceneScanNeededRef.current) runPatchPass();
   });
+
+  // Stable callback for debug panel's RepatchNow button
+  const handleRepatch = () => {
+    didLog.current = false;
+    fullSceneScanNeededRef.current = true;
+    runPatchPass(true);
+  };
 
   // Cleanup
   useEffect(() => {
@@ -444,6 +467,16 @@ df_vViewDist = length(mvPosition.xyz);
     };
   }, [scene, gl]);
 
+  // Debug panel only mounts when debug mode is active — eliminates Leva overhead
+  if (isDebugMode) {
+    return (
+      <DistanceFadeDebugPanel
+        propDefaults={{ enabled, distStart, distEnd, clipStart, clipEnd, forceKill, debugTint }}
+        onChange={setDebugControls}
+        onRepatch={handleRepatch}
+      />
+    );
+  }
   return null;
 }
 

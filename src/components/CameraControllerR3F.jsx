@@ -5,101 +5,22 @@ import { useControls, folder } from "leva";
 import { useCameraStore } from "../state/useCameraStore";
 import { useDebugStore } from "../state/useDebugStore";
 
-// Minimal gizmos: spheres at waypoint positions and optional lines to lookAt targets
-function CameraWaypointGizmos() {
-  const waypoints = useCameraStore((s) => s.waypoints);
-  const gizmos = useCameraStore((s) => s.gizmos);
-
-  // Memoize Float32Arrays to avoid per-render allocations
-  const lineArrays = useMemo(() => {
-    return waypoints.map((w) => {
-      if (!("lookAt" in w.orientation)) return null;
-      return new Float32Array([
-        w.position[0],
-        w.position[1],
-        w.position[2],
-        w.orientation.lookAt[0],
-        w.orientation.lookAt[1],
-        w.orientation.lookAt[2],
-      ]);
-    });
-  }, [waypoints]);
-
-  return (
-    <group>
-      {waypoints.map((w, idx) => {
-        const key = w.name ?? `wp-${idx}`;
-        const show = gizmos[key] ?? false;
-        if (!show) return null;
-        const lineArray = lineArrays[idx];
-        return (
-          <group key={key}>
-            <mesh position={w.position}>
-              <sphereGeometry args={[0.05, 8, 8]} />
-              <meshBasicMaterial color={"#6cf"} />
-            </mesh>
-            {lineArray && (
-              <line>
-                <bufferGeometry>
-                  <bufferAttribute
-                    attach="attributes-position"
-                    array={lineArray}
-                    count={2}
-                    itemSize={3}
-                  />
-                </bufferGeometry>
-                <lineBasicMaterial color="#6cf" linewidth={1} />
-              </line>
-            )}
-          </group>
-        );
-      })}
-    </group>
-  );
-}
-
-export default function CameraControllerR3F() {
-  // Keep current camera behavior unless enabled is true
-  const { camera } = useThree();
-  const isDebugMode = useDebugStore((state) => state.isDebugMode);
-  const setT = useCameraStore((s) => s.setT);
-  const getPose = useCameraStore((s) => s.getPose);
-  const enabled = useCameraStore((s) => s.enabled);
-  const setEnabled = useCameraStore((s) => s.setEnabled);
-  const locked = useCameraStore((s) => s.locked);
-  const paused = useCameraStore((s) => s.paused);
-  const mode = useCameraStore((s) => s.mode);
-  const waypoints = useCameraStore((s) => s.waypoints);
-  const globalSS = useCameraStore((s) => s.globalSS);
-  const getSegmentIndex = useCameraStore((s) => s.getSegmentIndex);
-  const getEffectiveSensitivity = useCameraStore(
-    (s) => s.getEffectiveSensitivity
-  );
-  const scenic = useCameraStore((s) => s.scenic);
-  const scenicDwellMs = useCameraStore((s) => s.scenicDwellMs);
-  const scenicSnapRadius = useCameraStore((s) => s.scenicSnapRadius);
-  const scenicResist = useCameraStore((s) => s.scenicResist);
-  const applyWheel = useCameraStore((s) => s.applyWheel);
-  const startFreeFlyDrag = useCameraStore((s) => s.startFreeFlyDrag);
-  const dragFreeFly = useCameraStore((s) => s.dragFreeFly);
-  const endFreeFlyDrag = useCameraStore((s) => s.endFreeFlyDrag);
-  const tRef = useRef(useCameraStore.getState().t ?? 0);
-  const lastSegRef = useRef(-1);
-
-  // Leva controls (only visible in debug mode)
+// Debug-only Leva panel — only mounts when isDebugMode is true
+// to eliminate ~40+ reactive property subscriptions when not debugging
+function CameraDebugPanel({ waypoints }) {
   const waypointNames = useMemo(
     () => waypoints.map((w, i) => w.name ?? `wp-${i}`),
     [waypoints]
   );
-  const values = useControls(
+  useControls(
     "Narrative/Camera",
     {
       enabled: {
-        value: enabled, // Use current store value (disabled until Explore button clicked)
+        value: useCameraStore.getState().enabled,
         onChange: (v) => useCameraStore.getState().setEnabled(v),
       },
       GlobalSS: {
-        value: globalSS,
+        value: useCameraStore.getState().globalSS,
         min: 0,
         max: 5,
         step: 0.01,
@@ -110,7 +31,7 @@ export default function CameraControllerR3F() {
         min: 0,
         max: 1,
         step: 0.001,
-        onChange: (v) => setT(v),
+        onChange: (v) => useCameraStore.getState().setT(v),
       },
       jump: {
         options: Object.fromEntries(waypointNames.map((n, i) => [n, i])),
@@ -209,8 +130,91 @@ export default function CameraControllerR3F() {
         },
       }),
     },
-    { collapsed: false, hidden: !isDebugMode }
+    { collapsed: false }
   );
+  return null;
+}
+
+// Minimal gizmos: spheres at waypoint positions and optional lines to lookAt targets
+function CameraWaypointGizmos() {
+  const waypoints = useCameraStore((s) => s.waypoints);
+  const gizmos = useCameraStore((s) => s.gizmos);
+
+  // Memoize Float32Arrays to avoid per-render allocations
+  const lineArrays = useMemo(() => {
+    return waypoints.map((w) => {
+      if (!("lookAt" in w.orientation)) return null;
+      return new Float32Array([
+        w.position[0],
+        w.position[1],
+        w.position[2],
+        w.orientation.lookAt[0],
+        w.orientation.lookAt[1],
+        w.orientation.lookAt[2],
+      ]);
+    });
+  }, [waypoints]);
+
+  return (
+    <group>
+      {waypoints.map((w, idx) => {
+        const key = w.name ?? `wp-${idx}`;
+        const show = gizmos[key] ?? false;
+        if (!show) return null;
+        const lineArray = lineArrays[idx];
+        return (
+          <group key={key}>
+            <mesh position={w.position}>
+              <sphereGeometry args={[0.05, 8, 8]} />
+              <meshBasicMaterial color={"#6cf"} />
+            </mesh>
+            {lineArray && (
+              <line>
+                <bufferGeometry>
+                  <bufferAttribute
+                    attach="attributes-position"
+                    array={lineArray}
+                    count={2}
+                    itemSize={3}
+                  />
+                </bufferGeometry>
+                <lineBasicMaterial color="#6cf" linewidth={1} />
+              </line>
+            )}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+export default function CameraControllerR3F() {
+  // Keep current camera behavior unless enabled is true
+  const { camera } = useThree();
+  const isDebugMode = useDebugStore((state) => state.isDebugMode);
+  const setT = useCameraStore((s) => s.setT);
+  const getPose = useCameraStore((s) => s.getPose);
+  const enabled = useCameraStore((s) => s.enabled);
+  const setEnabled = useCameraStore((s) => s.setEnabled);
+  const locked = useCameraStore((s) => s.locked);
+  const paused = useCameraStore((s) => s.paused);
+  const mode = useCameraStore((s) => s.mode);
+  const waypoints = useCameraStore((s) => s.waypoints);
+  const globalSS = useCameraStore((s) => s.globalSS);
+  const getSegmentIndex = useCameraStore((s) => s.getSegmentIndex);
+  const getEffectiveSensitivity = useCameraStore(
+    (s) => s.getEffectiveSensitivity
+  );
+  const scenic = useCameraStore((s) => s.scenic);
+  const scenicDwellMs = useCameraStore((s) => s.scenicDwellMs);
+  const scenicSnapRadius = useCameraStore((s) => s.scenicSnapRadius);
+  const scenicResist = useCameraStore((s) => s.scenicResist);
+  const applyWheel = useCameraStore((s) => s.applyWheel);
+  const startFreeFlyDrag = useCameraStore((s) => s.startFreeFlyDrag);
+  const dragFreeFly = useCameraStore((s) => s.dragFreeFly);
+  const endFreeFlyDrag = useCameraStore((s) => s.endFreeFlyDrag);
+  const tRef = useRef(useCameraStore.getState().t ?? 0);
+  const lastSegRef = useRef(-1);
 
   useFrame(() => {
     // Track current segment
@@ -375,6 +379,8 @@ export default function CameraControllerR3F() {
 
   return (
     <>
+      {/* Debug panel only mounts when debug mode is active — eliminates Leva overhead */}
+      {isDebugMode && <CameraDebugPanel waypoints={waypoints} />}
       {/* Only render gizmos when enabled to avoid clutter */}
       {enabled && <CameraWaypointGizmos />}
     </>

@@ -591,13 +591,15 @@ export default function ForestDynamicSampled({
       if (!rec) continue;
 
       if (mode === "highImmediate") {
-        nearImmediateTrees.push(...rec.trees);
+        for (let j = 0; j < rec.trees.length; j++) nearImmediateTrees.push(rec.trees[j]);
       } else if (mode === "highBuffer") {
-        nearBufferTrees.push(...rec.trees);
+        for (let j = 0; j < rec.trees.length; j++) nearBufferTrees.push(rec.trees[j]);
       }
       // Keep rocks only in near ring chunks (highImmediate/highBuffer)
       if (mode === "highImmediate" || mode === "highBuffer") {
-        rec.rocksByPart.forEach((arr, i) => rocksByPart[i].push(...arr));
+        rec.rocksByPart.forEach((arr, i) => {
+          for (let j = 0; j < arr.length; j++) rocksByPart[i].push(arr[j]);
+        });
       }
     }
 

@@ -11,61 +11,38 @@ import { useGLTF, useAnimations } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useCameraStore } from "../state/useCameraStore";
+import { useDebugStore } from "../state/useDebugStore";
 
-export default forwardRef(function Man(_, ref) {
-  // Load the GLB from /public (using Draco-compressed and animation-optimized version)
-  const { scene, animations } = useGLTF("/models/man/man_draco_optimized.glb");
+// Static defaults — used when not in debug mode to avoid Leva overhead
+const MAN_DEFAULTS = Object.freeze({
+  positionX: -1.6,
+  positionY: -4.433,
+  positionZ: -2.95,
+  rotationYDeg: 12.9,
+  scale: 0.06,
+  playbackSpeed: 1,
+  waveOnStop5: true,
+  waveDuration: 3.0,
+  manualTriggerWave: false,
+});
 
-  // Clone with SkeletonUtils so skinned animations remain intact
-  const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
-
-  // Root group ref for animations AND for fog occluder usage
-  const groupRef = useRef();
-  useImperativeHandle(ref, () => groupRef.current, []);
-
-  // Animation system
-  const { actions, names, clips, mixer } = useAnimations(
-    animations || [],
-    groupRef
-  );
-
-  // Prefer this clip by default
-  const defaultClip = useMemo(() => {
-    if (!names || names.length === 0) return "None";
-    return (
-      names.find((n) => n === "Gun_Idle") ||
-      names.find((n) => /gun.*idle|idle.*gun/i.test(n)) ||
-      names[0]
-    );
-  }, [names]);
-
-  // Controls: transform + animation
-  const {
-    positionX,
-    positionY,
-    positionZ,
-    rotationYDeg,
-    scale,
-    clipName,
-    playbackSpeed,
-    waveOnStop5,
-    waveDuration,
-    manualTriggerWave,
-  } = useControls({
+// Debug-only Leva panel — only mounts when isDebugMode is true
+function ManDebugPanel({ defaultClip, names, onChange }) {
+  const values = useControls({
     Man: folder({
       Transform: folder({
-        positionX: { value: -1.6, min: -50, max: 50, step: 0.01 },
-        positionY: { value: -4.433, min: -50, max: 50, step: 0.01 },
-        positionZ: { value: -2.95, min: -50, max: 50, step: 0.01 },
+        positionX: { value: MAN_DEFAULTS.positionX, min: -50, max: 50, step: 0.01 },
+        positionY: { value: MAN_DEFAULTS.positionY, min: -50, max: 50, step: 0.01 },
+        positionZ: { value: MAN_DEFAULTS.positionZ, min: -50, max: 50, step: 0.01 },
         rotationYDeg: {
-          value: 12.9,
+          value: MAN_DEFAULTS.rotationYDeg,
           min: -180,
           max: 180,
           step: 0.1,
           label: "Rotation Y (deg)",
         },
         scale: {
-          value: 0.06,
+          value: MAN_DEFAULTS.scale,
           min: 0.001,
           max: 10,
           step: 0.0005,
@@ -96,6 +73,66 @@ export default forwardRef(function Man(_, ref) {
       }),
     }),
   });
+  useEffect(() => {
+    onChange(values);
+  }, [
+    values.positionX, values.positionY, values.positionZ,
+    values.rotationYDeg, values.scale, values.clipName,
+    values.playbackSpeed, values.waveOnStop5, values.waveDuration,
+    values.manualTriggerWave,
+  ]);
+  return null;
+}
+
+export default forwardRef(function Man(_, ref) {
+  // Load the GLB from /public (using Draco-compressed and animation-optimized version)
+  const { scene, animations } = useGLTF("/models/man/man_draco_optimized.glb");
+
+  // Clone with SkeletonUtils so skinned animations remain intact
+  const cloned = useMemo(() => (scene ? skeletonClone(scene) : null), [scene]);
+
+  // Root group ref for animations AND for fog occluder usage
+  const groupRef = useRef();
+  useImperativeHandle(ref, () => groupRef.current, []);
+
+  // Animation system
+  const { actions, names, clips, mixer } = useAnimations(
+    animations || [],
+    groupRef
+  );
+
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+
+  // Prefer this clip by default
+  const defaultClip = useMemo(() => {
+    if (!names || names.length === 0) return "None";
+    return (
+      names.find((n) => n === "Gun_Idle") ||
+      names.find((n) => /gun.*idle|idle.*gun/i.test(n)) ||
+      names[0]
+    );
+  }, [names]);
+
+  // Debug controls state (null when not debugging)
+  const [debugValues, setDebugValues] = useState(null);
+  useEffect(() => {
+    if (!isDebugMode) setDebugValues(null);
+  }, [isDebugMode]);
+
+  // Active values: debug overrides or static defaults
+  const activeVals = debugValues ?? MAN_DEFAULTS;
+  const {
+    positionX,
+    positionY,
+    positionZ,
+    rotationYDeg,
+    scale,
+    playbackSpeed,
+    waveOnStop5,
+    waveDuration,
+    manualTriggerWave,
+  } = activeVals;
+  const clipName = debugValues?.clipName ?? defaultClip;
 
   // Traverse once to enable shadows and collect info
   useEffect(() => {
@@ -350,6 +387,13 @@ export default forwardRef(function Man(_, ref) {
       rotation={[0, rotationY, 0]}
       scale={scale}
     >
+      {isDebugMode && (
+        <ManDebugPanel
+          defaultClip={defaultClip}
+          names={names}
+          onChange={setDebugValues}
+        />
+      )}
       <primitive object={cloned} onAfterRender={onAfterRender} />
     </group>
   );

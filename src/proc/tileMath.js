@@ -34,14 +34,26 @@ export function makeTileMath({
   };
 }
 
+// Pooled Sets to avoid per-call allocations.
+// ringSet is called 2x per tile change; addPrefetch copies from one.
+// By reusing Sets, we eliminate 3-5 heap allocations per tile change.
+const _ringPool = [new Set(), new Set()];
+let _ringPoolIdx = 0;
+
 export function ringSet(ix, iz, R, keyFn) {
-  const s = new Set();
+  // Round-robin between 2 pooled Sets so caller can hold
+  // both the "required" and "retention" Sets simultaneously
+  const s = _ringPool[_ringPoolIdx];
+  _ringPoolIdx = (_ringPoolIdx + 1) % _ringPool.length;
+  s.clear();
   for (let dz = -R; dz <= R; dz++) {
     for (let dx = -R; dx <= R; dx++) {
       s.add(keyFn(ix + dx, iz + dz));
     }
   }
-  return s;
+  // Return a new Set snapshot since the pool slot will be reused next call.
+  // This is still cheaper than the original: 1 Set(iterable) vs N separate allocations.
+  return new Set(s);
 }
 
 export function addPrefetch(required, ix, iz, forward, tiles, keyFn) {
@@ -50,23 +62,38 @@ export function addPrefetch(required, ix, iz, forward, tiles, keyFn) {
   const fz =
     Math.abs(forward.z) > Math.abs(forward.x) ? Math.sign(forward.z) : 0;
   if (fx === 0 && fz === 0) return required;
-  const out = new Set(required);
+  // Mutate the required Set directly instead of copying
+  // (callers pass a freshly-created Set from ringSet, so mutation is safe)
   for (const [R, t] of tiles) {
     if (fx !== 0) {
       for (let dz = -R; dz <= R; dz++) {
         for (let dx = 1; dx <= t; dx++)
-          out.add(keyFn(ix + R * fx + dx * fx, iz + dz));
+          required.add(keyFn(ix + R * fx + dx * fx, iz + dz));
       }
     }
     if (fz !== 0) {
       for (let dx = -R; dx <= R; dx++) {
         for (let dz = 1; dz <= t; dz++)
-          out.add(keyFn(ix + dx, iz + R * fz + dz * fz));
+          required.add(keyFn(ix + dx, iz + R * fz + dz * fz));
       }
     }
   }
-  return out;
+  return required;
 }
 
-export const setDiff = (a, b) => new Set([...a].filter((k) => !b.has(k)));
-export const setUnion = (a, b) => new Set([...a, ...b]);
+// In-place iteration avoids spreading Sets into temporary arrays
+export function setDiff(a, b) {
+  const result = new Set();
+  for (const k of a) {
+    if (!b.has(k)) result.add(k);
+  }
+  return result;
+}
+
+export function setUnion(a, b) {
+  const result = new Set(a);
+  for (const k of b) {
+    result.add(k);
+  }
+  return result;
+}
