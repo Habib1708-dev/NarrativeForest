@@ -1,10 +1,11 @@
 // src/components/UnifiedCrystalClusters.jsx
-import React, { forwardRef, useEffect, useMemo, useRef } from "react";
+import React, { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useCameraStore } from "../state/useCameraStore";
+import { useDebugStore } from "../state/useDebugStore";
 
 const GLB_A = "/models/magicPlantsAndCrystal/CrystalCluster.glb";
 const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
@@ -228,6 +229,424 @@ const BAKED_C = [
   { px: -1.5, py: -4.73, pz: -3.68, ry: 0.0, s: 0.15 },
   { px: -2.94, py: -4.22, pz: -3.26, ry: 0.0, s: 0.12 },
 ];
+
+// -----------------------------------------
+// Static baked defaults (no Leva overhead)
+// -----------------------------------------
+const CRYSTAL_DEFAULTS = Object.freeze({
+  // Gradient
+  U_colorA: "#ecfaff", U_colorB: "#bc00f5", U_mid: 0.38, U_softness: 0.44,
+  U_bottomSatBoost: 0.1, U_bottomEmissiveBoost: 2.0, U_bottomFresnelBoost: 3.0, U_bottomFresnelPower: 0.5,
+  // Glass
+  U_ior: 1.5, U_thickness: 2.0, U_attenuationDistance: 12.0, U_roughness: 0.2, U_emissiveIntensity: 0.3,
+  // Shine
+  U_reflectBoost: 1.2, U_reflectPower: 2.0, U_rimBoost: 1.6, U_rimPower: 1.4, U_envIntensity: 2.0,
+  // Hover
+  U_hoverEnabled: true, U_hoverEase: 2.0, U_cycleTime: 10, U_coolTime: 5.0,
+  Pair_A_Bottom: "#2ec5ff", Pair_A_Top: "#b000ff",
+  Pair_B_Bottom: "#00ff23", Pair_B_Top: "#f9ff87",
+  Pair_C_Bottom: "#ffc300", Pair_C_Top: "#adadad",
+  // Dissolve
+  build: false, speed: 0.24, noiseScale: 4.72, noiseAmp: 0.8,
+  edgeWidth: 0.15, glowStrength: 2.0, glowColor: "#ffffff", seed: 184, coolTimeAfterBuild: 4.5,
+});
+
+const INSTANCE_A_DEFAULTS = Object.freeze(
+  BAKED_A.reduce((acc, d, i) => {
+    acc[`A_pX_${i}`] = d.px; acc[`A_pY_${i}`] = d.py; acc[`A_pZ_${i}`] = d.pz;
+    acc[`A_rX_${i}`] = d.rx ?? 0; acc[`A_rY_${i}`] = d.ry ?? 0; acc[`A_rZ_${i}`] = d.rz ?? 0;
+    acc[`A_s_${i}`] = d.s; acc[`A_sy_${i}`] = d.sy ?? 1.0;
+    return acc;
+  }, {})
+);
+
+const INSTANCE_B_DEFAULTS = Object.freeze(
+  BAKED_B.reduce((acc, d, i) => {
+    acc[`B_pX_${i}`] = d.px; acc[`B_pY_${i}`] = d.py; acc[`B_pZ_${i}`] = d.pz;
+    acc[`B_rY_${i}`] = d.ry ?? 0;
+    acc[`B_s_${i}`] = d.s;
+    return acc;
+  }, {})
+);
+
+const INSTANCE_C_DEFAULTS = Object.freeze(
+  BAKED_C.reduce((acc, d, i) => {
+    acc[`C_pX_${i}`] = d.px; acc[`C_pY_${i}`] = d.py; acc[`C_pZ_${i}`] = d.pz;
+    acc[`C_rY_${i}`] = d.ry ?? 0;
+    acc[`C_s_${i}`] = d.s;
+    return acc;
+  }, {})
+);
+
+// -----------------------------------------
+// Debug panel sub-component (only mounted when debug mode is on)
+// -----------------------------------------
+function CrystalDebugPanel({ onChange, onReplay }) {
+  const unifiedGradient = useControls("Crystals / Gradient", {
+    U_colorA: { value: "#ecfaff", label: "Bottom Color (A)" },
+    U_colorB: { value: "#bc00f5", label: "Top Color (B)" },
+    U_mid: {
+      value: 0.38,
+      min: 0,
+      max: 1,
+      step: 0.001,
+      label: "Blend Midpoint",
+    },
+    U_softness: {
+      value: 0.44,
+      min: 0,
+      max: 0.5,
+      step: 0.001,
+      label: "Blend Softness",
+    },
+    U_bottomSatBoost: {
+      value: 0.1,
+      min: 0,
+      max: 1.5,
+      step: 0.01,
+      label: "Bottom Saturation +",
+    },
+    U_bottomEmissiveBoost: {
+      value: 2.0,
+      min: 0,
+      max: 2,
+      step: 0.01,
+      label: "Bottom Glow +",
+    },
+    U_bottomFresnelBoost: {
+      value: 3.0,
+      min: 0,
+      max: 3,
+      step: 0.01,
+      label: "Bottom Fresnel +",
+    },
+    U_bottomFresnelPower: {
+      value: 0.5,
+      min: 0.5,
+      max: 6,
+      step: 0.1,
+      label: "Bottom Fresnel Falloff",
+    },
+  });
+
+  const unifiedGlass = useControls("Crystals / Glass", {
+    U_ior: { value: 1.5, min: 1.0, max: 2.333, step: 0.001 },
+    U_thickness: { value: 2.0, min: 0, max: 10, step: 0.01 },
+    U_attenuationDistance: { value: 12.0, min: 0.1, max: 200, step: 0.1 },
+    U_roughness: { value: 0.2, min: 0, max: 1, step: 0.001 },
+    U_emissiveIntensity: { value: 0.3, min: 0, max: 2, step: 0.01 },
+  });
+
+  const unifiedShine = useControls("Crystals / Shine", {
+    U_reflectBoost: {
+      value: 1.2,
+      min: 0,
+      max: 3,
+      step: 0.01,
+      label: "Reflect Boost",
+    },
+    U_reflectPower: {
+      value: 2.0,
+      min: 1,
+      max: 6,
+      step: 0.1,
+      label: "Reflect Power",
+    },
+    U_rimBoost: { value: 1.6, min: 0, max: 3, step: 0.01, label: "Rim Boost" },
+    U_rimPower: { value: 1.4, min: 1, max: 6, step: 0.1, label: "Rim Power" },
+    U_envIntensity: {
+      value: 2.0,
+      min: 0,
+      max: 8,
+      step: 0.1,
+      label: "EnvMap Intensity",
+    },
+  });
+
+  const unifiedHover = useControls("Crystals / Hover Colors", {
+    U_hoverEnabled: { value: true, label: "Enabled" },
+    U_hoverEase: {
+      value: 2.0,
+      min: 0.1,
+      max: 20,
+      step: 0.1,
+      label: "Ease In (1/s)",
+    },
+    U_cycleTime: {
+      value: 10,
+      min: 0.2,
+      max: 10,
+      step: 0.05,
+      label: "Cycle Step (s)",
+    },
+    U_coolTime: {
+      value: 5.0,
+      min: 0.05,
+      max: 20,
+      step: 0.05,
+      label: "Cool Back (s)",
+    },
+    Pair_A_Bottom: { value: "#2ec5ff", label: "A Bottom" },
+    Pair_A_Top: { value: "#b000ff", label: "A Top" },
+    Pair_B_Bottom: { value: "#00ff23", label: "B Bottom" },
+    Pair_B_Top: { value: "#f9ff87", label: "B Top" },
+    Pair_C_Bottom: { value: "#ffc300", label: "C Bottom" },
+    Pair_C_Top: { value: "#adadad", label: "C Top" },
+  });
+
+  const dissolve = useControls("Crystals Dissolve", {
+    build: { value: false, label: "Build Crystals" },
+    speed: {
+      value: 0.24,
+      min: 0.05,
+      max: 3,
+      step: 0.01,
+      label: "Speed (units/sec)",
+    },
+    noiseScale: {
+      value: 4.72,
+      min: 0.1,
+      max: 6,
+      step: 0.01,
+      label: "Noise Scale",
+    },
+    noiseAmp: {
+      value: 0.8,
+      min: 0,
+      max: 1.5,
+      step: 0.01,
+      label: "Noise Amplitude",
+    },
+    edgeWidth: {
+      value: 0.15,
+      min: 0.0,
+      max: 0.4,
+      step: 0.005,
+      label: "Edge Width",
+    },
+    glowStrength: {
+      value: 2.0,
+      min: 0.0,
+      max: 50,
+      step: 0.1,
+      label: "Glow Strength",
+    },
+    glowColor: { value: "#ffffff", label: "Glow Color" },
+    seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
+    coolTimeAfterBuild: {
+      value: 4.5,
+      min: 0.1,
+      max: 30,
+      step: 0.05,
+      label: "Glow Cooldown (s)",
+    },
+    Replay: button(() => {
+      onReplay();
+    }),
+  });
+
+  const instanceA = useControls(
+    "Crystal A / Instances",
+    useMemo(() => {
+      const schema = {};
+      for (let i = 0; i < COUNT_A; i++) {
+        const d = BAKED_A[i] ?? {
+          px: -2,
+          py: -4,
+          pz: -2,
+          rx: 0,
+          ry: 0,
+          rz: 0,
+          s: 1,
+          sy: 1,
+        };
+        schema[`A / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
+          {
+            [`A_pX_${i}`]: {
+              value: d.px,
+              min: -20,
+              max: 20,
+              step: 0.001,
+              label: "x",
+            },
+            [`A_pY_${i}`]: {
+              value: d.py,
+              min: -20,
+              max: 20,
+              step: 0.001,
+              label: "y",
+            },
+            [`A_pZ_${i}`]: {
+              value: d.pz,
+              min: -20,
+              max: 20,
+              step: 0.001,
+              label: "z",
+            },
+            [`A_rX_${i}`]: {
+              value: d.rx,
+              min: -180,
+              max: 180,
+              step: 0.1,
+              label: "rotX°",
+            },
+            [`A_rY_${i}`]: {
+              value: d.ry,
+              min: -180,
+              max: 180,
+              step: 0.1,
+              label: "rotY°",
+            },
+            [`A_rZ_${i}`]: {
+              value: d.rz,
+              min: -180,
+              max: 180,
+              step: 0.1,
+              label: "rotZ°",
+            },
+            [`A_s_${i}`]: {
+              value: d.s,
+              min: 0.01,
+              max: 5,
+              step: 0.001,
+              label: "scale",
+            },
+            [`A_sy_${i}`]: {
+              value: d.sy ?? 1.0,
+              min: 0.1,
+              max: 5,
+              step: 0.001,
+              label: "y-scale",
+            },
+          },
+          { collapsed: true }
+        );
+      }
+      return schema;
+    }, [])
+  );
+
+  const instanceB = useControls(
+    "Crystal B / Instances",
+    useMemo(() => {
+      const schema = {};
+      for (let i = 0; i < COUNT_B; i++) {
+        const d = BAKED_B[i] ?? { px: -2, py: -4, pz: -2, ry: 0, s: 0.5 };
+        schema[`B / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
+          {
+            [`B_pX_${i}`]: {
+              value: d.px,
+              min: -3,
+              max: 3,
+              step: 0.001,
+              label: "x",
+            },
+            [`B_pY_${i}`]: {
+              value: d.py,
+              min: -6,
+              max: -4,
+              step: 0.001,
+              label: "y",
+            },
+            [`B_pZ_${i}`]: {
+              value: d.pz,
+              min: -4,
+              max: 4,
+              step: 0.001,
+              label: "z",
+            },
+            [`B_rY_${i}`]: {
+              value: d.ry ?? 0,
+              min: -180,
+              max: 180,
+              step: 0.1,
+              label: "rotY°",
+            },
+            [`B_s_${i}`]: {
+              value: d.s,
+              min: 0.01,
+              max: 1,
+              step: 0.001,
+              label: "scale",
+            },
+          },
+          { collapsed: true }
+        );
+      }
+      return schema;
+    }, [])
+  );
+
+  const instanceC = useControls(
+    "Crystal C / Instances",
+    useMemo(() => {
+      const schema = {};
+      for (let i = 0; i < COUNT_C; i++) {
+        const d = BAKED_C[i] ?? FALLBACK_C;
+        schema[`C / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
+          {
+            [`C_pX_${i}`]: {
+              value: d.px,
+              min: -3,
+              max: 3,
+              step: 0.001,
+              label: "x",
+            },
+            [`C_pY_${i}`]: {
+              value: d.py,
+              min: -6,
+              max: -4,
+              step: 0.001,
+              label: "y",
+            },
+            [`C_pZ_${i}`]: {
+              value: d.pz,
+              min: -4,
+              max: 1,
+              step: 0.001,
+              label: "z",
+            },
+            [`C_rY_${i}`]: {
+              value: d.ry,
+              min: -180,
+              max: 180,
+              step: 0.1,
+              label: "rotY°",
+            },
+            [`C_s_${i}`]: {
+              value: d.s,
+              min: 0.01,
+              max: 5,
+              step: 0.001,
+              label: "scale",
+            },
+          },
+          { collapsed: true }
+        );
+      }
+      return schema;
+    }, [])
+  );
+
+  // Push all values to parent whenever any control changes
+  useEffect(() => {
+    onChange({
+      unified: {
+        ...unifiedGradient,
+        ...unifiedGlass,
+        ...unifiedShine,
+        ...unifiedHover,
+        U_envIntensity: unifiedShine.U_envIntensity,
+      },
+      dissolve,
+      instanceA,
+      instanceB,
+      instanceC,
+    });
+  }, [unifiedGradient, unifiedGlass, unifiedShine, unifiedHover, dissolve, instanceA, instanceB, instanceC, onChange]);
+
+  return null;
+}
 
 // ---------------------------------------------
 // Unified material with gradient/shine/hover + dissolve + cooldown
@@ -509,180 +928,37 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   const meshBRef = useRef();
   const meshCRef = useRef();
 
-  // Unified controls
-  const unifiedGradient = useControls("Crystals / Gradient", {
-    U_colorA: { value: "#ecfaff", label: "Bottom Color (A)" },
-    U_colorB: { value: "#bc00f5", label: "Top Color (B)" },
-    U_mid: {
-      value: 0.38,
-      min: 0,
-      max: 1,
-      step: 0.001,
-      label: "Blend Midpoint",
-    },
-    U_softness: {
-      value: 0.44,
-      min: 0,
-      max: 0.5,
-      step: 0.001,
-      label: "Blend Softness",
-    },
-    U_bottomSatBoost: {
-      value: 0.1,
-      min: 0,
-      max: 1.5,
-      step: 0.01,
-      label: "Bottom Saturation +",
-    },
-    U_bottomEmissiveBoost: {
-      value: 2.0,
-      min: 0,
-      max: 2,
-      step: 0.01,
-      label: "Bottom Glow +",
-    },
-    U_bottomFresnelBoost: {
-      value: 3.0,
-      min: 0,
-      max: 3,
-      step: 0.01,
-      label: "Bottom Fresnel +",
-    },
-    U_bottomFresnelPower: {
-      value: 0.5,
-      min: 0.5,
-      max: 6,
-      step: 0.1,
-      label: "Bottom Fresnel Falloff",
-    },
-  });
+  // Debug mode gate
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [debugValues, setDebugValues] = useState(null);
 
-  const unifiedGlass = useControls("Crystals / Glass", {
-    U_ior: { value: 1.5, min: 1.0, max: 2.333, step: 0.001 },
-    U_thickness: { value: 2.0, min: 0, max: 10, step: 0.01 },
-    U_attenuationDistance: { value: 12.0, min: 0.1, max: 200, step: 0.1 },
-    U_roughness: { value: 0.2, min: 0, max: 1, step: 0.001 },
-    U_emissiveIntensity: { value: 0.3, min: 0, max: 2, step: 0.01 },
-  });
+  // Resolve active values: debug overrides or baked defaults
+  const unified = isDebugMode && debugValues
+    ? debugValues.unified
+    : {
+        ...CRYSTAL_DEFAULTS,
+        U_envIntensity: CRYSTAL_DEFAULTS.U_envIntensity,
+      };
 
-  const unifiedShine = useControls("Crystals / Shine", {
-    U_reflectBoost: {
-      value: 1.2,
-      min: 0,
-      max: 3,
-      step: 0.01,
-      label: "Reflect Boost",
-    },
-    U_reflectPower: {
-      value: 2.0,
-      min: 1,
-      max: 6,
-      step: 0.1,
-      label: "Reflect Power",
-    },
-    U_rimBoost: { value: 1.6, min: 0, max: 3, step: 0.01, label: "Rim Boost" },
-    U_rimPower: { value: 1.4, min: 1, max: 6, step: 0.1, label: "Rim Power" },
-    U_envIntensity: {
-      value: 2.0,
-      min: 0,
-      max: 8,
-      step: 0.1,
-      label: "EnvMap Intensity",
-    },
-  });
+  const dissolve = isDebugMode && debugValues
+    ? debugValues.dissolve
+    : CRYSTAL_DEFAULTS;
 
-  const unifiedHover = useControls("Crystals / Hover Colors", {
-    U_hoverEnabled: { value: true, label: "Enabled" },
-    U_hoverEase: {
-      value: 2.0,
-      min: 0.1,
-      max: 20,
-      step: 0.1,
-      label: "Ease In (1/s)",
-    },
-    U_cycleTime: {
-      value: 10,
-      min: 0.2,
-      max: 10,
-      step: 0.05,
-      label: "Cycle Step (s)",
-    },
-    U_coolTime: {
-      value: 5.0,
-      min: 0.05,
-      max: 20,
-      step: 0.05,
-      label: "Cool Back (s)",
-    },
-    Pair_A_Bottom: { value: "#2ec5ff", label: "A Bottom" },
-    Pair_A_Top: { value: "#b000ff", label: "A Top" },
-    Pair_B_Bottom: { value: "#00ff23", label: "B Bottom" },
-    Pair_B_Top: { value: "#f9ff87", label: "B Top" },
-    Pair_C_Bottom: { value: "#ffc300", label: "C Bottom" },
-    Pair_C_Top: { value: "#adadad", label: "C Top" },
-  });
+  const instanceA = isDebugMode && debugValues
+    ? debugValues.instanceA
+    : INSTANCE_A_DEFAULTS;
 
-  const dissolve = useControls("Crystals Dissolve", {
-    build: { value: false, label: "Build Crystals" },
-    speed: {
-      value: 0.24,
-      min: 0.05,
-      max: 3,
-      step: 0.01,
-      label: "Speed (units/sec)",
-    },
-    noiseScale: {
-      value: 4.72,
-      min: 0.1,
-      max: 6,
-      step: 0.01,
-      label: "Noise Scale",
-    },
-    noiseAmp: {
-      value: 0.8,
-      min: 0,
-      max: 1.5,
-      step: 0.01,
-      label: "Noise Amplitude",
-    },
-    edgeWidth: {
-      value: 0.15,
-      min: 0.0,
-      max: 0.4,
-      step: 0.005,
-      label: "Edge Width",
-    },
-    glowStrength: {
-      value: 2.0,
-      min: 0.0,
-      max: 50,
-      step: 0.1,
-      label: "Glow Strength",
-    },
-    glowColor: { value: "#ffffff", label: "Glow Color" },
-    seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
-    coolTimeAfterBuild: {
-      value: 4.5,
-      min: 0.1,
-      max: 30,
-      step: 0.05,
-      label: "Glow Cooldown (s)",
-    },
-    Replay: button(() => {
-      progressRef.current = -0.2;
-      coolMixRef.current = 0.0;
-      updateUniformAll("uProgress", progressRef.current);
-      updateUniformAll("uCoolMix", coolMixRef.current);
-    }),
-  });
+  const instanceB = isDebugMode && debugValues
+    ? debugValues.instanceB
+    : INSTANCE_B_DEFAULTS;
 
-  const unified = {
-    ...unifiedGradient,
-    ...unifiedGlass,
-    ...unifiedShine,
-    ...unifiedHover,
-    U_envIntensity: unifiedShine.U_envIntensity,
-  };
+  const instanceC = isDebugMode && debugValues
+    ? debugValues.instanceC
+    : INSTANCE_C_DEFAULTS;
+
+  // Split out gradient/hover values for refs below
+  const unifiedGradient = unified;
+  const unifiedHover = unified;
 
   // Materials & state
   const progressRef = useRef(-0.2); // dissolve gate (-0.2..1.1)
@@ -729,9 +1005,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
       // If stop-15-down not found yet, keep dissolving out
       if (shouldBuildRef.current !== false) {
         shouldBuildRef.current = false;
-        console.warn(
-          "💎 stop-15-down not found in waypoints; crystals kept dissolved out."
-        );
       }
       return;
     }
@@ -742,11 +1015,6 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
 
     if (shouldBuild !== shouldBuildRef.current) {
       shouldBuildRef.current = shouldBuild;
-      console.log(
-        shouldBuild
-          ? `💎 Camera at waypoint ${currentWaypointIndex} (>= stop-15-down index ${stop15DownIndex}): Building crystals...`
-          : `💎 Camera at waypoint ${currentWaypointIndex} (< stop-15-down index ${stop15DownIndex}): Dissolving crystals...`
-      );
 
       // Play crystal sound when building starts
       if (
@@ -755,9 +1023,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
         !isPlayingCrystalSoundRef.current
       ) {
         crystalAudioRef.current.currentTime = 0;
-        crystalAudioRef.current.play().catch((error) => {
-          console.log("Crystal audio play failed:", error);
-        });
+        crystalAudioRef.current.play().catch(() => {});
         isPlayingCrystalSoundRef.current = true;
 
         // Reset the playing flag when audio ends
@@ -802,189 +1068,13 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
   );
   useEffect(() => updateUniformAll("uSeed", dissolve.seed), [dissolve.seed]);
 
-  // ---------- Instance controls (unchanged) ----------
-  const instanceA = useControls(
-    "Crystal A / Instances",
-    useMemo(() => {
-      const schema = {};
-      for (let i = 0; i < COUNT_A; i++) {
-        const d = BAKED_A[i] ?? {
-          px: -2,
-          py: -4,
-          pz: -2,
-          rx: 0,
-          ry: 0,
-          rz: 0,
-          s: 1,
-          sy: 1,
-        };
-        schema[`A / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
-          {
-            [`A_pX_${i}`]: {
-              value: d.px,
-              min: -20,
-              max: 20,
-              step: 0.001,
-              label: "x",
-            },
-            [`A_pY_${i}`]: {
-              value: d.py,
-              min: -20,
-              max: 20,
-              step: 0.001,
-              label: "y",
-            },
-            [`A_pZ_${i}`]: {
-              value: d.pz,
-              min: -20,
-              max: 20,
-              step: 0.001,
-              label: "z",
-            },
-            [`A_rX_${i}`]: {
-              value: d.rx,
-              min: -180,
-              max: 180,
-              step: 0.1,
-              label: "rotX°",
-            },
-            [`A_rY_${i}`]: {
-              value: d.ry,
-              min: -180,
-              max: 180,
-              step: 0.1,
-              label: "rotY°",
-            },
-            [`A_rZ_${i}`]: {
-              value: d.rz,
-              min: -180,
-              max: 180,
-              step: 0.1,
-              label: "rotZ°",
-            },
-            [`A_s_${i}`]: {
-              value: d.s,
-              min: 0.01,
-              max: 5,
-              step: 0.001,
-              label: "scale",
-            },
-            [`A_sy_${i}`]: {
-              value: d.sy ?? 1.0,
-              min: 0.1,
-              max: 5,
-              step: 0.001,
-              label: "y-scale",
-            },
-          },
-          { collapsed: true }
-        );
-      }
-      return schema;
-    }, [])
-  );
-
-  const instanceB = useControls(
-    "Crystal B / Instances",
-    useMemo(() => {
-      const schema = {};
-      for (let i = 0; i < COUNT_B; i++) {
-        const d = BAKED_B[i] ?? { px: -2, py: -4, pz: -2, ry: 0, s: 0.5 };
-        schema[`B / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
-          {
-            [`B_pX_${i}`]: {
-              value: d.px,
-              min: -3,
-              max: 3,
-              step: 0.001,
-              label: "x",
-            },
-            [`B_pY_${i}`]: {
-              value: d.py,
-              min: -6,
-              max: -4,
-              step: 0.001,
-              label: "y",
-            },
-            [`B_pZ_${i}`]: {
-              value: d.pz,
-              min: -4,
-              max: 4,
-              step: 0.001,
-              label: "z",
-            },
-            [`B_rY_${i}`]: {
-              value: d.ry ?? 0,
-              min: -180,
-              max: 180,
-              step: 0.1,
-              label: "rotY°",
-            },
-            [`B_s_${i}`]: {
-              value: d.s,
-              min: 0.01,
-              max: 1,
-              step: 0.001,
-              label: "scale",
-            },
-          },
-          { collapsed: true }
-        );
-      }
-      return schema;
-    }, [])
-  );
-
-  const instanceC = useControls(
-    "Crystal C / Instances",
-    useMemo(() => {
-      const schema = {};
-      for (let i = 0; i < COUNT_C; i++) {
-        const d = BAKED_C[i] ?? FALLBACK_C;
-        schema[`C / Instance ${String(i + 1).padStart(2, "0")}`] = folder(
-          {
-            [`C_pX_${i}`]: {
-              value: d.px,
-              min: -3,
-              max: 3,
-              step: 0.001,
-              label: "x",
-            },
-            [`C_pY_${i}`]: {
-              value: d.py,
-              min: -6,
-              max: -4,
-              step: 0.001,
-              label: "y",
-            },
-            [`C_pZ_${i}`]: {
-              value: d.pz,
-              min: -4,
-              max: 1,
-              step: 0.001,
-              label: "z",
-            },
-            [`C_rY_${i}`]: {
-              value: d.ry,
-              min: -180,
-              max: 180,
-              step: 0.1,
-              label: "rotY°",
-            },
-            [`C_s_${i}`]: {
-              value: d.s,
-              min: 0.01,
-              max: 5,
-              step: 0.001,
-              label: "scale",
-            },
-          },
-          { collapsed: true }
-        );
-      }
-      return schema;
-    }, [])
-  );
+  // Replay handler for debug panel
+  const handleReplay = React.useCallback(() => {
+    progressRef.current = -0.2;
+    coolMixRef.current = 0.0;
+    updateUniformAll("uProgress", progressRef.current);
+    updateUniformAll("uCoolMix", coolMixRef.current);
+  }, [materialA, materialB, materialC]);
 
   // ---------- Extract geometries (Y-up) ----------
   const geoA = useMemo(() => {
@@ -1342,6 +1432,7 @@ export default forwardRef(function UnifiedCrystalClusters(props, ref) {
 
   return (
     <group ref={rootRef} name="UnifiedCrystalClusters" {...props}>
+      {isDebugMode && <CrystalDebugPanel onChange={setDebugValues} onReplay={handleReplay} />}
       <group name="CrystalA">
         <instancedMesh
           ref={meshARef}

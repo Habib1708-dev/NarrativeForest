@@ -375,12 +375,14 @@ df_vViewDist = length(mvPosition.xyz);
 
     if (!didLog.current && stats.current.count > 0) {
       didLog.current = true;
-      const breakdown = [...stats.current.byType.entries()]
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(", ");
-      console.info(
-        `[DistanceFade] patched materials: ${stats.current.count} (${breakdown})`
-      );
+      if (process.env.NODE_ENV !== "production") {
+        const breakdown = [...stats.current.byType.entries()]
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        console.info(
+          `[DistanceFade] patched materials: ${stats.current.count} (${breakdown})`
+        );
+      }
     }
 
     return patchedThisPass > 0;

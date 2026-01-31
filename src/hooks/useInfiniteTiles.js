@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { makeTileMath, ringSet, addPrefetch, setDiff } from "../proc/tileMath";
+import { makeTileMath, ringSet, addPrefetch } from "../proc/tileMath";
 
 // Reusable Vector3 to avoid per-call allocations
 const _forward = new THREE.Vector3();
@@ -78,15 +78,5 @@ export function useInfiniteTiles({
     }
   });
 
-  // Diffs if you ever need them
-  const added = useMemo(
-    () => setDiff(required, retention),
-    [required, retention]
-  );
-  const removed = useMemo(
-    () => setDiff(retention, required),
-    [required, retention]
-  );
-
-  return { currentTile, required, retention, added, removed, math };
+  return { currentTile, required, retention, math };
 }

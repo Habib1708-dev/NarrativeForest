@@ -1,8 +1,65 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Sky } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useControls } from "leva";
+import { useDebugStore } from "../state/useDebugStore";
+
+/* ── Static defaults (used when debug panel is off) ── */
+export const CUSTOMSKY_HAZE_DEFAULTS = Object.freeze({
+  hazeEnabled: true,
+  hazeBottomY: -4.0,
+  hazeTopY: 87.0,
+  hazeFeather: 10.0,
+  hazePower: 1.0,
+  hazeBlendSpread: 0.59,
+  hazeBlendStrength: 0.74,
+});
+
+export const CUSTOMSKY_LIGHTNING_DEFAULTS = Object.freeze({
+  flashMinDelay: 4.0,
+  flashMaxDelay: 8.0,
+  flashSpreadBias: 1.2,
+  preFlashMs: 40,
+  mainFlashMs: 120,
+  tailMs: 250,
+  doubleFlashChance: 0.25,
+});
+
+/* ── Debug-only sub-component (mounts Leva panels) ── */
+function CustomSkyDebugPanel({ hazeDefaults, lightningDefaults, onChange }) {
+  const haze = useControls("Sky / Haze", {
+    hazeEnabled: { value: hazeDefaults.hazeEnabled },
+    hazeBottomY: { value: hazeDefaults.hazeBottomY, min: -200, max: 200, step: 0.1 },
+    hazeTopY: { value: hazeDefaults.hazeTopY, min: -200, max: 200, step: 0.1 },
+    hazeFeather: { value: hazeDefaults.hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
+    hazePower: { value: hazeDefaults.hazePower, min: 0.25, max: 4.0, step: 0.05 },
+    hazeBlendSpread: { value: hazeDefaults.hazeBlendSpread, min: 0.0, max: 2.0, step: 0.01 },
+    hazeBlendStrength: {
+      value: hazeDefaults.hazeBlendStrength,
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      label: "Haze Gradient Strength",
+    },
+  });
+
+  const lightning = useControls("Sky / Lightning", {
+    flashMinDelay: { value: lightningDefaults.flashMinDelay, min: 0.2, max: 20, step: 0.1 },
+    flashMaxDelay: { value: lightningDefaults.flashMaxDelay, min: 0.2, max: 30, step: 0.1 },
+    flashSpreadBias: { value: lightningDefaults.flashSpreadBias, min: 0.2, max: 3.0, step: 0.05 },
+    preFlashMs: { value: lightningDefaults.preFlashMs, min: 0, max: 600, step: 5 },
+    mainFlashMs: { value: lightningDefaults.mainFlashMs, min: 40, max: 600, step: 10 },
+    tailMs: { value: lightningDefaults.tailMs, min: 40, max: 2000, step: 10 },
+    doubleFlashChance: { value: lightningDefaults.doubleFlashChance, min: 0, max: 1, step: 0.01 },
+  });
+
+  useEffect(() => {
+    onChange({ ...haze, ...lightning });
+  }, [haze, lightning, onChange]);
+
+  return null;
+}
 
 /**
  * CustomSky
@@ -103,55 +160,33 @@ export default function CustomSky({
     }
   }, [tintColor]);
 
-  const {
-    hazeEnabled: ctrlHazeEnabled,
-    hazeBottomY: ctrlHazeBottomY,
-    hazeTopY: ctrlHazeTopY,
-    hazeFeather: ctrlHazeFeather,
-    hazePower: ctrlHazePower,
-    hazeBlendSpread: ctrlHazeBlendSpread,
-    hazeBlendStrength: ctrlHazeBlendStrength,
-  } = useControls("Sky / Haze", {
-    hazeEnabled: { value: hazeEnabled },
-    hazeBottomY: { value: hazeBottomY, min: -200, max: 200, step: 0.1 },
-    hazeTopY: { value: hazeTopY, min: -200, max: 200, step: 0.1 },
-    hazeFeather: { value: hazeFeather, min: 0.0, max: 10.0, step: 0.01 },
-    hazePower: { value: hazePower, min: 0.25, max: 4.0, step: 0.05 },
-    hazeBlendSpread: { value: hazeBlendSpread, min: 0.0, max: 2.0, step: 0.01 },
-    hazeBlendStrength: {
-      value: hazeBlendStrength,
-      min: 0.0,
-      max: 1.0,
-      step: 0.01,
-      label: "Haze Gradient Strength",
-    },
-  });
+  // ── Debug panel guard ──
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [debugValues, setDebugValues] = useState(null);
+
+  // Resolve ctrl* values: use debug overrides when available, otherwise use props directly
+  const ctrlHazeEnabled = isDebugMode && debugValues ? debugValues.hazeEnabled : hazeEnabled;
+  const ctrlHazeBottomY = isDebugMode && debugValues ? debugValues.hazeBottomY : hazeBottomY;
+  const ctrlHazeTopY = isDebugMode && debugValues ? debugValues.hazeTopY : hazeTopY;
+  const ctrlHazeFeather = isDebugMode && debugValues ? debugValues.hazeFeather : hazeFeather;
+  const ctrlHazePower = isDebugMode && debugValues ? debugValues.hazePower : hazePower;
+  const ctrlHazeBlendSpread = isDebugMode && debugValues ? debugValues.hazeBlendSpread : hazeBlendSpread;
+  const ctrlHazeBlendStrength = isDebugMode && debugValues ? debugValues.hazeBlendStrength : hazeBlendStrength;
 
   // Use hazeColor prop directly (controlled from Experience.jsx presets)
   const ctrlHazeColor = hazeColor;
 
-  // Leva controls for Lightning frequency/durations
   // lightningEnabled and flashPeakGain now come from Experience.jsx (presets)
   const ctrlLightningEnabled = lightningEnabled;
   const ctrlFlashPeakGain = flashPeakGain;
 
-  const {
-    flashMinDelay: ctrlFlashMinDelay,
-    flashMaxDelay: ctrlFlashMaxDelay,
-    flashSpreadBias: ctrlFlashSpreadBias,
-    preFlashMs: ctrlPreFlashMs,
-    mainFlashMs: ctrlMainFlashMs,
-    tailMs: ctrlTailMs,
-    doubleFlashChance: ctrlDoubleFlashChance,
-  } = useControls("Sky / Lightning", {
-    flashMinDelay: { value: flashMinDelay, min: 0.2, max: 20, step: 0.1 },
-    flashMaxDelay: { value: flashMaxDelay, min: 0.2, max: 30, step: 0.1 },
-    flashSpreadBias: { value: flashSpreadBias, min: 0.2, max: 3.0, step: 0.05 },
-    preFlashMs: { value: preFlashMs, min: 0, max: 600, step: 5 },
-    mainFlashMs: { value: mainFlashMs, min: 40, max: 600, step: 10 },
-    tailMs: { value: tailMs, min: 40, max: 2000, step: 10 },
-    doubleFlashChance: { value: doubleFlashChance, min: 0, max: 1, step: 0.01 },
-  });
+  const ctrlFlashMinDelay = isDebugMode && debugValues ? debugValues.flashMinDelay : flashMinDelay;
+  const ctrlFlashMaxDelay = isDebugMode && debugValues ? debugValues.flashMaxDelay : flashMaxDelay;
+  const ctrlFlashSpreadBias = isDebugMode && debugValues ? debugValues.flashSpreadBias : flashSpreadBias;
+  const ctrlPreFlashMs = isDebugMode && debugValues ? debugValues.preFlashMs : preFlashMs;
+  const ctrlMainFlashMs = isDebugMode && debugValues ? debugValues.mainFlashMs : mainFlashMs;
+  const ctrlTailMs = isDebugMode && debugValues ? debugValues.tailMs : tailMs;
+  const ctrlDoubleFlashChance = isDebugMode && debugValues ? debugValues.doubleFlashChance : doubleFlashChance;
 
   // Use Sky / Color props directly (controlled from Experience.jsx presets)
   const ctrlSaturation = saturation;
@@ -691,14 +726,39 @@ export default function CustomSky({
   });
 
   return (
-    <Sky
-      ref={skyRef}
-      sunPosition={sunPosition}
-      rayleigh={rayleigh}
-      turbidity={turbidity}
-      mieCoefficient={mieCoefficient}
-      mieDirectionalG={mieDirectionalG}
-      {...rest}
-    />
+    <>
+      {isDebugMode && (
+        <CustomSkyDebugPanel
+          hazeDefaults={{
+            hazeEnabled,
+            hazeBottomY,
+            hazeTopY,
+            hazeFeather,
+            hazePower,
+            hazeBlendSpread,
+            hazeBlendStrength,
+          }}
+          lightningDefaults={{
+            flashMinDelay,
+            flashMaxDelay,
+            flashSpreadBias,
+            preFlashMs,
+            mainFlashMs,
+            tailMs,
+            doubleFlashChance,
+          }}
+          onChange={setDebugValues}
+        />
+      )}
+      <Sky
+        ref={skyRef}
+        sunPosition={sunPosition}
+        rayleigh={rayleigh}
+        turbidity={turbidity}
+        mieCoefficient={mieCoefficient}
+        mieDirectionalG={mieDirectionalG}
+        {...rest}
+      />
+    </>
   );
 }

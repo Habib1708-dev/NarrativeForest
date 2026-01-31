@@ -4,11 +4,69 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useState,
 } from "react";
 import * as THREE from "three";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { useDebugStore } from "../state/useDebugStore";
+
+// Static defaults — used when not in debug mode to avoid Leva overhead
+const CATKTX2_DEFAULTS = Object.freeze({
+  positionX: -1.71,
+  positionY: -4.38,
+  positionZ: -2.91,
+  rotationYDeg: 180,
+  scale: 0.07,
+  tintColor: "#ffffff",
+  tintIntensity: 0.0,
+});
+
+// Debug-only Leva panel — only mounts when isDebugMode is true
+function CatKTX2DebugPanel({ onChange }) {
+  const values = useControls({
+    "Cat (KTX2)": folder({
+      Transform: folder({
+        positionX: { value: CATKTX2_DEFAULTS.positionX, min: -50, max: 50, step: 0.001 },
+        positionY: { value: CATKTX2_DEFAULTS.positionY, min: -50, max: 50, step: 0.001 },
+        positionZ: { value: CATKTX2_DEFAULTS.positionZ, min: -50, max: 50, step: 0.001 },
+        rotationYDeg: {
+          value: CATKTX2_DEFAULTS.rotationYDeg,
+          min: -180,
+          max: 180,
+          step: 0.1,
+          label: "Rotation Y (deg)",
+        },
+        scale: {
+          value: CATKTX2_DEFAULTS.scale,
+          min: 0.001,
+          max: 1,
+          step: 0.001,
+          label: "Uniform Scale",
+        },
+      }),
+      Appearance: folder({
+        tintColor: { value: CATKTX2_DEFAULTS.tintColor, label: "Tint Color" },
+        tintIntensity: {
+          value: CATKTX2_DEFAULTS.tintIntensity,
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          label: "Tint Intensity",
+        },
+      }),
+    }),
+  });
+  useEffect(() => {
+    onChange(values);
+  }, [
+    values.positionX, values.positionY, values.positionZ,
+    values.rotationYDeg, values.scale,
+    values.tintColor, values.tintIntensity,
+  ]);
+  return null;
+}
 
 export default forwardRef(function CatKTX2(_, ref) {
   // Load cat GLB with KTX2 compressed textures (resides under /public)
@@ -23,16 +81,16 @@ export default forwardRef(function CatKTX2(_, ref) {
 
   const { actions, names, mixer } = useAnimations(animations || [], groupRef);
 
-  // Pick the first clip and play it
-  useEffect(() => {
-    if (!actions || !names || names.length === 0) return;
-    const action = actions[names[0]];
-    if (!action) return;
-    action.reset().fadeIn(0.2).play();
-    return () => action.fadeOut(0.2);
-  }, [actions, names]);
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
 
-  // Leva transforms + appearance
+  // Debug controls state (null when not debugging)
+  const [debugValues, setDebugValues] = useState(null);
+  useEffect(() => {
+    if (!isDebugMode) setDebugValues(null);
+  }, [isDebugMode]);
+
+  // Active values: debug overrides or static defaults
+  const activeVals = debugValues ?? CATKTX2_DEFAULTS;
   const {
     positionX,
     positionY,
@@ -41,39 +99,16 @@ export default forwardRef(function CatKTX2(_, ref) {
     scale,
     tintColor,
     tintIntensity,
-  } = useControls({
-    "Cat (KTX2)": folder({
-      Transform: folder({
-        positionX: { value: -1.71, min: -50, max: 50, step: 0.001 },
-        positionY: { value: -4.38, min: -50, max: 50, step: 0.001 },
-        positionZ: { value: -2.91, min: -50, max: 50, step: 0.001 },
-        rotationYDeg: {
-          value: 180,
-          min: -180,
-          max: 180,
-          step: 0.1,
-          label: "Rotation Y (deg)",
-        },
-        scale: {
-          value: 0.07,
-          min: 0.001,
-          max: 1,
-          step: 0.001,
-          label: "Uniform Scale",
-        },
-      }),
-      Appearance: folder({
-        tintColor: { value: "#ffffff", label: "Tint Color" },
-        tintIntensity: {
-          value: 0.0,
-          min: 0.0,
-          max: 1.0,
-          step: 0.01,
-          label: "Tint Intensity",
-        },
-      }),
-    }),
-  });
+  } = activeVals;
+
+  // Pick the first clip and play it
+  useEffect(() => {
+    if (!actions || !names || names.length === 0) return;
+    const action = actions[names[0]];
+    if (!action) return;
+    action.reset().fadeIn(0.2).play();
+    return () => action.fadeOut(0.2);
+  }, [actions, names]);
 
   // Shadow setup, clone materials once, and stash original colors
   // Apply non-metallic settings (same as CatNoTextures)
@@ -174,6 +209,7 @@ export default forwardRef(function CatKTX2(_, ref) {
       rotation={[0, rotationY, 0]}
       scale={scale}
     >
+      {isDebugMode && <CatKTX2DebugPanel onChange={setDebugValues} />}
       <primitive object={cloned} />
     </group>
   );

@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
+  useState,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -10,8 +11,151 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { useDebugStore } from "../state/useDebugStore";
+
+// ── Static defaults (used when debug panel is off) ──────────────────────────
+const CABIN_DEFAULTS = Object.freeze({
+  positionX: -2.3,
+  positionY: -4.85,
+  positionZ: -2.7,
+  rotationYDeg: 180,
+  scale: 0.06,
+  tintColor: "#808080",
+  tintIntensity: 0.75,
+  bulbEnabled: true,
+  bulbColor: "#ffc37b",
+  bulbIntensity: 0.1,
+  bulbSize: 0.01,
+  bulbX: -1.71,
+  bulbY: -4.6,
+  bulbZ: -2.94,
+  bulb2Enabled: true,
+  bulb2Color: "#ffc37b",
+  bulb2Intensity: 0.2,
+  bulb2Size: 0.01,
+  bulb2X: -1.742,
+  bulb2Y: -4.622,
+  bulb2Z: -2.335,
+});
+
+// ── Debug-only sub-component (mounts useControls only when debug is active) ─
+function CabinDebugPanel({ onChange }) {
+  const values = useControls({
+    Cabin: folder({
+      Transform: folder({
+        positionX: { value: CABIN_DEFAULTS.positionX, min: -50, max: 50, step: 0.1 },
+        positionY: { value: CABIN_DEFAULTS.positionY, min: -20, max: 20, step: 0.01 },
+        positionZ: { value: CABIN_DEFAULTS.positionZ, min: -50, max: 50, step: 0.1 },
+        rotationYDeg: {
+          value: CABIN_DEFAULTS.rotationYDeg,
+          min: -180,
+          max: 180,
+          step: 1,
+          label: "Rotation Y (deg)",
+        },
+        scale: {
+          value: CABIN_DEFAULTS.scale,
+          min: 0.01,
+          max: 5,
+          step: 0.01,
+          label: "Uniform Scale",
+        },
+      }),
+      Tint: folder({
+        tintColor: { value: CABIN_DEFAULTS.tintColor, label: "Tint Color" },
+        tintIntensity: {
+          value: CABIN_DEFAULTS.tintIntensity,
+          min: 0,
+          max: 1,
+          step: 0.01,
+          label: "Intensity",
+        },
+      }),
+
+      // Bulb 1
+      "Bulb Light": folder({
+        bulbEnabled: { value: CABIN_DEFAULTS.bulbEnabled, label: "Enabled" },
+        bulbColor: { value: CABIN_DEFAULTS.bulbColor, label: "Color" },
+        bulbIntensity: {
+          value: CABIN_DEFAULTS.bulbIntensity,
+          min: 0,
+          max: 2,
+          step: 0.01,
+          label: "Intensity",
+        },
+        bulbSize: {
+          value: CABIN_DEFAULTS.bulbSize,
+          min: 0.001,
+          max: 0.1,
+          step: 0.001,
+          label: "Size",
+        },
+        bulbX: { value: CABIN_DEFAULTS.bulbX, min: -50, max: 50, step: 0.001, label: "X" },
+        bulbY: { value: CABIN_DEFAULTS.bulbY, min: -50, max: 50, step: 0.01, label: "Y" },
+        bulbZ: { value: CABIN_DEFAULTS.bulbZ, min: -50, max: 50, step: 0.01, label: "Z" },
+      }),
+
+      // Bulb 2
+      "Bulb Light 2": folder({
+        bulb2Enabled: { value: CABIN_DEFAULTS.bulb2Enabled, label: "Enabled" },
+        bulb2Color: { value: CABIN_DEFAULTS.bulb2Color, label: "Color" },
+        bulb2Intensity: {
+          value: CABIN_DEFAULTS.bulb2Intensity,
+          min: 0,
+          max: 2,
+          step: 0.01,
+          label: "Intensity",
+        },
+        bulb2Size: {
+          value: CABIN_DEFAULTS.bulb2Size,
+          min: 0.001,
+          max: 0.1,
+          step: 0.001,
+          label: "Size",
+        },
+        bulb2X: { value: CABIN_DEFAULTS.bulb2X, min: -50, max: 50, step: 0.001, label: "X" },
+        bulb2Y: { value: CABIN_DEFAULTS.bulb2Y, min: -50, max: 50, step: 0.001, label: "Y" },
+        bulb2Z: { value: CABIN_DEFAULTS.bulb2Z, min: -50, max: 50, step: 0.001, label: "Z" },
+      }),
+    }),
+  });
+
+  useEffect(() => {
+    onChange(values);
+  }, [values, onChange]);
+
+  return null;
+}
 
 export default forwardRef(function Cabin(_, ref) {
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [debugValues, setDebugValues] = useState(CABIN_DEFAULTS);
+
+  // Resolve active values: debug panel overrides or static defaults
+  const {
+    positionX,
+    positionY,
+    positionZ,
+    rotationYDeg,
+    scale,
+    tintColor,
+    tintIntensity,
+    bulbEnabled,
+    bulbColor,
+    bulbIntensity,
+    bulbSize,
+    bulbX,
+    bulbY,
+    bulbZ,
+    bulb2Enabled,
+    bulb2Color,
+    bulb2Intensity,
+    bulb2Size,
+    bulb2X,
+    bulb2Y,
+    bulb2Z,
+  } = isDebugMode ? debugValues : CABIN_DEFAULTS;
+
   // Load GLB from /public
   const { scene } = useGLTF("/models/cabin/Cabin2.glb");
 
@@ -47,114 +191,6 @@ export default forwardRef(function Cabin(_, ref) {
     materialsRef.current = Array.from(mats.values());
   }, [clonedScene]);
 
-  // Leva controls (with your provided defaults)
-  const {
-    positionX,
-    positionY,
-    positionZ,
-    rotationYDeg,
-    scale,
-    tintColor,
-    tintIntensity,
-
-    // Bulb 1
-    bulbEnabled,
-    bulbColor,
-    bulbIntensity,
-    bulbSize,
-    bulbX,
-    bulbY,
-    bulbZ,
-
-    // Bulb 2 (NEW)
-    bulb2Enabled,
-    bulb2Color,
-    bulb2Intensity,
-    bulb2Size,
-    bulb2X,
-    bulb2Y,
-    bulb2Z,
-  } = useControls({
-    Cabin: folder({
-      Transform: folder({
-        positionX: { value: -2.3, min: -50, max: 50, step: 0.1 },
-        positionY: { value: -4.85, min: -20, max: 20, step: 0.01 },
-        positionZ: { value: -2.7, min: -50, max: 50, step: 0.1 },
-        rotationYDeg: {
-          value: 180,
-          min: -180,
-          max: 180,
-          step: 1,
-          label: "Rotation Y (deg)",
-        },
-        scale: {
-          value: 0.06,
-          min: 0.01,
-          max: 5,
-          step: 0.01,
-          label: "Uniform Scale",
-        },
-      }),
-      Tint: folder({
-        tintColor: { value: "#808080", label: "Tint Color" },
-        tintIntensity: {
-          value: 0.75,
-          min: 0,
-          max: 1,
-          step: 0.01,
-          label: "Intensity",
-        },
-      }),
-
-      // Bulb 1
-      "Bulb Light": folder({
-        bulbEnabled: { value: true, label: "Enabled" },
-        bulbColor: { value: "#ffc37b", label: "Color" },
-        bulbIntensity: {
-          value: 0.1,
-          min: 0,
-          max: 2,
-          step: 0.01,
-          label: "Intensity",
-        },
-        bulbSize: {
-          value: 0.01,
-          min: 0.001,
-          max: 0.1,
-          step: 0.001,
-          label: "Size",
-        },
-        bulbX: { value: -1.71, min: -50, max: 50, step: 0.001, label: "X" },
-        bulbY: { value: -4.6, min: -50, max: 50, step: 0.01, label: "Y" },
-        bulbZ: { value: -2.94, min: -50, max: 50, step: 0.01, label: "Z" },
-      }),
-
-      // Bulb 2 (NEW)
-      "Bulb Light 2": folder({
-        bulb2Enabled: { value: true, label: "Enabled" },
-        bulb2Color: { value: "#ffc37b", label: "Color" },
-        bulb2Intensity: {
-          value: 0.2,
-          min: 0,
-          max: 2,
-          step: 0.01,
-          label: "Intensity",
-        },
-        bulb2Size: {
-          value: 0.01,
-          min: 0.001,
-          max: 0.1,
-          step: 0.001,
-          label: "Size",
-        },
-        // Start at the exact same position as bulb 1 by default
-        bulb2X: { value: -1.742, min: -50, max: 50, step: 0.001, label: "X" },
-        bulb2Y: { value: -4.622, min: -50, max: 50, step: 0.001, label: "Y" },
-        bulb2Z: { value: -2.335, min: -50, max: 50, step: 0.001, label: "Z" },
-      }),
-    }),
-  });
-
   // Apply tint (lerp from original to target color by intensity)
   useEffect(() => {
     const target = new THREE.Color(tintColor);
@@ -177,7 +213,7 @@ export default forwardRef(function Cabin(_, ref) {
 
   if (!clonedScene) return null;
 
-  // Bulb positions controlled via Leva
+  // Bulb positions
   const bulbPosition = useMemo(
     () => [bulbX, bulbY, bulbZ],
     [bulbX, bulbY, bulbZ]
@@ -305,6 +341,8 @@ export default forwardRef(function Cabin(_, ref) {
 
   return (
     <group ref={rootRef} userData={{ noDistanceFade: true }}>
+      {isDebugMode && <CabinDebugPanel onChange={setDebugValues} />}
+
       {/* Cabin model */}
       <group
         position={position}
@@ -333,7 +371,7 @@ export default forwardRef(function Cabin(_, ref) {
         />
       )}
 
-      {/* Bulb 2 (NEW) */}
+      {/* Bulb 2 */}
       {bulb2Enabled && (
         <Bulb
           position={bulb2Position}

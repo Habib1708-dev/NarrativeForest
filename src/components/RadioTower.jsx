@@ -3,6 +3,7 @@ import React, {
   forwardRef,
   useMemo,
   useRef,
+  useState,
   useEffect,
   useImperativeHandle,
 } from "react";
@@ -12,6 +13,126 @@ import { useControls, folder, button } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useFrame } from "@react-three/fiber";
 import { useCameraStore } from "../state/useCameraStore";
+import { useDebugStore } from "../state/useDebugStore";
+
+/* ─── static defaults (used when debug panel is off) ─── */
+const RADIOTOWER_DEFAULTS = Object.freeze({
+  positionX: 0.0,
+  positionY: -4.7,
+  positionZ: -1.9,
+  rotationYDeg: 0,
+  scale: 0.03,
+  heightScale: 1.8,
+  tintColor: "#ffffff",
+  tintIntensity: 0.0,
+  build: false,
+  speed: 0.24,
+  noiseScale: 4.72,
+  noiseAmp: 0.8,
+  edgeWidth: 0.15,
+  glowStrength: 10.0,
+  glowColor: "#ffffff",
+  seed: 184,
+});
+
+/* ─── debug sub-component (only rendered when debug mode is on) ─── */
+function RadioTowerDebugPanel({ onChange, onReplay }) {
+  useControls({
+    "Radio Tower": folder(
+      {
+        Transform: folder({
+          positionX: { value: RADIOTOWER_DEFAULTS.positionX, min: -200, max: 200, step: 0.01, onChange: (v) => onChange("positionX", v) },
+          positionY: { value: RADIOTOWER_DEFAULTS.positionY, min: -200, max: 200, step: 0.01, onChange: (v) => onChange("positionY", v) },
+          positionZ: { value: RADIOTOWER_DEFAULTS.positionZ, min: -200, max: 200, step: 0.01, onChange: (v) => onChange("positionZ", v) },
+          rotationYDeg: {
+            value: RADIOTOWER_DEFAULTS.rotationYDeg,
+            min: -180,
+            max: 180,
+            step: 0.1,
+            label: "Rotation Y (deg)",
+            onChange: (v) => onChange("rotationYDeg", v),
+          },
+          scale: {
+            value: RADIOTOWER_DEFAULTS.scale,
+            min: 0.001,
+            max: 5,
+            step: 0.001,
+            label: "Uniform Scale",
+            onChange: (v) => onChange("scale", v),
+          },
+          heightScale: {
+            value: RADIOTOWER_DEFAULTS.heightScale,
+            min: 0.1,
+            max: 10,
+            step: 0.01,
+            label: "Height Scale (Y)",
+            onChange: (v) => onChange("heightScale", v),
+          },
+        }),
+        Appearance: folder({
+          tintColor: { value: RADIOTOWER_DEFAULTS.tintColor, label: "Tint Color", onChange: (v) => onChange("tintColor", v) },
+          tintIntensity: {
+            value: RADIOTOWER_DEFAULTS.tintIntensity,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Tint Intensity",
+            onChange: (v) => onChange("tintIntensity", v),
+          },
+        }),
+        Dissolve: folder({
+          build: { value: RADIOTOWER_DEFAULTS.build, label: "Build Tower", onChange: (v) => onChange("build", v) },
+          speed: {
+            value: RADIOTOWER_DEFAULTS.speed,
+            min: 0.05,
+            max: 3,
+            step: 0.01,
+            label: "Speed (units/sec)",
+            onChange: (v) => onChange("speed", v),
+          },
+          noiseScale: {
+            value: RADIOTOWER_DEFAULTS.noiseScale,
+            min: 0.1,
+            max: 6,
+            step: 0.01,
+            label: "Noise Scale",
+            onChange: (v) => onChange("noiseScale", v),
+          },
+          noiseAmp: {
+            value: RADIOTOWER_DEFAULTS.noiseAmp,
+            min: 0,
+            max: 1.5,
+            step: 0.01,
+            label: "Noise Amplitude",
+            onChange: (v) => onChange("noiseAmp", v),
+          },
+          edgeWidth: {
+            value: RADIOTOWER_DEFAULTS.edgeWidth,
+            min: 0.0,
+            max: 0.4,
+            step: 0.005,
+            label: "Edge Width",
+            onChange: (v) => onChange("edgeWidth", v),
+          },
+          glowStrength: {
+            value: RADIOTOWER_DEFAULTS.glowStrength,
+            min: 0.0,
+            max: 50,
+            step: 0.1,
+            label: "Glow Strength",
+            onChange: (v) => onChange("glowStrength", v),
+          },
+          glowColor: { value: RADIOTOWER_DEFAULTS.glowColor, label: "Glow Color", onChange: (v) => onChange("glowColor", v) },
+          seed: { value: RADIOTOWER_DEFAULTS.seed, min: 0, max: 1000, step: 1, label: "Noise Seed", onChange: (v) => onChange("seed", v) },
+          Replay: button(() => onReplay()),
+        }),
+      },
+      { collapsed: false }
+    ),
+  });
+
+  return null;
+}
 
 export default forwardRef(function RadioTower(_, ref) {
   const glbPath = "/models/radioTower/Radio%20tower_draco.glb"; // Using Draco-compressed version
@@ -23,6 +144,20 @@ export default forwardRef(function RadioTower(_, ref) {
   useImperativeHandle(ref, () => rootRef.current, []);
 
   const materialsRef = useRef([]);
+
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [activeVals, setActiveVals] = useState({ ...RADIOTOWER_DEFAULTS });
+
+  // When debug mode turns off, reset to defaults
+  useEffect(() => {
+    if (!isDebugMode) {
+      setActiveVals({ ...RADIOTOWER_DEFAULTS });
+    }
+  }, [isDebugMode]);
+
+  const handleDebugChange = (key, value) => {
+    setActiveVals((prev) => ({ ...prev, [key]: value }));
+  };
 
   // Gather unique materials, cache original flags/colors
   useEffect(() => {
@@ -52,94 +187,6 @@ export default forwardRef(function RadioTower(_, ref) {
     materialsRef.current = Array.from(mats.values());
   }, [cloned]);
 
-  const params = useControls({
-    "Radio Tower": folder(
-      {
-        Transform: folder({
-          positionX: { value: 0.0, min: -200, max: 200, step: 0.01 },
-          positionY: { value: -4.7, min: -200, max: 200, step: 0.01 },
-          positionZ: { value: -1.9, min: -200, max: 200, step: 0.01 },
-          rotationYDeg: {
-            value: 0,
-            min: -180,
-            max: 180,
-            step: 0.1,
-            label: "Rotation Y (deg)",
-          },
-          scale: {
-            value: 0.03,
-            min: 0.001,
-            max: 5,
-            step: 0.001,
-            label: "Uniform Scale",
-          },
-          heightScale: {
-            value: 1.8,
-            min: 0.1,
-            max: 10,
-            step: 0.01,
-            label: "Height Scale (Y)",
-          },
-        }),
-        Appearance: folder({
-          tintColor: { value: "#ffffff", label: "Tint Color" },
-          tintIntensity: {
-            value: 0.0,
-            min: 0,
-            max: 1,
-            step: 0.01,
-            label: "Tint Intensity",
-          },
-        }),
-        Dissolve: folder({
-          build: { value: false, label: "Build Tower" },
-          speed: {
-            value: 0.24,
-            min: 0.05,
-            max: 3,
-            step: 0.01,
-            label: "Speed (units/sec)",
-          },
-          noiseScale: {
-            value: 4.72,
-            min: 0.1,
-            max: 6,
-            step: 0.01,
-            label: "Noise Scale",
-          },
-          noiseAmp: {
-            value: 0.8,
-            min: 0,
-            max: 1.5,
-            step: 0.01,
-            label: "Noise Amplitude",
-          },
-          edgeWidth: {
-            value: 0.15,
-            min: 0.0,
-            max: 0.4,
-            step: 0.005,
-            label: "Edge Width",
-          },
-          glowStrength: {
-            value: 10.0,
-            min: 0.0,
-            max: 50,
-            step: 0.1,
-            label: "Glow Strength",
-          },
-          glowColor: { value: "#ffffff", label: "Glow Color" },
-          seed: { value: 184, min: 0, max: 1000, step: 1, label: "Noise Seed" },
-          Replay: button(() => {
-            progressRef.current = -0.2;
-            updateUniformAll("uProgress", progressRef.current);
-          }),
-        }),
-      },
-      { collapsed: false }
-    ),
-  });
-
   const {
     positionX,
     positionY,
@@ -149,7 +196,15 @@ export default forwardRef(function RadioTower(_, ref) {
     heightScale,
     tintColor,
     tintIntensity,
-  } = params;
+    build,
+    speed,
+    noiseScale,
+    noiseAmp,
+    edgeWidth,
+    glowStrength,
+    glowColor,
+    seed,
+  } = activeVals;
 
   // live tint (preserve original color as base)
   useEffect(() => {
@@ -201,11 +256,6 @@ export default forwardRef(function RadioTower(_, ref) {
 
     if (shouldBuild !== shouldBuildRef.current) {
       shouldBuildRef.current = shouldBuild;
-      console.log(
-        shouldBuild
-          ? `🗼 Camera at waypoint ${currentWaypointIndex} (>= stop-13): Building tower...`
-          : `🗼 Camera at waypoint ${currentWaypointIndex} (< stop-13): Dissolving tower...`
-      );
     }
   }, [currentWaypointIndex]);
 
@@ -216,6 +266,11 @@ export default forwardRef(function RadioTower(_, ref) {
         sh.uniforms[name].value = val;
       }
     });
+  };
+
+  const handleReplay = () => {
+    progressRef.current = -0.2;
+    updateUniformAll("uProgress", progressRef.current);
   };
 
   // Patch materials once; preserve transparency & tone mapping intent
@@ -271,16 +326,16 @@ export default forwardRef(function RadioTower(_, ref) {
 
         // uniforms
         shader.uniforms.uProgress = { value: progressRef.current };
-        shader.uniforms.uEdgeWidth = { value: params.edgeWidth };
-        shader.uniforms.uNoiseScale = { value: params.noiseScale };
-        shader.uniforms.uNoiseAmp = { value: params.noiseAmp };
-        shader.uniforms.uGlowStrength = { value: params.glowStrength };
+        shader.uniforms.uEdgeWidth = { value: edgeWidth };
+        shader.uniforms.uNoiseScale = { value: noiseScale };
+        shader.uniforms.uNoiseAmp = { value: noiseAmp };
+        shader.uniforms.uGlowStrength = { value: glowStrength };
         shader.uniforms.uGlowColor = {
-          value: new THREE.Color(params.glowColor),
+          value: new THREE.Color(glowColor),
         };
         shader.uniforms.uMinY = { value: worldYRangeRef.current.min };
         shader.uniforms.uMaxY = { value: worldYRangeRef.current.max };
-        shader.uniforms.uSeed = { value: params.seed };
+        shader.uniforms.uSeed = { value: seed };
 
         const fragPrelude = /* glsl */ `
           uniform float uProgress, uEdgeWidth, uNoiseScale, uNoiseAmp, uMinY, uMaxY, uSeed, uGlowStrength;
@@ -364,44 +419,44 @@ export default forwardRef(function RadioTower(_, ref) {
       m.userData.rtPatched = true;
       // toneMapped policy: only disable when we actually want strong HDR edge
       m.toneMapped =
-        params.glowStrength > 0 ? false : m.userData._origToneMapped;
+        glowStrength > 0 ? false : m.userData._origToneMapped;
       m.needsUpdate = true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.edgeWidth, params.noiseScale, params.noiseAmp, params.glowStrength, params.glowColor, params.seed]);
+  }, [edgeWidth, noiseScale, noiseAmp, glowStrength, glowColor, seed]);
 
   // Update toneMapped dynamically if glowStrength changes
   useEffect(() => {
-    const wantHDR = params.glowStrength > 0;
+    const wantHDR = glowStrength > 0;
     materialsRef.current.forEach((m) => {
       if (!m || !m.userData) return;
       m.toneMapped = wantHDR ? false : m.userData._origToneMapped;
       m.needsUpdate = true;
     });
-  }, [params.glowStrength]);
+  }, [glowStrength]);
 
   // Live uniform updates
   useEffect(
-    () => updateUniformAll("uEdgeWidth", params.edgeWidth),
-    [params.edgeWidth]
+    () => updateUniformAll("uEdgeWidth", edgeWidth),
+    [edgeWidth]
   );
   useEffect(
-    () => updateUniformAll("uNoiseScale", params.noiseScale),
-    [params.noiseScale]
+    () => updateUniformAll("uNoiseScale", noiseScale),
+    [noiseScale]
   );
   useEffect(
-    () => updateUniformAll("uNoiseAmp", params.noiseAmp),
-    [params.noiseAmp]
+    () => updateUniformAll("uNoiseAmp", noiseAmp),
+    [noiseAmp]
   );
   useEffect(
-    () => updateUniformAll("uGlowStrength", params.glowStrength),
-    [params.glowStrength]
+    () => updateUniformAll("uGlowStrength", glowStrength),
+    [glowStrength]
   );
   useEffect(
-    () => updateUniformAll("uGlowColor", new THREE.Color(params.glowColor)),
-    [params.glowColor]
+    () => updateUniformAll("uGlowColor", new THREE.Color(glowColor)),
+    [glowColor]
   );
-  useEffect(() => updateUniformAll("uSeed", params.seed), [params.seed]);
+  useEffect(() => updateUniformAll("uSeed", seed), [seed]);
 
   const updateWorldYRange = () => {
     if (!rootRef.current) return;
@@ -430,10 +485,10 @@ export default forwardRef(function RadioTower(_, ref) {
   // Animate dissolve
   useFrame((_, dt) => {
     // Use camera-driven state unless manual control overrides
-    const target = params.build || shouldBuildRef.current ? 1.1 : -0.2;
+    const target = build || shouldBuildRef.current ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);
     if (dir !== 0) {
-      const step = params.speed * dt * dir;
+      const step = speed * dt * dir;
       const next = progressRef.current + step;
       progressRef.current = (dir > 0 ? Math.min : Math.max)(next, target);
       updateUniformAll("uProgress", progressRef.current);
@@ -449,6 +504,12 @@ export default forwardRef(function RadioTower(_, ref) {
       dispose={null}
       userData={{ noDistanceFade: true }}
     >
+      {isDebugMode && (
+        <RadioTowerDebugPanel
+          onChange={handleDebugChange}
+          onReplay={handleReplay}
+        />
+      )}
       <group position={position} rotation={[0, rotationY, 0]} scale={scaleVec}>
         <primitive object={cloned} />
       </group>

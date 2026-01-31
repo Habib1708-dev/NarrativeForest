@@ -4,11 +4,56 @@
 import React, {
   useMemo,
   useRef,
+  useState,
+  useEffect,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import * as THREE from "three";
 import { useControls, folder } from "leva";
+import { useDebugStore } from "../state/useDebugStore";
+
+// === Static defaults (used when debug mode is off) ===
+const LAKE_DEFAULTS = Object.freeze({
+  lakePosX: -1.8,
+  lakePosY: -4.79,
+  lakePosZ: -2.8,
+  lakeSizeX: 2.0,
+  lakeSizeZ: 2.0,
+});
+
+// === Debug-only panel (only mounted when debug mode is active) ===
+function LakeDebugPanel({ onChange }) {
+  const values = useControls("Lake", {
+    Transform: folder({
+      lakePosX: { value: LAKE_DEFAULTS.lakePosX, min: -20, max: 20, step: 0.01 },
+      lakePosY: { value: LAKE_DEFAULTS.lakePosY, min: -10, max: 10, step: 0.01 },
+      lakePosZ: { value: LAKE_DEFAULTS.lakePosZ, min: -20, max: 20, step: 0.01 },
+    }),
+    Size: folder({
+      lakeSizeX: {
+        value: LAKE_DEFAULTS.lakeSizeX,
+        min: 0.25,
+        max: 10,
+        step: 0.01,
+        label: "Size X",
+      },
+      lakeSizeZ: {
+        value: LAKE_DEFAULTS.lakeSizeZ,
+        min: 0.25,
+        max: 10,
+        step: 0.01,
+        label: "Size Z",
+      },
+    }),
+  });
+
+  useEffect(() => {
+    onChange(values);
+  }, [values.lakePosX, values.lakePosY, values.lakePosZ, values.lakeSizeX, values.lakeSizeZ]);
+
+  return null;
+}
 
 const FakeLake = forwardRef(function FakeLake(
   {
@@ -20,36 +65,16 @@ const FakeLake = forwardRef(function FakeLake(
 ) {
   const meshRef = useRef();
 
-  // === Controls (same as Lake for compatibility) ===
-  const {
-    lakePosX,
-    lakePosY,
-    lakePosZ,
-    lakeSizeX,
-    lakeSizeZ,
-  } = useControls("Lake", {
-    Transform: folder({
-      lakePosX: { value: -1.8, min: -20, max: 20, step: 0.01 },
-      lakePosY: { value: -4.79, min: -10, max: 10, step: 0.01 },
-      lakePosZ: { value: -2.8, min: -20, max: 20, step: 0.01 },
-    }),
-    Size: folder({
-      lakeSizeX: {
-        value: 2.0,
-        min: 0.25,
-        max: 10,
-        step: 0.01,
-        label: "Size X",
-      },
-      lakeSizeZ: {
-        value: 2.0,
-        min: 0.25,
-        max: 10,
-        step: 0.01,
-        label: "Size Z",
-      },
-    }),
-  });
+  // === Debug mode gating ===
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [debugValues, setDebugValues] = useState(null);
+
+  useEffect(() => {
+    if (!isDebugMode) setDebugValues(null);
+  }, [isDebugMode]);
+
+  const activeVals = debugValues ?? LAKE_DEFAULTS;
+  const { lakePosX, lakePosY, lakePosZ, lakeSizeX, lakeSizeZ } = activeVals;
 
   // === Simple gray material ===
   const material = useMemo(
@@ -117,6 +142,7 @@ const FakeLake = forwardRef(function FakeLake(
   return (
     <group position={lakePosition} rotation={rotation} scale={lakeScale}>
       <mesh ref={meshRef} geometry={geom} material={material} frustumCulled renderOrder={10} />
+      {isDebugMode && <LakeDebugPanel onChange={setDebugValues} />}
     </group>
   );
 });

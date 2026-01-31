@@ -1,12 +1,224 @@
 // src/components/MagicMushrooms.jsx
-import React, { useEffect, useMemo, useRef, forwardRef } from "react";
+import React, { useEffect, useMemo, useRef, useState, forwardRef } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useControls, folder, button } from "leva";
 import { useCameraStore } from "../state/useCameraStore";
+import { useDebugStore } from "../state/useDebugStore";
 
 const MUSHROOM_GLB = "/models/magicPlantsAndCrystal/Mushroom.glb";
+
+// ── Static defaults (used when debug mode is off) ──
+const MUSHROOM_DEFAULTS = Object.freeze({
+  dissolveCtl: Object.freeze({
+    build: false,
+    speed: 0.24,
+    noiseScale: 4.5,
+    noiseAmp: 0.8,
+    edgeWidth: 0.15,
+    glowStrength: 10.0,
+    seed: 321,
+  }),
+  gradCtl: Object.freeze({
+    bottomColor: "#ffa22b",
+    topColor: "#ffa22b",
+    height: 0.51,
+    soft: 0.2,
+    intensity: 1.0,
+  }),
+  fireflyCtl: Object.freeze({
+    enabled: true,
+    burstCount: 30,
+    pointSize: 6,
+    lifetime: 1.0,
+    upwardSpeed: 0.5,
+    lateralSpread: 0.3,
+    color: "#ffc353ff",
+  }),
+  squeezeCtl: Object.freeze({
+    enabled: true,
+    squeezeAmount: 0.13,
+    preserveVolume: true,
+    squeezeSpeed: 4.8,
+    releaseSpeed: 4.8,
+    autoRelease: true,
+    holdSeconds: 0.2,
+  }),
+});
+
+// ── Debug panel sub-component (only rendered in debug mode) ──
+function MushroomDebugPanel({ onChange, onReplay, onResetAll }) {
+  const dissolveCtl = useControls({
+    Mushrooms: folder(
+      {
+        Dissolve: folder({
+          build: { value: MUSHROOM_DEFAULTS.dissolveCtl.build, label: "Build Mushrooms" },
+          speed: {
+            value: MUSHROOM_DEFAULTS.dissolveCtl.speed,
+            min: 0.05,
+            max: 3,
+            step: 0.01,
+            label: "Speed (units/sec)",
+          },
+          noiseScale: {
+            value: MUSHROOM_DEFAULTS.dissolveCtl.noiseScale,
+            min: 0.1,
+            max: 6,
+            step: 0.01,
+            label: "Noise Scale",
+          },
+          noiseAmp: {
+            value: MUSHROOM_DEFAULTS.dissolveCtl.noiseAmp,
+            min: 0,
+            max: 1.5,
+            step: 0.01,
+            label: "Noise Amplitude",
+          },
+          edgeWidth: {
+            value: MUSHROOM_DEFAULTS.dissolveCtl.edgeWidth,
+            min: 0.0,
+            max: 0.4,
+            step: 0.005,
+            label: "Edge Width",
+          },
+          glowStrength: {
+            value: MUSHROOM_DEFAULTS.dissolveCtl.glowStrength,
+            min: 0.0,
+            max: 50,
+            step: 0.1,
+            label: "Glow Strength",
+          },
+          seed: { value: MUSHROOM_DEFAULTS.dissolveCtl.seed, min: 0, max: 1000, step: 1, label: "Noise Seed" },
+          Replay: button(() => onReplay()),
+        }),
+      },
+      { collapsed: true }
+    ),
+  });
+
+  const gradCtl = useControls({
+    Gradient: folder(
+      {
+        bottomColor: { value: MUSHROOM_DEFAULTS.gradCtl.bottomColor, label: "Bottom" },
+        topColor: { value: MUSHROOM_DEFAULTS.gradCtl.topColor, label: "Top" },
+        height: {
+          value: MUSHROOM_DEFAULTS.gradCtl.height,
+          min: 0,
+          max: 1,
+          step: 0.001,
+          label: "Height (midpoint)",
+        },
+        soft: {
+          value: MUSHROOM_DEFAULTS.gradCtl.soft,
+          min: 0.001,
+          max: 0.5,
+          step: 0.001,
+          label: "Soft (half-width)",
+        },
+        intensity: {
+          value: MUSHROOM_DEFAULTS.gradCtl.intensity,
+          min: 0,
+          max: 1,
+          step: 0.01,
+          label: "Intensity",
+        },
+      },
+      { collapsed: false }
+    ),
+  });
+
+  const fireflyCtl = useControls({
+    Fireflies: folder(
+      {
+        enabled: { value: MUSHROOM_DEFAULTS.fireflyCtl.enabled, label: "Enabled" },
+        burstCount: {
+          value: MUSHROOM_DEFAULTS.fireflyCtl.burstCount,
+          min: 10,
+          max: 100,
+          step: 1,
+          label: "Particles per Burst",
+        },
+        pointSize: {
+          value: MUSHROOM_DEFAULTS.fireflyCtl.pointSize,
+          min: 1,
+          max: 8,
+          step: 0.5,
+          label: "Point Size (px)",
+        },
+        lifetime: {
+          value: MUSHROOM_DEFAULTS.fireflyCtl.lifetime,
+          min: 1.0,
+          max: 8.0,
+          step: 0.1,
+          label: "Lifetime (seconds)",
+        },
+        upwardSpeed: {
+          value: MUSHROOM_DEFAULTS.fireflyCtl.upwardSpeed,
+          min: 0.05,
+          max: 0.5,
+          step: 0.01,
+          label: "Upward Speed",
+        },
+        lateralSpread: {
+          value: MUSHROOM_DEFAULTS.fireflyCtl.lateralSpread,
+          min: 0.01,
+          max: 0.3,
+          step: 0.005,
+          label: "Lateral Spread",
+        },
+        color: { value: MUSHROOM_DEFAULTS.fireflyCtl.color, label: "Color" },
+      },
+      { collapsed: false }
+    ),
+  });
+
+  const squeezeCtl = useControls({
+    Interaction: folder(
+      {
+        enabled: { value: MUSHROOM_DEFAULTS.squeezeCtl.enabled, label: "Enable Click" },
+        squeezeAmount: {
+          value: MUSHROOM_DEFAULTS.squeezeCtl.squeezeAmount,
+          min: 0,
+          max: 0.8,
+          step: 0.01,
+          label: "Squeeze Amount",
+        },
+        preserveVolume: { value: MUSHROOM_DEFAULTS.squeezeCtl.preserveVolume, label: "Preserve Volume (inflate XZ)" },
+        squeezeSpeed: {
+          value: MUSHROOM_DEFAULTS.squeezeCtl.squeezeSpeed,
+          min: 1,
+          max: 20,
+          step: 0.1,
+          label: "Squeeze Speed",
+        },
+        releaseSpeed: {
+          value: MUSHROOM_DEFAULTS.squeezeCtl.releaseSpeed,
+          min: 1,
+          max: 20,
+          step: 0.1,
+          label: "Release Speed",
+        },
+        autoRelease: { value: MUSHROOM_DEFAULTS.squeezeCtl.autoRelease, label: "Auto Release" },
+        holdSeconds: {
+          value: MUSHROOM_DEFAULTS.squeezeCtl.holdSeconds,
+          min: 0.0,
+          max: 2.0,
+          step: 0.01,
+          label: "Hold (s)",
+        },
+        ResetAll: button(() => onResetAll()),
+      },
+      { collapsed: false }
+    ),
+  });
+
+  useEffect(() => {
+    onChange({ dissolveCtl, gradCtl, fireflyCtl, squeezeCtl });
+  }, [dissolveCtl, gradCtl, fireflyCtl, squeezeCtl, onChange]);
+
+  return null;
+}
 
 // === Optimized Firefly Shaders ===
 const firefliesFragmentShader = `
@@ -21,7 +233,7 @@ void main() {
   // Simple soft circle
   float alpha = (1.0 - r * 2.0) * vAlpha;
   if (alpha <= 0.01) discard;
-  
+
   gl_FragColor = vec4(uColor, alpha);
 }
 `;
@@ -40,25 +252,25 @@ varying float vAlpha;
 
 void main() {
   float age = uTime - aBirthTime;
-  
+
   // Skip dead particles
   if (age < 0.0 || age > aLifetime) {
     gl_Position = vec4(0.0, 0.0, 0.0, -1.0); // Clip
     vAlpha = 0.0;
     return;
   }
-  
+
   // Simple physics: position + velocity * time + gravity
   vec3 pos = position + aVelocity * age;
   pos.y += -0.5 * age * age; // Simple gravity
-  
+
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  
+
   // Fade based on lifetime
   float lifeRatio = age / aLifetime;
   vAlpha = 1.0 - lifeRatio;
-  
+
   // Size
   gl_PointSize = aSize * uPixelRatio;
   gl_PointSize *= (1.0 / -mvPosition.z);
@@ -74,6 +286,14 @@ const seeded = (i, salt = 1) => {
 export default forwardRef(function MagicMushrooms(props, ref) {
   const { scene } = useGLTF(MUSHROOM_GLB);
   const { gl, clock } = useThree();
+  const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const [debugValues, setDebugValues] = useState(MUSHROOM_DEFAULTS);
+
+  const activeVals = isDebugMode ? debugValues : MUSHROOM_DEFAULTS;
+  const dissolveCtl = activeVals.dissolveCtl;
+  const gradCtl = activeVals.gradCtl;
+  const fireflyCtl = activeVals.fireflyCtl;
+  const squeezeCtl = activeVals.squeezeCtl;
 
   // ----- Instance placements (7th mushroom Y adjusted to -4.82) -----
   const INSTANCES = useMemo(
@@ -180,9 +400,11 @@ export default forwardRef(function MagicMushrooms(props, ref) {
       // If stop-14 not found yet, keep dissolving out
       if (shouldBuildRef.current !== false) {
         shouldBuildRef.current = false;
-        console.warn(
-          "🍄 stop-14 not found in waypoints; mushrooms kept dissolved out."
-        );
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            "🍄 stop-14 not found in waypoints; mushrooms kept dissolved out."
+          );
+        }
       }
       return;
     }
@@ -193,202 +415,15 @@ export default forwardRef(function MagicMushrooms(props, ref) {
 
     if (shouldBuild !== shouldBuildRef.current) {
       shouldBuildRef.current = shouldBuild;
-      console.log(
-        shouldBuild
-          ? `🍄 Camera at waypoint ${currentWaypointIndex} (>= stop-14 index ${stop14Index}): Building mushrooms...`
-          : `🍄 Camera at waypoint ${currentWaypointIndex} (< stop-14 index ${stop14Index}): Dissolving mushrooms...`
-      );
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          shouldBuild
+            ? `🍄 Camera at waypoint ${currentWaypointIndex} (>= stop-14 index ${stop14Index}): Building mushrooms...`
+            : `🍄 Camera at waypoint ${currentWaypointIndex} (< stop-14 index ${stop14Index}): Dissolving mushrooms...`
+        );
+      }
     }
   }, [currentWaypointIndex, stop14Index]);
-
-  const dissolveCtl = useControls({
-    Mushrooms: folder(
-      {
-        Dissolve: folder({
-          build: { value: false, label: "Build Mushrooms" },
-          speed: {
-            value: 0.24,
-            min: 0.05,
-            max: 3,
-            step: 0.01,
-            label: "Speed (units/sec)",
-          },
-          noiseScale: {
-            value: 4.5,
-            min: 0.1,
-            max: 6,
-            step: 0.01,
-            label: "Noise Scale",
-          },
-          noiseAmp: {
-            value: 0.8,
-            min: 0,
-            max: 1.5,
-            step: 0.01,
-            label: "Noise Amplitude",
-          },
-          edgeWidth: {
-            value: 0.15,
-            min: 0.0,
-            max: 0.4,
-            step: 0.005,
-            label: "Edge Width",
-          },
-          glowStrength: {
-            value: 10.0,
-            min: 0.0,
-            max: 50,
-            step: 0.1,
-            label: "Glow Strength",
-          },
-          seed: { value: 321, min: 0, max: 1000, step: 1, label: "Noise Seed" },
-          Replay: button(() => {
-            progressRef.current = -0.2;
-            updateUniformAll("uProgress", progressRef.current);
-          }),
-        }),
-      },
-      { collapsed: true }
-    ),
-  });
-
-  // =========================
-  // Global Gradient controls
-  // =========================
-  const gradCtl = useControls({
-    Gradient: folder(
-      {
-        bottomColor: { value: "#ffa22b", label: "Bottom" },
-        topColor: { value: "#ffa22b", label: "Top" },
-        height: {
-          value: 0.51,
-          min: 0,
-          max: 1,
-          step: 0.001,
-          label: "Height (midpoint)",
-        },
-        soft: {
-          value: 0.2,
-          min: 0.001,
-          max: 0.5,
-          step: 0.001,
-          label: "Soft (half-width)",
-        },
-        intensity: {
-          value: 1.0,
-          min: 0,
-          max: 1,
-          step: 0.01,
-          label: "Intensity",
-        },
-      },
-      { collapsed: false }
-    ),
-  });
-
-  // =========================
-  // Fireflies controls
-  // =========================
-  const fireflyCtl = useControls({
-    Fireflies: folder(
-      {
-        enabled: { value: true, label: "Enabled" },
-        burstCount: {
-          value: 30,
-          min: 10,
-          max: 100,
-          step: 1,
-          label: "Particles per Burst",
-        },
-        pointSize: {
-          value: 6,
-          min: 1,
-          max: 8,
-          step: 0.5,
-          label: "Point Size (px)",
-        },
-        lifetime: {
-          value: 1.0,
-          min: 1.0,
-          max: 8.0,
-          step: 0.1,
-          label: "Lifetime (seconds)",
-        },
-        upwardSpeed: {
-          value: 0.5,
-          min: 0.05,
-          max: 0.5,
-          step: 0.01,
-          label: "Upward Speed",
-        },
-        lateralSpread: {
-          value: 0.3,
-          min: 0.01,
-          max: 0.3,
-          step: 0.005,
-          label: "Lateral Spread",
-        },
-        color: { value: "#ffc353ff", label: "Color" },
-      },
-      { collapsed: false }
-    ),
-  });
-
-  // =========================
-  // Interaction (Click → Squeeze + Fireflies)
-  // =========================
-  const squeezeCtl = useControls({
-    Interaction: folder(
-      {
-        enabled: { value: true, label: "Enable Click" },
-        squeezeAmount: {
-          value: 0.13,
-          min: 0,
-          max: 0.8,
-          step: 0.01,
-          label: "Squeeze Amount",
-        },
-        preserveVolume: { value: true, label: "Preserve Volume (inflate XZ)" },
-        squeezeSpeed: {
-          value: 4.8,
-          min: 1,
-          max: 20,
-          step: 0.1,
-          label: "Squeeze Speed",
-        },
-        releaseSpeed: {
-          value: 4.8,
-          min: 1,
-          max: 20,
-          step: 0.1,
-          label: "Release Speed",
-        },
-        autoRelease: { value: true, label: "Auto Release" },
-        holdSeconds: {
-          value: 0.2,
-          min: 0.0,
-          max: 2.0,
-          step: 0.01,
-          label: "Hold (s)",
-        },
-        ResetAll: button(() => {
-          const N = INSTANCES.length;
-          for (let i = 0; i < N; i++) {
-            targetSqueeze.current[i] = 0;
-            currentSqueeze.current[i] = 0;
-            holdTimers.current[i] = 0;
-          }
-          // Clear all fireflies
-          activeParticles.current = [];
-          if (fireflyGeometry.current) {
-            updateFireflyGeometry();
-          }
-          matricesDirtyRef.current = true;
-        }),
-      },
-      { collapsed: false }
-    ),
-  });
 
   const currentSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
   const targetSqueeze = useRef(new Float32Array(INSTANCES.length).fill(0));
@@ -403,72 +438,16 @@ export default forwardRef(function MagicMushrooms(props, ref) {
   const fireflyMaterial = useRef(null);
   const maxParticles = 500; // Pool size
 
-  // Click handler
-  const onClickInstance = (e) => {
-    if (!squeezeCtl.enabled) return;
-    e.stopPropagation();
-    const id = e.instanceId;
-    if (id == null) return;
-
-    // Squeeze
-    if (squeezeCtl.autoRelease) {
-      targetSqueeze.current[id] = squeezeCtl.squeezeAmount;
-      holdTimers.current[id] = Math.max(
-        holdTimers.current[id],
-        squeezeCtl.holdSeconds
-      );
-    } else {
-      const near = Math.abs(targetSqueeze.current[id]) < 1e-3;
-      targetSqueeze.current[id] = near ? squeezeCtl.squeezeAmount : 0.0;
-    }
-
-    // Emit fireflies
-    if (fireflyCtl.enabled) {
-      emitFireflies(INSTANCES[id].position);
-    }
-
-    matricesDirtyRef.current = true;
-  };
-
-  // Emit fireflies from a position
-  const emitFireflies = (position) => {
-    const currentTime = clock.getElapsedTime();
-    const burstCount = fireflyCtl.burstCount;
-
-    for (let i = 0; i < burstCount; i++) {
-      // Start at mushroom center with tiny random offset
-      const x = position[0] + (Math.random() - 0.5) * 0.02;
-      const z = position[2] + (Math.random() - 0.5) * 0.02;
-      const y = position[1] + 0.05; // Slightly above mushroom
-
-      // Velocities: ONLY positive Y (upward), small lateral drift
-      const vx = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
-      const vz = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
-      const vy = fireflyCtl.upwardSpeed + Math.random() * 0.05; // GUARANTEED positive upward
-
-      // Random lifetime and fade timing
-      const lifetime = fireflyCtl.lifetime * (0.7 + Math.random() * 0.6);
-      const fadeStart = lifetime * (0.4 + Math.random() * 0.3);
-
-      // Tiny size
-      const size = fireflyCtl.pointSize * (0.8 + Math.random() * 0.4);
-
-      activeParticles.current.push({
-        position: [x, y, z],
-        velocity: [vx, vy, vz], // vy is ALWAYS positive
-        birthTime: currentTime,
-        lifetime: lifetime,
-        fadeStart: fadeStart,
-        size: size,
+  // Helper to update a uniform on all patched materials
+  const updateUniformAll = (name, val) => {
+    sources.forEach((src) => {
+      const mats = Array.isArray(src.material) ? src.material : [src.material];
+      mats.forEach((m) => {
+        const sh = m?.userData?.rtShader;
+        if (sh && sh.uniforms && name in sh.uniforms)
+          sh.uniforms[name].value = val;
       });
-    }
-
-    // Limit total particles
-    if (activeParticles.current.length > maxParticles) {
-      activeParticles.current = activeParticles.current.slice(-maxParticles);
-    }
-
-    updateFireflyGeometry();
+    });
   };
 
   // Update geometry with active particles
@@ -564,16 +543,93 @@ export default forwardRef(function MagicMushrooms(props, ref) {
     fireflyGeometry.current.setDrawRange(0, Math.min(count, maxParticles));
   };
 
-  // Helper to update a uniform on all patched materials
-  const updateUniformAll = (name, val) => {
-    sources.forEach((src) => {
-      const mats = Array.isArray(src.material) ? src.material : [src.material];
-      mats.forEach((m) => {
-        const sh = m?.userData?.rtShader;
-        if (sh && sh.uniforms && name in sh.uniforms)
-          sh.uniforms[name].value = val;
+  // Debug panel callbacks
+  const handleReplay = React.useCallback(() => {
+    progressRef.current = -0.2;
+    updateUniformAll("uProgress", progressRef.current);
+  }, [sources]);
+
+  const handleResetAll = React.useCallback(() => {
+    const N = INSTANCES.length;
+    for (let i = 0; i < N; i++) {
+      targetSqueeze.current[i] = 0;
+      currentSqueeze.current[i] = 0;
+      holdTimers.current[i] = 0;
+    }
+    // Clear all fireflies
+    activeParticles.current = [];
+    if (fireflyGeometry.current) {
+      updateFireflyGeometry();
+    }
+    matricesDirtyRef.current = true;
+  }, [INSTANCES.length]);
+
+  // Click handler
+  const onClickInstance = (e) => {
+    if (!squeezeCtl.enabled) return;
+    e.stopPropagation();
+    const id = e.instanceId;
+    if (id == null) return;
+
+    // Squeeze
+    if (squeezeCtl.autoRelease) {
+      targetSqueeze.current[id] = squeezeCtl.squeezeAmount;
+      holdTimers.current[id] = Math.max(
+        holdTimers.current[id],
+        squeezeCtl.holdSeconds
+      );
+    } else {
+      const near = Math.abs(targetSqueeze.current[id]) < 1e-3;
+      targetSqueeze.current[id] = near ? squeezeCtl.squeezeAmount : 0.0;
+    }
+
+    // Emit fireflies
+    if (fireflyCtl.enabled) {
+      emitFireflies(INSTANCES[id].position);
+    }
+
+    matricesDirtyRef.current = true;
+  };
+
+  // Emit fireflies from a position
+  const emitFireflies = (position) => {
+    const currentTime = clock.getElapsedTime();
+    const burstCount = fireflyCtl.burstCount;
+
+    for (let i = 0; i < burstCount; i++) {
+      // Start at mushroom center with tiny random offset
+      const x = position[0] + (Math.random() - 0.5) * 0.02;
+      const z = position[2] + (Math.random() - 0.5) * 0.02;
+      const y = position[1] + 0.05; // Slightly above mushroom
+
+      // Velocities: ONLY positive Y (upward), small lateral drift
+      const vx = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
+      const vz = (Math.random() - 0.5) * fireflyCtl.lateralSpread * 0.5; // Gentle side drift
+      const vy = fireflyCtl.upwardSpeed + Math.random() * 0.05; // GUARANTEED positive upward
+
+      // Random lifetime and fade timing
+      const lifetime = fireflyCtl.lifetime * (0.7 + Math.random() * 0.6);
+      const fadeStart = lifetime * (0.4 + Math.random() * 0.3);
+
+      // Tiny size
+      const size = fireflyCtl.pointSize * (0.8 + Math.random() * 0.4);
+
+      activeParticles.current.push({
+        position: [x, y, z],
+        velocity: [vx, vy, vz], // vy is ALWAYS positive
+        birthTime: currentTime,
+        lifetime: lifetime,
+        fadeStart: fadeStart,
+        size: size,
       });
-    });
+    }
+
+    // Limit total particles
+    if (activeParticles.current.length > maxParticles) {
+      activeParticles.current = activeParticles.current.slice(-maxParticles);
+    }
+
+    updateFireflyGeometry();
   };
 
   // Track if shaders have been patched to avoid duplicate updates
@@ -1071,6 +1127,15 @@ export default forwardRef(function MagicMushrooms(props, ref) {
             frustumCulled={false}
           />
         )}
+
+      {/* Debug panel (only rendered when debug mode is active) */}
+      {isDebugMode && (
+        <MushroomDebugPanel
+          onChange={setDebugValues}
+          onReplay={handleReplay}
+          onResetAll={handleResetAll}
+        />
+      )}
     </group>
   );
 });

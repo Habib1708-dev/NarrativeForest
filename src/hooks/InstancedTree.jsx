@@ -172,7 +172,7 @@ export function useInstancedTree(url) {
       }
     });
 
-    if (!__logged.has(url)) {
+    if (!__logged.has(url) && process.env.NODE_ENV !== "production") {
       __logged.add(url);
 
       const geoRows = result.map((p) => ({

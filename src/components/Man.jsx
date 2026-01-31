@@ -156,69 +156,70 @@ export default forwardRef(function Man(_, ref) {
       }
     });
 
-    console.groupCollapsed("👨 Man model loaded");
-    console.log("Source:", "/models/man/man_draco_optimized.glb");
-    console.log("Meshes:", meshes.length, "Unique materials:", materials.size);
-    if (meshes.length) {
-      console.groupCollapsed("Meshes");
-      console.table(
-        meshes.map((m, i) => ({
-          idx: i,
-          name: m.name,
-          uuid: m.uuid,
-          geometryUUID: m.geometryUUID,
-          materials: m.materialNames.join(", "),
-        }))
-      );
+    if (process.env.NODE_ENV !== "production") {
+      console.groupCollapsed("Man model loaded");
+      console.log("Source:", "/models/man/man_draco_optimized.glb");
+      console.log("Meshes:", meshes.length, "Unique materials:", materials.size);
+      if (meshes.length) {
+        console.groupCollapsed("Meshes");
+        console.table(
+          meshes.map((m, i) => ({
+            idx: i,
+            name: m.name,
+            uuid: m.uuid,
+            geometryUUID: m.geometryUUID,
+            materials: m.materialNames.join(", "),
+          }))
+        );
+        console.groupEnd();
+      }
+      if (materials.size) {
+        console.groupCollapsed("Unique Materials");
+        console.table(
+          Array.from(materials.values()).map((m) => ({
+            name: m.name || "",
+            uuid: m.uuid,
+            type: m.type,
+            transparent: !!m.transparent,
+            opacity: m.opacity,
+          }))
+        );
+        console.groupEnd();
+      }
       console.groupEnd();
     }
-    if (materials.size) {
-      console.groupCollapsed("Unique Materials");
-      console.table(
-        Array.from(materials.values()).map((m) => ({
-          name: m.name || "",
-          uuid: m.uuid,
-          type: m.type,
-          transparent: !!m.transparent,
-          opacity: m.opacity,
-        }))
-      );
-      console.groupEnd();
-    }
-    console.groupEnd();
   }, [cloned]);
 
   // Log animation clips and tracks once
   useEffect(() => {
-    if (!clips || clips.length === 0) {
-      console.info("👨 Man: no animations found in GLB.");
-      return;
-    }
-    console.groupCollapsed("👨 Man animations loaded");
-    console.log(
-      "Clip names:",
-      clips.map((c) => c.name)
-    );
-    console.table(
-      clips.map((c, i) => ({
-        idx: i,
-        name: c.name,
-        duration: c.duration?.toFixed?.(2),
-        tracks: c.tracks?.length ?? 0,
-      }))
-    );
-    clips.slice(0, 3).forEach((c) => {
-      console.groupCollapsed(
-        `Tracks for "${c.name}" (${c.tracks?.length || 0})`
+    if (!clips || clips.length === 0) return;
+    if (process.env.NODE_ENV !== "production") {
+      console.groupCollapsed("Man animations loaded");
+      console.log(
+        "Clip names:",
+        clips.map((c) => c.name)
       );
-      (c.tracks || []).slice(0, 10).forEach((t, i) => {
-        console.log(
-          `${i}. ${t.name} :: ${t.ValueTypeName} (${t.times?.length || 0} keys)`
+      console.table(
+        clips.map((c, i) => ({
+          idx: i,
+          name: c.name,
+          duration: c.duration?.toFixed?.(2),
+          tracks: c.tracks?.length ?? 0,
+        }))
+      );
+      clips.slice(0, 3).forEach((c) => {
+        console.groupCollapsed(
+          `Tracks for "${c.name}" (${c.tracks?.length || 0})`
         );
+        (c.tracks || []).slice(0, 10).forEach((t, i) => {
+          console.log(
+            `${i}. ${t.name} :: ${t.ValueTypeName} (${t.times?.length || 0} keys)`
+          );
+        });
+        console.groupEnd();
       });
       console.groupEnd();
-    });
-    console.groupEnd();
+    }
   }, [clips]);
 
   // Switch animation on control change
@@ -250,7 +251,7 @@ export default forwardRef(function Man(_, ref) {
       currentWaypointIndex === stop5Index &&
       lastWaypointIndex !== stop5Index
     ) {
-      console.log("🎬 Camera reached stop-5! Triggering wave animation...");
+      if (process.env.NODE_ENV !== "production") console.log("Camera reached stop-5, triggering wave animation");
       triggerWaveAnimation();
     }
 
@@ -260,7 +261,7 @@ export default forwardRef(function Man(_, ref) {
   // Manual trigger for testing
   useEffect(() => {
     if (manualTriggerWave && actions) {
-      console.log("🎬 Manual wave trigger activated");
+      if (process.env.NODE_ENV !== "production") console.log("Manual wave trigger activated");
       triggerWaveAnimation();
     }
   }, [manualTriggerWave, actions]);
@@ -273,7 +274,7 @@ export default forwardRef(function Man(_, ref) {
     const waveAction = actions[waveClipName];
 
     if (!waveAction) {
-      console.warn(`⚠️ Wave animation "${waveClipName}" not found in actions`);
+      if (process.env.NODE_ENV !== "production") console.warn(`Wave animation "${waveClipName}" not found in actions`);
       return;
     }
 
@@ -296,11 +297,7 @@ export default forwardRef(function Man(_, ref) {
     waveAction.fadeIn(0.3).play();
     waveActionRef.current = waveAction;
 
-    console.log(
-      `👋 Playing wave animation (clip duration: ${clipDuration.toFixed(
-        2
-      )}s, user duration: ${effectiveDuration.toFixed(2)}s)`
-    );
+    if (process.env.NODE_ENV !== "production") console.log(`Playing wave animation (clip: ${clipDuration.toFixed(2)}s, user: ${effectiveDuration.toFixed(2)}s)`);
 
     // After wave finishes, resume the previous animation
     setTimeout(() => {
@@ -309,9 +306,7 @@ export default forwardRef(function Man(_, ref) {
       }
       if (currentAction && currentAction !== waveAction) {
         currentAction.reset().fadeIn(0.3).play();
-        console.log(
-          `↩️ Resumed previous animation: ${currentAction.getClip().name}`
-        );
+        if (process.env.NODE_ENV !== "production") console.log(`Resumed previous animation: ${currentAction.getClip().name}`);
       }
       waveActionRef.current = null;
     }, effectiveDuration * 1000);
@@ -331,7 +326,7 @@ export default forwardRef(function Man(_, ref) {
     if (!nextName) {
       Object.values(actions).forEach((a) => a?.stop());
       if (prev) currentActionRef.current = null;
-      console.log("⏹️ Man animation stopped");
+      if (process.env.NODE_ENV !== "production") console.log("Man animation stopped");
       return;
     }
 
@@ -343,20 +338,20 @@ export default forwardRef(function Man(_, ref) {
     }
     next.reset().fadeIn(0.2).play();
     currentActionRef.current = next;
-    console.log(`▶️ Man playing clip: ${nextName}`);
+    if (process.env.NODE_ENV !== "production") console.log(`Man playing clip: ${nextName}`);
 
     return () => {
       // optional cleanup: keep running across remounts if desired
     };
   }, [actions, clipName]);
 
-  // Mixer event logs
+  // Mixer event logs (dev only — these fire on every animation loop/finish)
   useEffect(() => {
-    if (!mixer) return;
+    if (!mixer || process.env.NODE_ENV === "production") return;
     const onLoop = (e) =>
-      console.log("🔁 Man clip looped:", e?.action?.getClip()?.name);
+      console.log("Man clip looped:", e?.action?.getClip()?.name);
     const onFinished = (e) =>
-      console.log("🏁 Man clip finished:", e?.action?.getClip()?.name);
+      console.log("Man clip finished:", e?.action?.getClip()?.name);
     mixer.addEventListener("loop", onLoop);
     mixer.addEventListener("finished", onFinished);
     return () => {
@@ -365,14 +360,14 @@ export default forwardRef(function Man(_, ref) {
     };
   }, [mixer]);
 
-  // Confirm that it actually renders at least once
+  // Confirm that it actually renders at least once (dev only)
   const renderedOnce = useRef(false);
-  const onAfterRender = () => {
+  const onAfterRender = process.env.NODE_ENV !== "production" ? () => {
     if (!renderedOnce.current) {
       renderedOnce.current = true;
-      console.log("✅ Man model rendered to the canvas at least once.");
+      console.log("Man model rendered to the canvas at least once.");
     }
-  };
+  } : undefined;
 
   if (!cloned) return null;
 
@@ -394,7 +389,7 @@ export default forwardRef(function Man(_, ref) {
           onChange={setDebugValues}
         />
       )}
-      <primitive object={cloned} onAfterRender={onAfterRender} />
+      <primitive object={cloned} {...(onAfterRender ? { onAfterRender } : {})} />
     </group>
   );
 });

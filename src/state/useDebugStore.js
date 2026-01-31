@@ -12,16 +12,7 @@ export const useDebugStore = create((set) => ({
 
   // Toggle debug mode on/off
   toggleDebugMode: () =>
-    set((state) => {
-      const newMode = !state.isDebugMode;
-      console.log(
-        `🔧 Debug mode ${newMode ? "ENABLED" : "DISABLED"}`,
-        newMode
-          ? "\n  - Performance monitor visible\n  - Leva controls visible\n  - Free camera movement enabled"
-          : "\n  - Narrative camera active\n  - Clean UI mode"
-      );
-      return { isDebugMode: newMode };
-    }),
+    set((state) => ({ isDebugMode: !state.isDebugMode })),
 
   // Explicit setters if needed
   setDebugMode: (enabled) => set({ isDebugMode: enabled }),
