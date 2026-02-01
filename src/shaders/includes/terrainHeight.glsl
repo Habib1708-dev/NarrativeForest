@@ -73,18 +73,18 @@ float terrainFbm(float x, float y, float frequency, int octaves, float seed, flo
   float value = 0.0;
   float amplitude = 0.5;
   float freq = frequency;
-  
-  for (int o = 0; o < 2; o++) {
+
+  for (int o = 0; o < 8; o++) {
     if (o >= octaves) break;
-    
+
     value += amplitude * simplexNoise2d(
       vec2((x + seed * 100.0) * freq * scale, (y + seed * 100.0) * freq * scale)
     );
-    
+
     freq *= 2.0;
     amplitude *= 0.5;
   }
-  
+
   return value;
 }
 

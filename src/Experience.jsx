@@ -233,7 +233,7 @@ import { heightAt as sampleHeight } from "./proc/heightfield";
 // import ForestDynamic from "./components/ForestDynamic";
 // import ForestDynamic from "./components/ForestDynamic";
 import ForestDynamicSampled from "./components/ForestDynamicSampled";
-// import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
+import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
 import Stars from "./components/Stars";
 import CustomSky from "./components/CustomSky";
 import Butterfly from "./components/Butterfly";
@@ -806,7 +806,7 @@ export default function Experience() {
             window.dispatchEvent(new Event("forest-ready"));
           }}
         />
-        {/* <UnifiedCrystalClusters /> */}
+        <UnifiedCrystalClusters />
         {/* <Butterfly /> */}
         <IntroText />
       </Suspense>
