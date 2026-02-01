@@ -46,7 +46,7 @@ function clampPointToOrientedBox(
 export default forwardRef(function IntroButterfly(
   {
     // initial transform
-    position = [-0.131, -3.737, -5.104],
+    position = [-0.131, -3.934, -5.104],
     rotation,
     scale = 0.03,
 
@@ -794,7 +794,7 @@ export default forwardRef(function IntroButterfly(
     : enableGlow;
 
   // Habitat wire
-  const showHabitat = enableControls ? knobs?.showHabitat ?? true : true;
+  const showHabitat = enableControls ? knobs?.showHabitat ?? false : false;
   const hw = enableControls ? knobs?.habitatWidth ?? 0.439 : 0.439;
   const hh = enableControls ? knobs?.habitatHeight ?? 0.35 : 0.35;
   const hd = enableControls ? knobs?.habitatDepth ?? 5.0 : 5.0;
