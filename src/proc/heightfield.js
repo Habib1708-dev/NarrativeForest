@@ -97,7 +97,7 @@ function plateauize(h, threshold, smoothing) {
 
 // Match Terrain.jsx Leva defaults 1:1 (and mesh world offset)
 const params = {
-  elevation: 7,
+  elevation: 9,
   frequency: 0.004,
   octaves: 2,
   seed: 2.2,

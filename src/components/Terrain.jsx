@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { setTerrainParams } from "../proc/heightfield";
 
 const DEFAULT_TERRAIN_PARAMS = Object.freeze({
-  elevation: 7,
+  elevation: 9,
   frequency: 0.004,
   octaves: 2,
   seed: 2.2,
