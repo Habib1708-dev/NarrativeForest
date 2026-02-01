@@ -46,7 +46,7 @@ function clampPointToOrientedBox(
 export default forwardRef(function IntroButterfly(
   {
     // initial transform
-    position = [-0.131, -3.147, -5.104],
+    position = [-0.131, -3.737, -5.104],
     rotation,
     scale = 0.03,
 
