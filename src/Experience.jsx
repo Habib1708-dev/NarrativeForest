@@ -809,7 +809,7 @@ export default function Experience() {
         />
         <UnifiedCrystalClusters />
         {/* <Butterfly /> */}
-        <IntroButterfly />
+        <IntroButterfly position={[-0.131, -1.5, -5.104]} />
         <IntroText />
       </Suspense>
 
