@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
+import { useDebugStore } from "../state/useDebugStore";
 
 const UP = new THREE.Vector3(0, 1, 0);
 const Y_FLIP = new THREE.Quaternion().setFromAxisAngle(
@@ -45,7 +46,7 @@ function clampPointToOrientedBox(
 export default forwardRef(function IntroButterfly(
   {
     // initial transform
-    position = [-0.131, -3.934, -5.104],
+    position = [-0.131, -3.147, -5.104],
     rotation,
     scale = 0.03,
 
@@ -79,6 +80,7 @@ export default forwardRef(function IntroButterfly(
   ref
 ) {
   const { camera } = useThree();
+  const isDebugMode = useDebugStore((state) => state.isDebugMode);
 
   // --- Texture ---
   const tex = useTexture(texturePath);
@@ -123,6 +125,18 @@ export default forwardRef(function IntroButterfly(
 
     // smoothed camera forward/backward speed (projected on habitat forward)
     camSpeedSmooth: 0,
+
+    // Pre-allocated temporaries for useFrame (eliminates per-frame GC pressure)
+    tmpHabitatCenter: new THREE.Vector3(),
+    tmpHabitatQuat: new THREE.Quaternion(),
+    tmpCameraForward: new THREE.Vector3(),
+    tmpCameraVel: new THREE.Vector3(),
+    tmpDesiredPos: new THREE.Vector3(),
+    tmpClampedDesired: new THREE.Vector3(),
+    tmpToVector: new THREE.Vector3(),
+    tmpDesiredVel: new THREE.Vector3(),
+    tmpLookTarget: new THREE.Vector3(),
+    tmpRelative: new THREE.Vector3(),
   });
 
   const rotationQ = useMemo(() => {
@@ -135,7 +149,7 @@ export default forwardRef(function IntroButterfly(
 
   // --- Controls (now with habitat) ---
   const knobs = useControls(
-    enableControls
+    isDebugMode && enableControls
       ? {
           [controlsFolder]: folder(
             {
@@ -447,6 +461,19 @@ export default forwardRef(function IntroButterfly(
     ]
   );
 
+  // Shared geometry for both main and glow meshes (50% GPU memory savings)
+  const sharedGeometry = useMemo(
+    () => new THREE.PlaneGeometry(1, 1, 6, 6),
+    []
+  );
+
+  // Cleanup shared geometry on unmount
+  useEffect(() => {
+    return () => {
+      sharedGeometry.dispose();
+    };
+  }, [sharedGeometry]);
+
   // Init
   useEffect(() => {
     if (camera) st.current.lastCamPos.copy(camera.position);
@@ -461,13 +488,13 @@ export default forwardRef(function IntroButterfly(
     const dtSafe = Math.max(1e-4, dt);
 
     // ---- HABITAT BASIS (recomputed live from controls) ----
-    const hc = new THREE.Vector3(
+    const hc = s.tmpHabitatCenter.set(
       get("habitatCenterX", position[0]),
       get("habitatCenterY", position[1]),
       get("habitatCenterZ", position[2])
     );
     const yaw = THREE.MathUtils.degToRad(get("habitatYawDeg", -33.6));
-    const q = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+    const q = s.tmpHabitatQuat.setFromAxisAngle(UP, yaw);
     const right = s.right.set(1, 0, 0).applyQuaternion(q);
     const up = s.up.copy(UP);
     const forward = s.forward.set(0, 0, 1).applyQuaternion(q);
@@ -483,16 +510,16 @@ export default forwardRef(function IntroButterfly(
     const offY = get("heightOffset", -0.15);
 
     // camera motion & forward in world
-    const camF = new THREE.Vector3();
+    const camF = s.tmpCameraForward;
     camera.getWorldDirection(camF).normalize();
 
-    const camVel = camera.position.clone().sub(s.lastCamPos);
+    const camVel = s.tmpCameraVel.copy(camera.position).sub(s.lastCamPos);
     const camForwardSpeed = camVel.dot(camF) / dtSafe; // +fwd, -back
     s.lastCamPos.copy(camera.position);
 
     if (tie) {
       // desired center: ahead of camera
-      const desired = camera.position.clone().addScaledVector(camF, ahead);
+      const desired = s.tmpDesiredPos.copy(camera.position).addScaledVector(camF, ahead);
       desired.y += offY;
 
       // clamp desired to habitat OBB
@@ -600,8 +627,8 @@ export default forwardRef(function IntroButterfly(
     const oz = ozBase + ozBias;
 
     // desired position from center using HABITAT basis
-    const desiredPos = s.targetCenter
-      .clone()
+    const desiredPos = s.tmpDesiredPos
+      .copy(s.targetCenter)
       .addScaledVector(right, ox)
       .addScaledVector(up, oy)
       .addScaledVector(forward, oz);
@@ -619,8 +646,8 @@ export default forwardRef(function IntroButterfly(
     );
 
     // target velocity (critically damped spring) with clamp
-    const to = clampedDesired.sub(s.pos);
-    const desiredVel = to.multiplyScalar(5.0);
+    const to = s.tmpToVector.copy(clampedDesired).sub(s.pos);
+    const desiredVel = s.tmpDesiredVel.copy(to).multiplyScalar(5.0);
     if (desiredVel.length() > maxSpeed) desiredVel.setLength(maxSpeed);
 
     s.vel.lerp(desiredVel, 1 - Math.exp(-8.0 * dtSafe));
@@ -633,7 +660,7 @@ export default forwardRef(function IntroButterfly(
     if (vLenSq > EPS) s.fwd.copy(s.vel).normalize();
     else s.fwd.copy(forward);
 
-    const lookTgt = s.pos.clone().add(s.fwd);
+    const lookTgt = s.tmpLookTarget.copy(s.pos).add(s.fwd);
     s.mLook.lookAt(s.pos, lookTgt, UP);
     s.qTarget.setFromRotationMatrix(s.mLook);
     s.qTarget.multiply(Y_FLIP);
@@ -695,10 +722,15 @@ export default forwardRef(function IntroButterfly(
       u.uTiltStatic.value = tiltRad;
     }
 
+    // Distance-based culling (butterfly is subpixel beyond 50 units at 0.03 scale)
+    const distToCam = camera.position.distanceTo(s.pos);
+    const cullDistance = 50;
+    const isTooFar = distToCam > cullDistance;
+
     // Visibility and glow-up handling near forward edge of habitat
     if (enableEdgeFade) {
       // local z within habitat basis
-      const rel = s.pos.clone().sub(s.center);
+      const rel = s.tmpRelative.copy(s.pos).sub(s.center);
       const zLocal = rel.dot(forward);
       const nearEdgeZ = s.halfD * (1.0 - edgeFadeFraction);
       const reappearZ = s.halfD * (1.0 - reappearFraction);
@@ -726,11 +758,11 @@ export default forwardRef(function IntroButterfly(
           1.0
         );
       }
-      // set object visibility to avoid draw calls when fully invisible
+      // set object visibility with distance culling and edge fade
       if (groupRef.current) {
-        if (s.visTarget === 0.0 && s.visAlpha <= 0.001)
-          groupRef.current.visible = false;
-        else groupRef.current.visible = true;
+        const shouldBeVisible = !isTooFar &&
+          (s.visTarget !== 0.0 || s.visAlpha > 0.001);
+        groupRef.current.visible = shouldBeVisible;
       }
 
       // glow boost peaks while invisible and reduces as fully visible
@@ -738,7 +770,7 @@ export default forwardRef(function IntroButterfly(
     } else {
       s.visAlpha = 1.0;
       s.glowBoost = 0.0;
-      if (groupRef.current) groupRef.current.visible = true;
+      if (groupRef.current) groupRef.current.visible = !isTooFar;
     }
 
     // apply uniforms for visibility and glow boost
@@ -806,8 +838,7 @@ export default forwardRef(function IntroButterfly(
       )}
 
       <group ref={groupRef} position={position}>
-        <mesh ref={meshRef}>
-          <planeGeometry args={[1, 1, 12, 12]} />
+        <mesh ref={meshRef} geometry={sharedGeometry}>
           <shaderMaterial
             ref={matRef}
             vertexShader={vertex}
@@ -821,8 +852,7 @@ export default forwardRef(function IntroButterfly(
         </mesh>
 
         {showGlow && (
-          <mesh ref={glowRef}>
-            <planeGeometry args={[1, 1, 12, 12]} />
+          <mesh ref={glowRef} geometry={sharedGeometry}>
             <shaderMaterial
               ref={glowMatRef}
               vertexShader={vertex}
