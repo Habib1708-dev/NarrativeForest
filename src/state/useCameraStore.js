@@ -350,6 +350,14 @@ const isBrowser = typeof window !== "undefined";
 
 const tDriver = { value: 0 };
 const scrollState = { velocity: 0 };
+
+/** Normalized t (0..1) at waypoint "stop-4", or 1 if not found */
+function getStop4T(waypoints) {
+  if (!Array.isArray(waypoints) || waypoints.length < 2) return 1;
+  const idx = waypoints.findIndex((w) => w?.name === "stop-4");
+  if (idx < 0) return 1;
+  return idx / (waypoints.length - 1);
+}
 // Note: Raycasting removed for freeflight - now using analytical heightAt() for performance
 
 const LAST_T_THRESHOLD = 0.999;
@@ -460,6 +468,9 @@ export const useCameraStore = create((set, get) => {
   const localScrollState = scrollState;
   let velocityTween = null;
   let tickerActive = false;
+  /** Mutable ref for GSAP to tween scroll bump back to 0 */
+  const bumpValue = { value: 0 };
+  let bumpReturnTween = null;
 
   const stopTicker = () => {
     if (!tickerActive) return;
@@ -636,6 +647,32 @@ export const useCameraStore = create((set, get) => {
 
     if (Math.abs(velocity) <= velocityThreshold) {
       localScrollState.velocity = 0;
+      // When scroll stops in the start→stop-4 range, ease bump back to 0
+      const tNow = tDriver.value;
+      const waypoints = state.waypoints;
+      const tStop4 = getStop4T(waypoints);
+      if (tNow <= tStop4 + 1e-6) {
+        const bump = get().scrollBumpOffset ?? 0;
+        if (
+          Math.abs(bump) > 1e-6 &&
+          (!bumpReturnTween || !bumpReturnTween.isActive())
+        ) {
+          bumpValue.value = bump;
+          if (bumpReturnTween) bumpReturnTween.kill();
+          const cfg = get().scrollBump ?? {};
+          bumpReturnTween = gsap.to(bumpValue, {
+            value: 0,
+            duration: cfg.returnDuration ?? 0.8,
+            ease: cfg.returnEase ?? "sine.out",
+            overwrite: "auto",
+            onUpdate: () => set({ scrollBumpOffset: bumpValue.value }),
+            onComplete: () => {
+              bumpReturnTween = null;
+              set({ scrollBumpOffset: 0 });
+            },
+          });
+        }
+      }
       if (!velocityTween || !velocityTween.isActive()) {
         stopTicker();
       }
@@ -824,6 +861,16 @@ export const useCameraStore = create((set, get) => {
       velocityEase: "power3.out",
       timeScale: 1,
       velocityDtScale: 1,
+    },
+
+    // Scroll bump: start → stop-4 only; little vertical dip while scrolling, eases back when done
+    scrollBumpOffset: 0,
+    scrollBump: {
+      enabled: true,
+      maxBump: -0.28,
+      impulseFactor: 0.48,
+      returnDuration: 0.7,
+      returnEase: "sine.out",
     },
 
     // Scenic pause tuning around anchor stops (exposed via Leva)
@@ -1140,6 +1187,37 @@ export const useCameraStore = create((set, get) => {
       set({ t: baseT });
       maybeActivateFreeFly(baseT);
 
+      // Bump effect: start → stop-4 only; add dip on scroll, eased back when scroll stops
+      const waypoints = get().waypoints;
+      const tStop4 = getStop4T(waypoints);
+      if (baseT <= tStop4 + 1e-6) {
+        const cfg = get().scrollBump ?? {};
+        if (cfg.enabled !== false) {
+          const maxBump = cfg.maxBump ?? -0.24;
+          const impulseFactor = cfg.impulseFactor ?? 0.28;
+          const bumpDelta = -Math.abs(totalStep) * impulseFactor;
+          bumpValue.value = Math.max(
+            maxBump,
+            (get().scrollBumpOffset ?? 0) + bumpDelta
+          );
+          if (bumpReturnTween) {
+            bumpReturnTween.kill();
+            bumpReturnTween = null;
+          }
+          set({ scrollBumpOffset: bumpValue.value });
+        }
+      } else {
+        // Past stop-4: clear bump so it doesn't linger
+        if ((get().scrollBumpOffset ?? 0) !== 0) {
+          bumpValue.value = 0;
+          if (bumpReturnTween) {
+            bumpReturnTween.kill();
+            bumpReturnTween = null;
+          }
+          set({ scrollBumpOffset: 0 });
+        }
+      }
+
       if (!isBrowser) return;
 
       const impulse = dir * totalStep * inertiaRatio;
@@ -1190,7 +1268,15 @@ export const useCameraStore = create((set, get) => {
         waypoints,
         tt
       );
-      return { position, quaternion, fov, segmentIndex };
+      // Scroll bump: start → stop-4 only; vertical dip during scroll, eases back when done
+      const tStop4 = getStop4T(waypoints);
+      const bump = (tt <= tStop4 + 1e-6 && (state.scrollBump?.enabled !== false))
+        ? (state.scrollBumpOffset ?? 0)
+        : 0;
+      const outPosition = bump !== 0
+        ? position.clone().add(new THREE.Vector3(0, bump, 0))
+        : position.clone();
+      return { position: outPosition, quaternion, fov, segmentIndex };
     },
     getSegmentIndex: (t) => {
       const state = get();
