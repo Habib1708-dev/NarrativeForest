@@ -3,7 +3,7 @@
 import { Perf } from "r3f-perf";
 import { OrbitControls, Sky } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
-import { useRef, useState, Suspense, useEffect, useMemo } from "react";
+import { useRef, useState, useReducer, Suspense, useEffect, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useDebugStore } from "./state/useDebugStore";
@@ -366,8 +366,11 @@ export default function Experience() {
   const presetControl = debugPresetControl ?? PRESET_CONTROL_DEFAULTS;
   const controls = debugControls ?? SCENE_CONTROL_DEFAULTS;
 
-  // State for transition overrides
-  const [transitionOverrides, setTransitionOverrides] = useState({});
+  // Ref-based transition overrides — avoids triggering 60fps React re-renders during transitions.
+  // A useReducer tick is used to batch re-renders at ~10fps for smooth visual updates.
+  const transitionOverridesRef = useRef({});
+  const [, forceRenderTick] = useReducer((x) => x + 1, 0);
+  const lastTransitionRenderRef = useRef(0);
 
   // Track when user manually changes controls to clear specific overrides
   const prevControlsRef = useRef(controls);
@@ -388,19 +391,18 @@ export default function Experience() {
 
       if (changedKeys.length > 0) {
         // User manually changed a control, clear those overrides
-        setTransitionOverrides((prev) => {
-          const newOverrides = { ...prev };
-          changedKeys.forEach((key) => delete newOverrides[key]);
-          return newOverrides;
-        });
+        const newOverrides = { ...transitionOverridesRef.current };
+        changedKeys.forEach((key) => delete newOverrides[key]);
+        transitionOverridesRef.current = newOverrides;
+        forceRenderTick();
       }
     }
 
     prevControlsRef.current = current;
   }, [controls]);
 
-  // Merge controls with transition overrides
-  const activeValues = { ...controls, ...transitionOverrides };
+  // Merge controls with transition overrides (ref read on each render)
+  const activeValues = { ...controls, ...transitionOverridesRef.current };
 
   // Destructure for easier use (using activeValues instead of controls)
   const {
@@ -531,8 +533,16 @@ export default function Experience() {
       updates[key] = newValue;
     }
 
-    // Apply all updates as overrides
-    setTransitionOverrides(updates);
+    // Apply all updates to the ref (no React re-render)
+    transitionOverridesRef.current = updates;
+
+    // Throttle React re-renders to ~10fps during transitions (every ~100ms)
+    const now = performance.now();
+    const shouldRender = rawProgress >= 1.0 || now - lastTransitionRenderRef.current >= 100;
+    if (shouldRender) {
+      lastTransitionRenderRef.current = now;
+      forceRenderTick();
+    }
 
     // Complete transition - keep the overrides permanently as the new values
     if (rawProgress >= 1.0) {
@@ -823,50 +833,37 @@ export default function Experience() {
         debugTint={false}
       />
 
-      {isWebGLValid && gl && camera && (() => {
-        // Double-check WebGL context is valid before rendering EffectComposer
-        try {
-          const webglContext = gl.getContext();
-          if (!webglContext || webglContext.isContextLost()) {
-            return null;
-          }
-        } catch (e) {
-          return null;
-        }
-        
-        return (
-          <EffectComposer
-            multisampling={0}
-            frameBufferType={THREE.HalfFloatType}
-            depthBuffer={true}
-          >
-            <Bloom
-              intensity={1.35}
-              luminanceThreshold={0.7}
-              luminanceSmoothing={0.08}
-              kernelSize={KernelSize.VERY_SMALL}
-              resolutionScale={0.5}
-              // mipmapBlur
+      {isWebGLValid && (
+        <EffectComposer
+          multisampling={0}
+          frameBufferType={THREE.HalfFloatType}
+          depthBuffer={true}
+        >
+          <Bloom
+            intensity={1.35}
+            luminanceThreshold={0.7}
+            luminanceSmoothing={0.08}
+            kernelSize={KernelSize.VERY_SMALL}
+            resolutionScale={0.5}
+          />
+          <BrightnessContrast brightness={-globalDarken} contrast={0} />
+          {blurEnabled && (
+            <DistanceBlurEffect
+              focusDistance={blurFocusDistance}
+              focusRange={blurFocusRange}
+              blurStrength={blurStrength}
+              cameraNear={camera.near}
+              cameraFar={camera.far}
             />
-            <BrightnessContrast brightness={-globalDarken} contrast={0} />
-            {blurEnabled && (
-              <DistanceBlurEffect
-                focusDistance={blurFocusDistance}
-                focusRange={blurFocusRange}
-                blurStrength={blurStrength}
-                cameraNear={camera.near}
-                cameraFar={camera.far}
-              />
-            )}
-            {grainEnabled && (
-              <NoiseJitterEffect
-                grainStrength={grainStrength}
-                grainSize={grainSize}
-              />
-            )}
-          </EffectComposer>
-        );
-      })()}
+          )}
+          {grainEnabled && (
+            <NoiseJitterEffect
+              grainStrength={grainStrength}
+              grainSize={grainSize}
+            />
+          )}
+        </EffectComposer>
+      )}
 
       {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
       <CameraControllerR3F />

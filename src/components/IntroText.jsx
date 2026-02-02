@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Html } from "@react-three/drei";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
@@ -11,7 +11,7 @@ const TITLE_TEXT = "Habib Khalaf";
 const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
 
 export default function IntroText() {
-  const { camera, gl } = useThree();
+  const { camera } = useThree();
   const cameraMode = useCameraStore((state) => state.mode);
   const [shouldRender, setShouldRender] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -76,12 +76,20 @@ export default function IntroText() {
     };
   }, [shouldRender, isFadingOut]);
 
-  const [charStates, setCharStates] = useState(
-    // Each char: { offset, opacity, scale, blur }
+  // Mutable per-character state (never triggers React re-renders)
+  const charStatesRef = useRef(
     Array(totalChars)
       .fill(null)
       .map(() => ({ offset: 0, opacity: 1, scale: 1, blur: 0 }))
   );
+
+  // DOM refs for direct manipulation — one ref per character span
+  const spanRefsRef = useRef([]);
+
+  // Callback ref collector for span elements
+  const setSpanRef = useCallback((el, idx) => {
+    if (el) spanRefsRef.current[idx] = el;
+  }, []);
 
   // Store initial camera position and direction
   const initialCamPos = useRef(null);
@@ -89,11 +97,6 @@ export default function IntroText() {
 
   // Track last progress to avoid unnecessary updates
   const lastProgressRef = useRef(-1);
-  // Mutable ref for charStates to avoid creating new arrays
-  const charStatesRef = useRef(charStates);
-  // Throttle React re-renders — 20fps is fine for text animation
-  const lastRenderTimeRef = useRef(0);
-  const RENDER_THROTTLE_MS = 50;
 
   // Staggered delays for each character (like the CSS animation-delay)
   const CHAR_DELAY = 0.028; // ~28ms converted to distance units
@@ -105,14 +108,7 @@ export default function IntroText() {
 
   // Calculate the position once at mount (static, not sticky)
   const position = useMemo(() => {
-    if (!camera || !gl) return null;
-    // Check if WebGL context is valid
-    try {
-      const webglContext = gl.getContext();
-      if (!webglContext || webglContext.isContextLost()) return null;
-    } catch (e) {
-      return null; // Context not available
-    }
+    if (!camera) return null;
     try {
       const direction = new Vector3();
       camera.getWorldDirection(direction).normalize();
@@ -120,21 +116,12 @@ export default function IntroText() {
       initialCamPos.current = camera.position.clone();
       return camera.position.clone().add(direction.clone().multiplyScalar(2));
     } catch (error) {
-      // Silently handle WebGL context loss
       return null;
     }
-  }, [camera, gl]);
+  }, [camera]);
 
   useFrame(() => {
-    if (!camera || !gl || !initialCamPos.current || !initialCamDir.current) return;
-
-    // Check if WebGL context is still valid
-    try {
-      const webglContext = gl.getContext();
-      if (!webglContext || webglContext.isContextLost()) return;
-    } catch (e) {
-      return; // Context lost or not available
-    }
+    if (!camera || !initialCamPos.current || !initialCamDir.current) return;
 
     try {
       // Calculate forward movement using reusable Vector3
@@ -149,9 +136,6 @@ export default function IntroText() {
       lastProgressRef.current = progress;
 
       const animationDistance = 0.5; // Distance over which the animation plays
-
-      // Calculate per-character states, mutating in place
-      let anyChange = false;
       const states = charStatesRef.current;
 
       for (let i = 0; i < charDelays.current.length; i++) {
@@ -191,26 +175,20 @@ export default function IntroText() {
           state.opacity = opacity;
           state.scale = scale;
           state.blur = blur;
-          anyChange = true;
-        }
-      }
 
-      // Only trigger React re-render if something changed, throttled to avoid 60fps DOM updates
-      if (anyChange) {
-        const now = performance.now();
-        if (now - lastRenderTimeRef.current >= RENDER_THROTTLE_MS) {
-          lastRenderTimeRef.current = now;
-          setCharStates([...states]);
+          // Apply directly to DOM element — no React re-render needed
+          const el = spanRefsRef.current[i];
+          if (el) {
+            el.style.transform = `translateY(-${offset}px) scale(${scale})`;
+            el.style.opacity = opacity;
+            el.style.filter = `blur(${blur}px)`;
+          }
         }
       }
     } catch (error) {
       // Silently handle WebGL context loss during animation
     }
   });
-
-  // Split states for title and subtitle
-  const titleStates = charStates.slice(0, TITLE_TEXT.length);
-  const subtitleStates = charStates.slice(TITLE_TEXT.length);
 
   const baseStyle = {
     display: "inline-block",
@@ -219,8 +197,8 @@ export default function IntroText() {
     textTransform: "uppercase",
   };
 
-  // Don't render if unmounting, WebGL context unavailable, or if Explore button hasn't been clicked and delay hasn't passed
-  if (shouldUnmount || !shouldRender || !isVisible || !camera || !gl || !position) {
+  // Don't render if unmounting or if Explore button hasn't been clicked and delay hasn't passed
+  if (shouldUnmount || !shouldRender || !isVisible || !camera || !position) {
     return null;
   }
 
@@ -247,16 +225,12 @@ export default function IntroText() {
           {TITLE_TEXT.split("").map((char, i) => (
             <span
               key={`title-${i}`}
+              ref={(el) => setSpanRef(el, i)}
               style={{
                 ...baseStyle,
                 fontSize: "clamp(2rem, 4vw, 3.5rem)",
                 fontWeight: "bold",
                 textShadow: "0 0 10px rgba(0,0,0,0.5)",
-                transform: `translateY(-${
-                  titleStates[i]?.offset || 0
-                }px) scale(${titleStates[i]?.scale || 1})`,
-                opacity: titleStates[i]?.opacity ?? 1,
-                filter: `blur(${titleStates[i]?.blur || 0}px)`,
               }}
             >
               {char === " " ? "\u00A0" : char}
@@ -268,17 +242,13 @@ export default function IntroText() {
           {SUBTITLE_TEXT.split("").map((char, i) => (
             <span
               key={`subtitle-${i}`}
+              ref={(el) => setSpanRef(el, TITLE_TEXT.length + i)}
               style={{
                 ...baseStyle,
                 fontSize: "1rem",
                 letterSpacing: "0.3em",
                 color: "rgba(249, 249, 249, 0.85)",
                 textShadow: "0 0 10px rgba(0,0,0,0.5)",
-                transform: `translateY(-${
-                  subtitleStates[i]?.offset || 0
-                }px) scale(${subtitleStates[i]?.scale || 1})`,
-                opacity: subtitleStates[i]?.opacity ?? 1,
-                filter: `blur(${subtitleStates[i]?.blur || 0}px)`,
               }}
             >
               {char === " " ? "\u00A0" : char}
