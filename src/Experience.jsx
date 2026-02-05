@@ -229,6 +229,14 @@ import { usePresetTransition } from "./hooks/usePresetTransition";
 import TerrainTiled from "./components/TerrainTiled";
 import { heightAt as sampleHeight } from "./proc/heightfield";
 
+// Authority-anchored terrain system (alternative with infinite freeflight support)
+import TerrainAuthority from "./components/TerrainAuthority";
+import ForestAuthority from "./components/ForestAuthority";
+
+// Toggle between old (TerrainTiled) and new (TerrainAuthority) terrain systems
+// Set to true to use the authority-anchored system with infinite freeflight support
+const USE_AUTHORITY_TERRAIN = true;
+
 // NEW
 // import ForestDynamic from "./components/ForestDynamic";
 // import ForestDynamic from "./components/ForestDynamic";
@@ -756,17 +764,32 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        <TerrainTiled
-          ref={terrainRef}
-          sampleHeight={sampleHeight}
-          tileSize={TERRAIN_TILE_SIZE}
-          anchorMinX={-10}
-          anchorMinZ={-10}
-          loadRadius={TERRAIN_LOAD_RADIUS}
-          dropRadius={3}
-          prefetch={1}
-          resolution={4}
-        />
+        {/* Terrain System - Toggle between old (TerrainTiled) and new (TerrainAuthority) */}
+        {USE_AUTHORITY_TERRAIN ? (
+          <TerrainAuthority
+            ref={terrainRef}
+            sampleHeight={sampleHeight}
+            tileSize={TERRAIN_TILE_SIZE}
+            anchorMinX={-10}
+            anchorMinZ={-10}
+            loadRadius={TERRAIN_LOAD_RADIUS}
+            dropRadius={3}
+            prefetch={1}
+            resolution={4}
+          />
+        ) : (
+          <TerrainTiled
+            ref={terrainRef}
+            sampleHeight={sampleHeight}
+            tileSize={TERRAIN_TILE_SIZE}
+            anchorMinX={-10}
+            anchorMinZ={-10}
+            loadRadius={TERRAIN_LOAD_RADIUS}
+            dropRadius={3}
+            prefetch={1}
+            resolution={4}
+          />
+        )}
 
         {/* Actors */}
         <Cabin ref={cabinRef} />
@@ -799,24 +822,32 @@ export default function Experience() {
           }}
         /> */}
 
-        {/* Forest — publish instanced meshes for fog occlusion */}
-        {/* <ForestDynamic
-          terrainGroup={terrainGroupHandle}
-          tileSize={TERRAIN_TILE_SIZE}
-          terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-        /> */}
-        <ForestDynamicSampled
-          terrainGroup={terrainGroupHandle}
-          tileSize={TERRAIN_TILE_SIZE}
-          terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-          exclusion={lakeExclusion}
-          onInitialReady={() => {
-            performanceMonitor.markTimeToInteractive();
-            performanceMonitor.markTotalLoadTime();
-            // Signal that the forest (scene) is ready - trees have been rendered
-            window.dispatchEvent(new Event("forest-ready"));
-          }}
-        />
+        {/* Forest System - Toggle between old (ForestDynamicSampled) and new (ForestAuthority) */}
+        {USE_AUTHORITY_TERRAIN ? (
+          <ForestAuthority
+            terrainGroup={terrainGroupHandle}
+            tileSize={TERRAIN_TILE_SIZE}
+            terrainLoadRadius={TERRAIN_LOAD_RADIUS}
+            exclusion={lakeExclusion}
+            onInitialReady={() => {
+              performanceMonitor.markTimeToInteractive();
+              performanceMonitor.markTotalLoadTime();
+              window.dispatchEvent(new Event("forest-ready"));
+            }}
+          />
+        ) : (
+          <ForestDynamicSampled
+            terrainGroup={terrainGroupHandle}
+            tileSize={TERRAIN_TILE_SIZE}
+            terrainLoadRadius={TERRAIN_LOAD_RADIUS}
+            exclusion={lakeExclusion}
+            onInitialReady={() => {
+              performanceMonitor.markTimeToInteractive();
+              performanceMonitor.markTotalLoadTime();
+              window.dispatchEvent(new Event("forest-ready"));
+            }}
+          />
+        )}
         <UnifiedCrystalClusters />
         {/* <Butterfly /> */}
         <IntroButterfly position={[-0.131, -3.836, -5.104]} />

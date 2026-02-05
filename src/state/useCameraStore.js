@@ -8,6 +8,7 @@ import {
   yawPitchFromQuaternion,
 } from "../utils/cameraInterp";
 import { heightAt } from "../proc/heightfield";
+import { useWorldAnchorStore } from "./useWorldAnchorStore";
 
 /**
  * @typedef {Object} Waypoint
@@ -612,6 +613,9 @@ export const useCameraStore = create((set, get) => {
 
       set({ freeFly: nextFreeFly });
 
+      // AUTHORITY-ANCHOR: Update distance from anchor origin for distance-based effects
+      useWorldAnchorStore.getState().updateDistance(nextPos);
+
       const moving =
         Math.abs(speed) > 1e-4 ||
         Math.abs(yawRate) > 1e-4 ||
@@ -737,6 +741,9 @@ export const useCameraStore = create((set, get) => {
       freeFlyUserHasDragged: false, // Reset interaction flag when entering freeflight
       t: 1,
     });
+
+    // AUTHORITY-ANCHOR: Set freeflight mode with current position as anchor origin
+    useWorldAnchorStore.getState().setFreeflightMode(nextFreeFly.position);
   };
 
   // Exit freeflight mode and return to path mode
@@ -752,6 +759,9 @@ export const useCameraStore = create((set, get) => {
       t: exitT,
       freeFlyUserHasDragged: false,
     });
+
+    // AUTHORITY-ANCHOR: Return to authored mode
+    useWorldAnchorStore.getState().setAuthoredMode();
   };
 
   const maybeActivateFreeFly = (tValue) => {
@@ -968,6 +978,9 @@ export const useCameraStore = create((set, get) => {
         freeFly: nextFreeFly,
         freeFlyUserHasDragged: false, // Reset interaction flag when entering freeflight via skip
       });
+
+      // AUTHORITY-ANCHOR: Set freeflight mode with current position as anchor origin
+      useWorldAnchorStore.getState().setFreeflightMode(nextFreeFly.position);
 
       ensureTicker();
     },
