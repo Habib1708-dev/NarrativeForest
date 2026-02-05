@@ -22,11 +22,11 @@ import { useWorldAnchorStore } from "../state/useWorldAnchorStore";
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
   chunkSize: 2,
-  nearRingChunks: 3,
-  midRingChunks: 4,
-  nearImmediateFraction: 0.3,
-  raysPerFrame: 150,
-  retentionSeconds: 2,
+  nearRingChunks: 4, // Slightly up from 3 (conservative)
+  midRingChunks: 5, // Slightly up from 4 (conservative)
+  nearImmediateFraction: 0.4, // Slightly up from 0.3
+  raysPerFrame: 180, // Budget per frame for placement attempts (NOT raycasting, just a counter)
+  retentionSeconds: 3, // Slightly up from 2
   treeMinSpacing: 0.7,
   rockMinSpacing: 0.35,
   treeTargetPerChunk: 14,
@@ -36,11 +36,14 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   rockScaleMin: 0.36,
   rockScaleMax: 0.48,
   renderMidTrees: false,
-  renderExtraChunks: 3,
+  renderExtraChunks: 3, // Keep original
   treeTint: "#000000",
   treeTintIntensity: 1,
   rockTint: "#444444",
   rockTintIntensity: 1,
+  // Direction-aware pre-loading (main improvement - low overhead)
+  predictAheadSeconds: 1.0, // Look ahead 1 second
+  predictChunkRadius: 2, // Pre-load 2 extra chunks in movement direction
 });
 
 // Reuse transform helpers + matrix instances to reduce per-chunk GC pressure
@@ -126,6 +129,8 @@ export default function ForestAuthority({
     treeTintIntensity,
     rockTint,
     rockTintIntensity,
+    predictAheadSeconds,
+    predictChunkRadius,
   } = settings;
 
   // Terrain half-extent clamp so forest never outruns loaded tiles
@@ -243,6 +248,11 @@ export default function ForestAuthority({
   const lastCellRef = useRef({ cx: 1e9, cz: 1e9 });
   const camXZ = useRef(new THREE.Vector3());
   const prevChildrenCountRef = useRef(-1);
+
+  // Direction-aware pre-loading: velocity tracking
+  const lastCamPosRef = useRef(new THREE.Vector3());
+  const camVelocityRef = useRef(new THREE.Vector3());
+  const lastFrameTimeRef = useRef(performance.now());
 
   useEffect(() => {
     lastCellRef.current = { cx: 1e9, cz: 1e9 };
@@ -368,7 +378,7 @@ export default function ForestAuthority({
     return out;
   };
 
-  const computeModes = (cx, cz) => {
+  const computeModes = (cx, cz, velocity = null) => {
     const next = {};
     const assign = (coords, mode) => {
       for (const [x, z] of coords) {
@@ -399,6 +409,41 @@ export default function ForestAuthority({
       next[key] = mode;
     });
 
+    // Direction-aware pre-loading: predict chunks ahead of camera movement
+    if (velocity && velocity.lengthSq() > 0.01) {
+      const speed = velocity.length();
+      const dir = velocity.clone().normalize();
+      // Calculate how many chunks ahead based on speed and predictAheadSeconds
+      const predictDist = speed * (predictAheadSeconds || 1.5);
+      const predictChunks = Math.ceil(predictDist / chunkSize) + (predictChunkRadius || 3);
+
+      // Pre-load chunks in a cone ahead of camera
+      for (let i = 1; i <= predictChunks; i++) {
+        // Main direction
+        const px = cx + Math.round(dir.x * i);
+        const pz = cz + Math.round(dir.z * i);
+        const key = chunkKey(px, pz);
+        if (!next[key] || next[key] === "far" || next[key] === "med") {
+          next[key] = "highPredicted";
+        }
+
+        // Spread to adjacent chunks for wider coverage (cone effect)
+        if (i > 1) {
+          const perpX = -dir.z;
+          const perpZ = dir.x;
+          for (let offset = -1; offset <= 1; offset += 2) {
+            const spreadFactor = Math.min(1, i * 0.3);
+            const sx = cx + Math.round(dir.x * i + perpX * offset * spreadFactor);
+            const sz = cz + Math.round(dir.z * i + perpZ * offset * spreadFactor);
+            const sKey = chunkKey(sx, sz);
+            if (!next[sKey] || next[sKey] === "far" || next[sKey] === "med") {
+              next[sKey] = "highPredicted";
+            }
+          }
+        }
+      }
+    }
+
     return { next, viewSet: new Set(Object.keys(next)) };
   };
 
@@ -416,12 +461,25 @@ export default function ForestAuthority({
       }
 
       camXZ.current.set(camera.position.x, 0, camera.position.z);
+
+      // Calculate camera velocity for direction-aware pre-loading
+      const dt = (now - lastFrameTimeRef.current) / 1000; // Delta time in seconds
+      if (dt > 0 && dt < 0.5) {
+        // Avoid huge deltas (e.g., after tab switch)
+        camVelocityRef.current
+          .subVectors(camXZ.current, lastCamPosRef.current)
+          .divideScalar(dt);
+      }
+      lastCamPosRef.current.copy(camXZ.current);
+      lastFrameTimeRef.current = now;
+
       // AUTHORITY-ANCHOR AWARE: Use anchor-relative chunk coordinates
       const [ccx, ccz] = worldToChunk(camXZ.current.x, camXZ.current.z);
       if (ccx !== lastCellRef.current.cx || ccz !== lastCellRef.current.cz) {
         lastCellRef.current = { cx: ccx, cz: ccz };
 
-        const { next, viewSet } = computeModes(ccx, ccz);
+        // Pass velocity for direction-aware pre-loading
+        const { next, viewSet } = computeModes(ccx, ccz, camVelocityRef.current);
 
         for (const k of viewSet) {
           if (!cacheRef.current.has(k)) {
@@ -469,6 +527,20 @@ export default function ForestAuthority({
     if (buildQueueRef.current.length) {
       let budget = raysPerFrame;
       if (!Number.isFinite(budget) || budget <= 0) budget = 1;
+
+      // Priority sorting: highImmediate first, then highPredicted, then others
+      const priority = {
+        highImmediate: 0,
+        highPredicted: 1,
+        highBuffer: 2,
+        med: 3,
+        far: 4,
+      };
+      buildQueueRef.current.sort((a, b) => {
+        const ma = modesRef.current[a.key];
+        const mb = modesRef.current[b.key];
+        return (priority[ma] ?? 5) - (priority[mb] ?? 5);
+      });
 
       while (budget > 0 && buildQueueRef.current.length) {
         const job = buildQueueRef.current.shift();
