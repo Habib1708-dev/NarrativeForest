@@ -369,7 +369,7 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
     };
 
     const mesh = new THREE.Mesh(geom, tileMaterial);
-    mesh.frustumCulled = false;
+    mesh.frustumCulled = true;
     mesh.visible = true;
 
     updateTerrainAuthorityTileUniforms(mesh, minX, minZ, tileSizeLocal, latticeStepLocal);

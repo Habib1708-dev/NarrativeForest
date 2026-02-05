@@ -26,7 +26,7 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   midRingChunks: 5, // Slightly up from 4 (conservative)
   nearImmediateFraction: 0.4, // Slightly up from 0.3
   raysPerFrame: 180, // Budget per frame for placement attempts (NOT raycasting, just a counter)
-  retentionSeconds: 3, // Slightly up from 2
+  retentionSeconds: 2, // Reduced from 3 for faster memory reclamation
   treeMinSpacing: 0.7,
   rockMinSpacing: 0.35,
   treeTargetPerChunk: 14,
