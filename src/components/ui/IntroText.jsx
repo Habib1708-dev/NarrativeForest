@@ -7,8 +7,24 @@ import { useCameraStore } from "../../state/useCameraStore";
 // Reusable Vector3 to avoid per-frame allocations
 const _displacement = new Vector3();
 
+// Pre-computed constants (moved outside component to avoid re-computation)
 const TITLE_TEXT = "Habib Khalaf";
 const SUBTITLE_TEXT = "AI & Full Stack 3D Web Developer";
+const TITLE_CHARS = TITLE_TEXT.split("");
+const SUBTITLE_CHARS = SUBTITLE_TEXT.split("");
+const TOTAL_CHARS = TITLE_TEXT.length + SUBTITLE_TEXT.length;
+const CHAR_DELAY = 0.028;
+const CHAR_DELAYS = Array.from({ length: TOTAL_CHARS }, (_, i) => i * CHAR_DELAY);
+const ANIMATION_DISTANCE = 0.5;
+
+// Pre-computed initial char states
+const createInitialCharStates = () =>
+  Array.from({ length: TOTAL_CHARS }, () => ({
+    offset: 0,
+    opacity: 1,
+    scale: 1,
+    blur: 0,
+  }));
 
 export default function IntroText() {
   const { camera } = useThree();
@@ -18,9 +34,6 @@ export default function IntroText() {
   const [fadeInOpacity, setFadeInOpacity] = useState(0);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [shouldUnmount, setShouldUnmount] = useState(false);
-
-  // Total characters for both lines
-  const totalChars = TITLE_TEXT.length + SUBTITLE_TEXT.length;
 
   // Listen for Explore button click event
   useEffect(() => {
@@ -48,7 +61,7 @@ export default function IntroText() {
       // Unmount after fade-out animation completes
       const unmountTimeout = setTimeout(() => {
         setShouldUnmount(true);
-      }, 800); // Match the fade-out transition duration
+      }, 800);
       return () => clearTimeout(unmountTimeout);
     }
   }, [cameraMode, shouldRender, isVisible]);
@@ -60,14 +73,12 @@ export default function IntroText() {
     let delayTimeout;
     let fadeTimeout;
 
-    // Wait 1 second before showing the text
     delayTimeout = setTimeout(() => {
       setIsVisible(true);
-      // Start with opacity 0, then trigger fade-in after a tiny delay to ensure transition works
       setFadeInOpacity(0);
       fadeTimeout = setTimeout(() => {
         setFadeInOpacity(1);
-      }, 10); // Small delay to ensure CSS transition is triggered
+      }, 10);
     }, 1000);
 
     return () => {
@@ -77,14 +88,13 @@ export default function IntroText() {
   }, [shouldRender, isFadingOut]);
 
   // Mutable per-character state (never triggers React re-renders)
-  const charStatesRef = useRef(
-    Array(totalChars)
-      .fill(null)
-      .map(() => ({ offset: 0, opacity: 1, scale: 1, blur: 0 }))
-  );
+  const charStatesRef = useRef(createInitialCharStates());
 
-  // DOM refs for direct manipulation — one ref per character span
+  // DOM refs for direct manipulation
   const spanRefsRef = useRef([]);
+
+  // Track if animation has completed (all chars at opacity 0)
+  const animationCompleteRef = useRef(false);
 
   // Callback ref collector for span elements
   const setSpanRef = useCallback((el, idx) => {
@@ -97,14 +107,6 @@ export default function IntroText() {
 
   // Track last progress to avoid unnecessary updates
   const lastProgressRef = useRef(-1);
-
-  // Staggered delays for each character (like the CSS animation-delay)
-  const CHAR_DELAY = 0.028; // ~28ms converted to distance units
-  const charDelays = useRef(
-    Array(totalChars)
-      .fill(null)
-      .map((_, i) => i * CHAR_DELAY)
-  );
 
   // Calculate the position once at mount (static, not sticky)
   const position = useMemo(() => {
@@ -120,7 +122,42 @@ export default function IntroText() {
     }
   }, [camera]);
 
+  // Memoize styles to avoid recreation on each render
+  const baseStyle = useMemo(
+    () => ({
+      display: "inline-block",
+      color: "#f9f9f9",
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+      willChange: "transform, opacity, filter",
+    }),
+    []
+  );
+
+  const titleCharStyle = useMemo(
+    () => ({
+      ...baseStyle,
+      fontSize: "clamp(2rem, 4vw, 3.5rem)",
+      fontWeight: "bold",
+      textShadow: "0 0 10px rgba(0,0,0,0.5)",
+    }),
+    [baseStyle]
+  );
+
+  const subtitleCharStyle = useMemo(
+    () => ({
+      ...baseStyle,
+      fontSize: "1rem",
+      letterSpacing: "0.3em",
+      color: "rgba(249, 249, 249, 0.85)",
+      textShadow: "0 0 10px rgba(0,0,0,0.5)",
+    }),
+    [baseStyle]
+  );
+
   useFrame(() => {
+    // Early exit if animation is complete
+    if (animationCompleteRef.current) return;
     if (!camera || !initialCamPos.current || !initialCamDir.current) return;
 
     try {
@@ -135,14 +172,13 @@ export default function IntroText() {
       if (Math.abs(progress - lastProgressRef.current) < 0.001) return;
       lastProgressRef.current = progress;
 
-      const animationDistance = 0.5; // Distance over which the animation plays
       const states = charStatesRef.current;
+      let allComplete = true;
 
-      for (let i = 0; i < charDelays.current.length; i++) {
-        const delay = charDelays.current[i];
-        // Adjust progress based on staggered delay
+      for (let i = 0; i < TOTAL_CHARS; i++) {
+        const delay = CHAR_DELAYS[i];
         const adjustedProgress = Math.max(0, progress - delay);
-        const t = Math.min(1, adjustedProgress / animationDistance);
+        const t = Math.min(1, adjustedProgress / ANIMATION_DISTANCE);
 
         // Match the CSS keyframes easing (ease-out curve)
         const eased = 1 - Math.pow(1 - t, 2);
@@ -165,6 +201,11 @@ export default function IntroText() {
           blur = 1 + 1 * subT;
         }
 
+        // Track if any character hasn't completed
+        if (opacity > 0.001) {
+          allComplete = false;
+        }
+
         // Check if values changed before mutating
         const state = states[i];
         if (
@@ -176,7 +217,7 @@ export default function IntroText() {
           state.scale = scale;
           state.blur = blur;
 
-          // Apply directly to DOM element — no React re-render needed
+          // Apply directly to DOM element
           const el = spanRefsRef.current[i];
           if (el) {
             el.style.transform = `translateY(-${offset}px) scale(${scale})`;
@@ -185,19 +226,17 @@ export default function IntroText() {
           }
         }
       }
+
+      // Mark animation as complete to stop useFrame calls
+      if (allComplete) {
+        animationCompleteRef.current = true;
+      }
     } catch (error) {
       // Silently handle WebGL context loss during animation
     }
   });
 
-  const baseStyle = {
-    display: "inline-block",
-    color: "#f9f9f9",
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-  };
-
-  // Don't render if unmounting or if Explore button hasn't been clicked and delay hasn't passed
+  // Don't render if unmounting or conditions not met
   if (shouldUnmount || !shouldRender || !isVisible || !camera || !position) {
     return null;
   }
@@ -218,20 +257,16 @@ export default function IntroText() {
           position: "relative",
           opacity: fadeInOpacity,
           transition: "opacity 800ms ease-in",
+          contain: "layout style paint",
         }}
       >
         {/* Title line */}
         <div style={{ whiteSpace: "nowrap" }}>
-          {TITLE_TEXT.split("").map((char, i) => (
+          {TITLE_CHARS.map((char, i) => (
             <span
               key={`title-${i}`}
               ref={(el) => setSpanRef(el, i)}
-              style={{
-                ...baseStyle,
-                fontSize: "clamp(2rem, 4vw, 3.5rem)",
-                fontWeight: "bold",
-                textShadow: "0 0 10px rgba(0,0,0,0.5)",
-              }}
+              style={titleCharStyle}
             >
               {char === " " ? "\u00A0" : char}
             </span>
@@ -239,17 +274,11 @@ export default function IntroText() {
         </div>
         {/* Subtitle line */}
         <div style={{ whiteSpace: "nowrap", marginTop: "-0.5rem" }}>
-          {SUBTITLE_TEXT.split("").map((char, i) => (
+          {SUBTITLE_CHARS.map((char, i) => (
             <span
               key={`subtitle-${i}`}
               ref={(el) => setSpanRef(el, TITLE_TEXT.length + i)}
-              style={{
-                ...baseStyle,
-                fontSize: "1rem",
-                letterSpacing: "0.3em",
-                color: "rgba(249, 249, 249, 0.85)",
-                textShadow: "0 0 10px rgba(0,0,0,0.5)",
-              }}
+              style={subtitleCharStyle}
             >
               {char === " " ? "\u00A0" : char}
             </span>

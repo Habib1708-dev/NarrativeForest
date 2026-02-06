@@ -149,6 +149,13 @@ objectNormal = terrainNormal;
     );
   };
 
+  // CRITICAL: Set customProgramCacheKey so each cloned material gets its own shader program
+  // Without this, Three.js may use a cached (unmodified) shader for clones
+  // We use the material's uuid to ensure uniqueness - each clone gets a new uuid
+  material.customProgramCacheKey = function () {
+    return `terrain-${this.uuid}`;
+  };
+
   return material;
 }
 

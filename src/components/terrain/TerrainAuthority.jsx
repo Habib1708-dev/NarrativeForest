@@ -149,7 +149,7 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
     const t0 = performance.now();
     try {
       worker = new Worker(
-        new URL("../workers/terrainTileWorker.js", import.meta.url),
+        new URL("../../workers/terrainTileWorker.js", import.meta.url),
         { type: "module" }
       );
     } catch (err) {
@@ -345,8 +345,19 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
 
   const acquireMaterial = () => {
     const pool = materialPoolRef.current;
-    if (pool.length > 0) return pool.pop();
-    return baseMaterial.clone();
+    if (pool.length > 0) {
+      return pool.pop();
+    }
+    const cloned = baseMaterial.clone();
+    // Explicitly copy onBeforeCompile - some Three.js versions don't copy it properly
+    if (baseMaterial.onBeforeCompile && !cloned.onBeforeCompile) {
+      cloned.onBeforeCompile = baseMaterial.onBeforeCompile;
+    }
+    // Also copy customProgramCacheKey if present
+    if (baseMaterial.customProgramCacheKey) {
+      cloned.customProgramCacheKey = baseMaterial.customProgramCacheKey;
+    }
+    return cloned;
   };
 
   const releaseMaterial = (mat) => {
@@ -426,7 +437,6 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
   useEffect(() => {
     required.forEach((key) => {
       if (typeof key !== "string") {
-        console.error("TerrainAuthority: required set contains non-string key", key, typeof key);
         return;
       }
       if (tiles.current.has(key)) return;
@@ -519,7 +529,6 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
       const job = q.shift();
       if (!job) break;
       if (typeof job.key !== "string") {
-        console.error("TerrainAuthority: job has non-string key", job.key, typeof job.key);
         continue;
       }
       const rec = tiles.current.get(job.key);
@@ -533,12 +542,6 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
 
         rec.state = "building";
         rec.lastTouched = performance.now();
-        if (typeof rec.key !== "string") {
-          console.error("TerrainAuthority: tile key is not a string", rec.key, typeof rec.key);
-          rec.state = "queued";
-          q.unshift(job);
-          continue;
-        }
         pendingWorkerJobsRef.current.set(rec.key, job);
         workerRef.current.postMessage({
           type: "build",

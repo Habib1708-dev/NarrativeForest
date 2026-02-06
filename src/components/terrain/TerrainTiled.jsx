@@ -134,7 +134,7 @@ const TerrainTiled = forwardRef(function TerrainTiled(
     const t0 = performance.now();
     try {
       worker = new Worker(
-        new URL("../workers/terrainTileWorker.js", import.meta.url),
+        new URL("../../workers/terrainTileWorker.js", import.meta.url),
         { type: "module" }
       );
     } catch (err) {
