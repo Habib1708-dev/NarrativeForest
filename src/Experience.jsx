@@ -209,46 +209,46 @@ function ArchDebugPanel({ archConfig, isDebugMode, onChange }) {
   return null;
 }
 
-// Scene pieces
-import Cabin from "./components/Cabin";
-import Man from "./components/Man";
-import Cat from "./components/Cat";
-import CatNoTextures from "./components/CatNoTextures";
-import CatKTX2 from "./components/CatKTX2";
-import Lake from "./components/Lake";
-// import FakeLake from "./components/FakeLake"; // Replaced with real Lake component
-// import FogParticleSystem from "./components/FogParticleSystem";
-import RadioTower from "./components/RadioTower";
-import DistanceFade from "./fog/DistanceFade";
+// Scene pieces - Entities
+import Cabin from "./components/entities/Cabin";
+import Man from "./components/entities/Man";
+import Cat from "./components/entities/Cat";
+import CatNoTextures from "./components/entities/CatNoTextures";
+import CatKTX2 from "./components/entities/CatKTX2";
+import RadioTower from "./components/entities/RadioTower";
+import Butterfly from "./components/entities/Butterfly";
+import IntroButterfly from "./components/entities/IntroButterfly";
+
+// Scene pieces - Terrain
+import Lake from "./components/terrain/Lake";
+import TerrainTiled from "./components/terrain/TerrainTiled";
+import TerrainAuthority from "./components/terrain/TerrainAuthority";
+
+// Scene pieces - Vegetation
+import ForestAuthority from "./components/vegetation/ForestAuthority";
+import ForestDynamicSampled from "./components/vegetation/ForestDynamicSampled";
+import UnifiedCrystalClusters from "./components/vegetation/UnifiedCrystalClusters";
+
+// Scene pieces - Environment
+import DistanceFade from "./components/environment/DistanceFade";
+import Stars from "./components/environment/Stars";
+import CustomSky from "./components/environment/CustomSky";
+
+// Scene pieces - Camera
+import CameraControllerR3F from "./components/camera/CameraControllerR3F";
+
+// Scene pieces - UI
+import IntroText from "./components/ui/IntroText";
 
 // Preset system
 import { PRESETS, PRESET_NAMES } from "./utils/presets";
 import { usePresetTransition } from "./hooks/usePresetTransition";
-
-// Tiled terrain and heightfield
-import TerrainTiled from "./components/TerrainTiled";
 import { heightAt as sampleHeight } from "./proc/heightfield";
-
-// Authority-anchored terrain system (alternative with infinite freeflight support)
-import TerrainAuthority from "./components/TerrainAuthority";
-import ForestAuthority from "./components/ForestAuthority";
+import { useCameraStore } from "./state/useCameraStore";
 
 // Toggle between old (TerrainTiled) and new (TerrainAuthority) terrain systems
 // Set to true to use the authority-anchored system with infinite freeflight support
 const USE_AUTHORITY_TERRAIN = true;
-
-// NEW
-// import ForestDynamic from "./components/ForestDynamic";
-// import ForestDynamic from "./components/ForestDynamic";
-import ForestDynamicSampled from "./components/ForestDynamicSampled";
-import UnifiedCrystalClusters from "./components/UnifiedCrystalClusters";
-import Stars from "./components/Stars";
-import CustomSky from "./components/CustomSky";
-import Butterfly from "./components/Butterfly";
-import IntroButterfly from "./components/IntroButterfly";
-import CameraControllerR3F from "./components/CameraControllerR3F";
-import IntroText from "./components/IntroText";
-import { useCameraStore } from "./state/useCameraStore";
 
 export default function Experience() {
   const { gl, camera } = useThree();

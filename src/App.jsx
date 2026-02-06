@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import Navbar from "./components/Navbar";
+import Navbar from "./components/ui/Navbar";
 import { Home, AboutUs, OurWork, ContactUs } from "./pages";
 
 export default function App() {

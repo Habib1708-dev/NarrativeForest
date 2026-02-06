@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import "./style.css";
+import "./styles/index.css";
 
 // Prevent React DevTools from crashing if a renderer registers without a semver string.
 if (typeof window !== "undefined") {
