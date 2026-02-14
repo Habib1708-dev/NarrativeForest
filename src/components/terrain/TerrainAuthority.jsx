@@ -480,8 +480,8 @@ const TerrainAuthority = forwardRef(function TerrainAuthority(
     // ========================================
     const { mode, origin } = useWorldAnchorStore.getState();
     const isFreeflight = mode === "FREEFLIGHT" ? 1.0 : 0.0;
-    const travelOffsetX = isFreeflight ? camera.position.x - origin.x : 0;
-    const travelOffsetZ = isFreeflight ? camera.position.z - origin.z : 0;
+    const travelOffsetX = isFreeflight ? -origin.x : 0;
+    const travelOffsetZ = isFreeflight ? -origin.z : 0;
 
     tiles.current.forEach((rec) => {
       if (rec.mesh?.material) {

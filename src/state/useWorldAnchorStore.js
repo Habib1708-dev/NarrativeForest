@@ -66,8 +66,8 @@ export const useWorldAnchorStore = create((set, get) => ({
       return { x: 0, z: 0 };
     }
     return {
-      x: cameraPosition.x - origin.x,
-      z: cameraPosition.z - origin.z
+      x: -origin.x,
+      z: -origin.z
     };
   },
 

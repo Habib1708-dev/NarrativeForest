@@ -22,10 +22,10 @@ import { useWorldAnchorStore } from "../../state/useWorldAnchorStore";
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
   chunkSize: 2,
-  nearRingChunks: 4, // Slightly up from 3 (conservative)
-  midRingChunks: 5, // Slightly up from 4 (conservative)
+  nearRingChunks: 5, // Wider near ring for smoother freeflight
+  midRingChunks: 7, // Wider mid ring — safe since height sampling is procedural
   nearImmediateFraction: 0.4, // Slightly up from 0.3
-  raysPerFrame: 180, // Budget per frame for placement attempts (NOT raycasting, just a counter)
+  raysPerFrame: 1500, // Budget per frame for placement attempts (pure CPU math, ~0.5ms at this level)
   retentionSeconds: 2, // Reduced from 3 for faster memory reclamation
   treeMinSpacing: 0.7,
   rockMinSpacing: 0.35,
@@ -42,8 +42,8 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   rockTint: "#444444",
   rockTintIntensity: 1,
   // Direction-aware pre-loading (main improvement - low overhead)
-  predictAheadSeconds: 1.0, // Look ahead 1 second
-  predictChunkRadius: 2, // Pre-load 2 extra chunks in movement direction
+  predictAheadSeconds: 2.0, // Look ahead 2 seconds for smooth freeflight
+  predictChunkRadius: 3, // Pre-load 3 extra chunks in movement direction
 });
 
 // Reuse transform helpers + matrix instances to reduce per-chunk GC pressure
@@ -80,7 +80,7 @@ export default function ForestAuthority({
   terrainLoadRadius = 2,
   exclusion = null,
   refRockRefs, // OPTIONAL: external array/refs for the rocks instancedMeshes
-  onOccludersChange = () => {}, // OPTIONAL: callback(occ[]) for fog prepass, etc.
+  onOccludersChange = () => { }, // OPTIONAL: callback(occ[]) for fog prepass, etc.
   sampleHeight = defaultHeightSampler, // height sampler (used as fallback, prefer anchoredHeightAt)
   config,
   onInitialReady,
@@ -676,10 +676,10 @@ export default function ForestAuthority({
 
       if (mode === "highImmediate") {
         for (let j = 0; j < rec.trees.length; j++) nearImmediateTrees.push(rec.trees[j]);
-      } else if (mode === "highBuffer") {
+      } else if (mode === "highBuffer" || mode === "highPredicted") {
         for (let j = 0; j < rec.trees.length; j++) nearBufferTrees.push(rec.trees[j]);
       }
-      if (mode === "highImmediate" || mode === "highBuffer") {
+      if (mode === "highImmediate" || mode === "highBuffer" || mode === "highPredicted") {
         rec.rocksByPart.forEach((arr, i) => {
           for (let j = 0; j < arr.length; j++) rocksByPart[i].push(arr[j]);
         });

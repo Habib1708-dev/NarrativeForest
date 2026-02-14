@@ -223,6 +223,7 @@ import IntroButterfly from "./components/entities/IntroButterfly";
 import Lake from "./components/terrain/Lake";
 import TerrainTiled from "./components/terrain/TerrainTiled";
 import TerrainAuthority from "./components/terrain/TerrainAuthority";
+import TerrainTiledOpt from "./components/terrain/TerrainTiledOpt";
 
 // Scene pieces - Vegetation
 import ForestAuthority from "./components/vegetation/ForestAuthority";
@@ -246,9 +247,12 @@ import { usePresetTransition } from "./hooks/usePresetTransition";
 import { heightAt as sampleHeight } from "./proc/heightfield";
 import { useCameraStore } from "./state/useCameraStore";
 
-// Toggle between old (TerrainTiled) and new (TerrainAuthority) terrain systems
-// Set to true to use the authority-anchored system with infinite freeflight support
-const USE_AUTHORITY_TERRAIN = true;
+// Terrain system selector: "authority" | "tiled" | "opt"
+//   "authority" — TerrainAuthority (anchored, freeflight)
+//   "tiled"     — TerrainTiled (GPU displacement, original)
+//   "opt"       — TerrainTiledOpt (CPU worker displacement, shared material, frustum culling)
+const TERRAIN_MODE = "opt";
+const USE_AUTHORITY_TERRAIN = TERRAIN_MODE === "authority";
 
 export default function Experience() {
   const { gl, camera } = useThree();
@@ -764,8 +768,8 @@ export default function Experience() {
       />
 
       <Suspense fallback={null}>
-        {/* Terrain System - Toggle between old (TerrainTiled) and new (TerrainAuthority) */}
-        {USE_AUTHORITY_TERRAIN ? (
+        {/* Terrain System — "authority" | "tiled" | "opt" */}
+        {TERRAIN_MODE === "authority" && (
           <TerrainAuthority
             ref={terrainRef}
             sampleHeight={sampleHeight}
@@ -777,8 +781,22 @@ export default function Experience() {
             prefetch={1}
             resolution={4}
           />
-        ) : (
+        )}
+        {TERRAIN_MODE === "tiled" && (
           <TerrainTiled
+            ref={terrainRef}
+            sampleHeight={sampleHeight}
+            tileSize={TERRAIN_TILE_SIZE}
+            anchorMinX={-10}
+            anchorMinZ={-10}
+            loadRadius={TERRAIN_LOAD_RADIUS}
+            dropRadius={3}
+            prefetch={1}
+            resolution={4}
+          />
+        )}
+        {TERRAIN_MODE === "opt" && (
+          <TerrainTiledOpt
             ref={terrainRef}
             sampleHeight={sampleHeight}
             tileSize={TERRAIN_TILE_SIZE}
