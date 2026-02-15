@@ -571,7 +571,7 @@ export default function StopCircleOverlay() {
           gap: "0.3em",
           pointerEvents: "none",
           zIndex: 60,
-          fontFamily: "var(--font-family, sans-serif)",
+          fontFamily: "system-ui, Avenir, Helvetica, Arial, sans-serif",
           fontSize: "1.5rem",
           color: "white",
           textShadow: "0 2px 4px rgba(0,0,0,0.5)",
@@ -669,7 +669,7 @@ export default function StopCircleOverlay() {
           textAlign: "center",
           pointerEvents: "none",
           zIndex: 60,
-          fontFamily: '"Georama", sans-serif',
+          fontFamily: "system-ui, Avenir, Helvetica, Arial, sans-serif",
           fontOpticalSizing: "auto",
           fontSize: "clamp(2rem, 5vw, 4.5rem)",
           fontWeight: "300",
@@ -748,7 +748,7 @@ export default function StopCircleOverlay() {
           >
             <div
               style={{
-                fontFamily: '"Georama", sans-serif',
+                fontFamily: "system-ui, Avenir, Helvetica, Arial, sans-serif",
                 fontSize: isMobile
                   ? "clamp(1.75rem, 6vw, 2.6rem)"
                   : "clamp(2rem, 4vw, 3rem)",
