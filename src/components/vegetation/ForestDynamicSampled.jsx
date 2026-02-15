@@ -14,7 +14,7 @@ import {
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
   chunkSize: 2,
-  nearRingChunks: 3,
+  nearRingChunks: 4,
   midRingChunks: 4,
   nearImmediateFraction: 0.3,
   raysPerFrame: 150,

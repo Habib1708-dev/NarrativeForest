@@ -9,7 +9,7 @@ import { emitDistanceFadeTileReady } from "../../utils/distanceFadeEvents";
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
   chunkSize: 2,
-  nearRingChunks: 3,
+  nearRingChunks: 4,
   midRingChunks: 4,
   raysPerFrame: 150,
   retentionSeconds: 2,

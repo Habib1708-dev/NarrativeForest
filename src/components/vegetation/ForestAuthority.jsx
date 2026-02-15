@@ -22,7 +22,7 @@ import { useWorldAnchorStore } from "../../state/useWorldAnchorStore";
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
   chunkSize: 2,
-  nearRingChunks: 5, // Wider near ring for smoother freeflight
+  nearRingChunks: 6, // Wider near ring for smoother freeflight (high-quality trees/rocks, no LOD)
   midRingChunks: 7, // Wider mid ring — safe since height sampling is procedural
   nearImmediateFraction: 0.4, // Slightly up from 0.3
   raysPerFrame: 1500, // Budget per frame for placement attempts (pure CPU math, ~0.5ms at this level)
