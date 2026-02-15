@@ -42,7 +42,7 @@ export default function FogParticles({
       rotationSpeedZ: { value: 0.05, min: -5, max: 5, step: 0.01 },
       fogTint: { value: "#c1c1c1" },
     },
-    { collapsed: false }
+    { collapsed: true }
   );
 
   // Smart occlusion controls
@@ -72,7 +72,7 @@ export default function FogParticles({
           label: "Fog Behind Objects",
         },
       },
-      { collapsed: false }
+      { collapsed: true }
     );
 
   // UFF params (defaults aligned to your Experience.jsx)

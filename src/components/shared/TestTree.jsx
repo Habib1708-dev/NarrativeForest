@@ -13,7 +13,7 @@ export default function TestTree() {
     position: { value: [-2, -4, -2], step: 0.1 },
     rotation: { value: [0, 0, 0], step: 0.1 },
     scale: { value: 0.5, min: 0.005, max: 3, step: 0.001 },
-  });
+  }, { collapsed: true });
 
   return (
     <primitive

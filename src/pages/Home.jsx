@@ -7,7 +7,7 @@ import DebugModeIndicator from "../components/ui/DebugModeIndicator";
 import ClickAndDragHint from "../components/ui/ClickAndDragHint";
 import PresetSelector from "../components/ui/PresetSelector";
 import StopCircleOverlay from "../components/ui/StopCircleOverlay";
-import PerformanceMetricsDisplay from "../components/ui/PerformanceMetricsDisplay";
+
 import CanvasErrorBoundary from "../components/shared/CanvasErrorBoundary";
 import { useDebugStore } from "../state/useDebugStore";
 import { useAudioStore } from "../state/useAudioStore";
@@ -204,7 +204,6 @@ export default function Home() {
         </Canvas>
       </CanvasErrorBoundary>
 
-      <PerformanceMetricsDisplay />
       <FreeFlyJoystickOverlay />
     </>
   );

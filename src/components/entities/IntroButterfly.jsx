@@ -292,7 +292,7 @@ export default forwardRef(function IntroButterfly(
                 groupRef.current.position.copy(st.current.pos);
               }),
             },
-            { collapsed: false }
+            { collapsed: true }
           ),
         }
       : {}

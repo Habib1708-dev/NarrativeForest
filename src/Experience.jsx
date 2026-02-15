@@ -89,7 +89,7 @@ function PresetDebugPanel({ isDebugMode, onChange }) {
         label: "Transition Duration (s)",
       },
     },
-    { hidden: !isDebugMode }
+    { collapsed: true, hidden: !isDebugMode }
   );
   useEffect(() => {
     onChange(presetControl);
@@ -116,23 +116,23 @@ function SceneDebugPanel({ isDebugMode, onChange }) {
         grainEnabled: { value: false, label: "Enable Film Grain" },
         grainStrength: { value: 0.02, min: 0.0, max: 0.5, step: 0.01, label: "Grain Strength" },
         grainSize: { value: 0.5, min: 0.5, max: 5.0, step: 0.1, label: "Grain Size" },
-      }),
+      }, { collapsed: true }),
       "Post / Distance Blur": folder({
         blurEnabled: { value: false, label: "Enable Distance Blur" },
         blurFocusDistance: { value: 1.5, min: 0.1, max: 50.0, step: 0.1, label: "Focus Distance" },
         blurFocusRange: { value: 2.0, min: 0.5, max: 20.0, step: 0.1, label: "Focus Range" },
         blurStrength: { value: 5.0, min: 0.0, max: 20.0, step: 0.1, label: "Blur Strength" },
-      }),
+      }, { collapsed: true }),
       Atmosphere: folder({
         fogColor: { value: "#585858" },
         fogMode: { value: "exp2", options: ["linear", "exp2"] },
         fogNear: { value: 4, min: 0, max: 50, step: 1 },
         fogFar: { value: 10, min: 3, max: 30, step: 3 },
         fogDensity: { value: 0.4, min: 0.0, max: 0.8, step: 0.001 },
-      }),
+      }, { collapsed: true }),
       Lights: folder({
         dirLightIntensity: { value: 0.0, min: 0, max: 5, step: 0.01 },
-      }),
+      }, { collapsed: true }),
       "Unified Fog": folder({
         fEnabled: { value: true },
         fColor: { value: "#98a0a5" },
@@ -149,7 +149,7 @@ function SceneDebugPanel({ isDebugMode, onChange }) {
         fLightIntensity: { value: 0.0, min: 0.0, max: 2.0, step: 0.01 },
         fAnisotropy: { value: 0.0, min: -0.8, max: 0.8, step: 0.01 },
         fSkyRadius: { value: 100.0, min: 100, max: 4000, step: 10 },
-      }),
+      }, { collapsed: true }),
       Sky: folder(
         {
           sunPosition: { value: [5.0, -1.0, 30.0], step: 0.1 },
@@ -163,13 +163,13 @@ function SceneDebugPanel({ isDebugMode, onChange }) {
       ),
       "Sky / Haze": folder({
         hazeColor: { value: "#585858", label: "Haze Color" },
-      }),
+      }, { collapsed: true }),
       "Sky / Color": folder({
         saturation: { value: 1.0, min: 0.0, max: 2.5, step: 0.01 },
         tintStrength: { value: 0.0, min: 0.0, max: 1.0, step: 0.01 },
         tintColor: { value: "#ffffff", label: "Tint Color" },
         hueShift: { value: 0, min: -180, max: 180, step: 0.5, label: "Hue Shift" },
-      }),
+      }, { collapsed: true }),
       "Sky / Lightning": folder(
         {
           lightningEnabled: { value: false, label: "Enable Lightning" },

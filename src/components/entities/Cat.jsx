@@ -72,7 +72,7 @@ export default forwardRef(function Cat(_, ref) {
           label: "Tint Intensity",
         },
       }),
-    }),
+    }, { collapsed: true }),
   });
 
   // Shadow setup, clone materials once, and stash original colors

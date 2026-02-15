@@ -99,7 +99,7 @@ const Lake = forwardRef(function Lake(
         label: "Opacity",
       },
     }),
-  });
+  }, { collapsed: true });
 
   // === Material ===
   const uniformsRef = useRef(null);

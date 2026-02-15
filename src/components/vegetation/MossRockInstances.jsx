@@ -103,7 +103,7 @@ export default forwardRef(function MossRockInstances(props, ref) {
     return schema;
   }, []);
 
-  const ctl = useControls("MossRock Instances", controlSchema);
+  const ctl = useControls("MossRock Instances", controlSchema, { collapsed: true });
 
   const instRef = useRef();
   // So parent can access the instancedMesh if needed

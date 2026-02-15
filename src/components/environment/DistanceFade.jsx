@@ -23,7 +23,7 @@ function DistanceFadeDebugPanel({ propDefaults, onChange, onRepatch }) {
         RepatchNow: button(() => onRepatch?.()),
       }),
     },
-    { collapsed: false }
+    { collapsed: true }
   );
   useEffect(() => {
     onChange(controls);

@@ -42,7 +42,7 @@ function CustomSkyDebugPanel({ hazeDefaults, lightningDefaults, onChange }) {
       step: 0.01,
       label: "Haze Gradient Strength",
     },
-  });
+  }, { collapsed: true });
 
   const lightning = useControls("Sky / Lightning", {
     flashMinDelay: { value: lightningDefaults.flashMinDelay, min: 0.2, max: 20, step: 0.1 },
@@ -52,7 +52,7 @@ function CustomSkyDebugPanel({ hazeDefaults, lightningDefaults, onChange }) {
     mainFlashMs: { value: lightningDefaults.mainFlashMs, min: 40, max: 600, step: 10 },
     tailMs: { value: lightningDefaults.tailMs, min: 40, max: 2000, step: 10 },
     doubleFlashChance: { value: lightningDefaults.doubleFlashChance, min: 0, max: 1, step: 0.01 },
-  });
+  }, { collapsed: true });
 
   useEffect(() => {
     onChange({ ...haze, ...lightning });

@@ -56,7 +56,7 @@ function CatKTX2DebugPanel({ onChange }) {
           label: "Tint Intensity",
         },
       }),
-    }),
+    }, { collapsed: true }),
   });
   useEffect(() => {
     onChange(values);

@@ -12,8 +12,8 @@ const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
 const GLB_C = "/models/magicPlantsAndCrystal/CrystalCluster4.glb";
 
 const COUNT_A = 15;
-const COUNT_B = 34;
-const COUNT_C = 16;
+const COUNT_B = 32;
+const COUNT_C = 15;
 
 const d2r = (deg) => (deg * Math.PI) / 180;
 
@@ -186,8 +186,6 @@ const BAKED_B = [
   { px: -2.84, py: -4.59, pz: -2.98, ry: -53.8, s: 0.047 },
   { px: -2.56, py: -4.59, pz: -2.98, ry: -53.8, s: 0.047 },
   { px: -1.02, py: -4.42, pz: -3.14, ry: 11.7, s: 0.072 },
-  { px: -2.04, py: -4.47, pz: -3.47, ry: 180.0, s: 0.067 },
-  { px: -2.0, py: -4.48, pz: -3.49, ry: 86.6, s: 0.052 },
   { px: -2.45, py: -4.7, pz: -2.28, ry: 134.6, s: 0.052 },
   { px: -1.383, py: -4.841, pz: -1.92, ry: 137.9, s: 0.065 },
   { px: -2.449, py: -4.542, pz: -1.766, ry: 0.0, s: 0.102 },
@@ -227,7 +225,6 @@ const BAKED_C = [
   { px: -1.1, py: -4.59, pz: -2.37, ry: -33.7, s: 0.18 },
   { px: -2.39, py: -4.75, pz: -3.5, ry: -33.7, s: 0.19 },
   { px: -1.5, py: -4.73, pz: -3.68, ry: 0.0, s: 0.15 },
-  { px: -2.94, py: -4.22, pz: -3.26, ry: 0.0, s: 0.12 },
 ];
 
 // -----------------------------------------
@@ -327,7 +324,7 @@ function CrystalDebugPanel({ onChange, onReplay }) {
       step: 0.1,
       label: "Bottom Fresnel Falloff",
     },
-  });
+  }, { collapsed: true });
 
   const unifiedGlass = useControls("Crystals / Glass", {
     U_ior: { value: 1.5, min: 1.0, max: 2.333, step: 0.001 },
@@ -335,7 +332,7 @@ function CrystalDebugPanel({ onChange, onReplay }) {
     U_attenuationDistance: { value: 12.0, min: 0.1, max: 200, step: 0.1 },
     U_roughness: { value: 0.2, min: 0, max: 1, step: 0.001 },
     U_emissiveIntensity: { value: 0.3, min: 0, max: 2, step: 0.01 },
-  });
+  }, { collapsed: true });
 
   const unifiedShine = useControls("Crystals / Shine", {
     U_reflectBoost: {
@@ -361,7 +358,7 @@ function CrystalDebugPanel({ onChange, onReplay }) {
       step: 0.1,
       label: "EnvMap Intensity",
     },
-  });
+  }, { collapsed: true });
 
   const unifiedHover = useControls("Crystals / Hover Colors", {
     U_hoverEnabled: { value: true, label: "Enabled" },
@@ -392,7 +389,7 @@ function CrystalDebugPanel({ onChange, onReplay }) {
     Pair_B_Top: { value: "#f9ff87", label: "B Top" },
     Pair_C_Bottom: { value: "#ffc300", label: "C Bottom" },
     Pair_C_Top: { value: "#adadad", label: "C Top" },
-  });
+  }, { collapsed: true });
 
   const dissolve = useControls("Crystals Dissolve", {
     build: { value: false, label: "Build Crystals" },
@@ -443,7 +440,7 @@ function CrystalDebugPanel({ onChange, onReplay }) {
     Replay: button(() => {
       onReplay();
     }),
-  });
+  }, { collapsed: true });
 
   const instanceA = useControls(
     "Crystal A / Instances",
@@ -523,7 +520,8 @@ function CrystalDebugPanel({ onChange, onReplay }) {
         );
       }
       return schema;
-    }, [])
+    }, []),
+    { collapsed: true }
   );
 
   const instanceB = useControls(
@@ -574,7 +572,8 @@ function CrystalDebugPanel({ onChange, onReplay }) {
         );
       }
       return schema;
-    }, [])
+    }, []),
+    { collapsed: true }
   );
 
   const instanceC = useControls(
@@ -625,7 +624,8 @@ function CrystalDebugPanel({ onChange, onReplay }) {
         );
       }
       return schema;
-    }, [])
+    }, []),
+    { collapsed: true }
   );
 
   // Push all values to parent whenever any control changes

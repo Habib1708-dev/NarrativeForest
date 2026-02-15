@@ -117,7 +117,7 @@ function CabinDebugPanel({ onChange }) {
         bulb2Y: { value: CABIN_DEFAULTS.bulb2Y, min: -50, max: 50, step: 0.001, label: "Y" },
         bulb2Z: { value: CABIN_DEFAULTS.bulb2Z, min: -50, max: 50, step: 0.001, label: "Z" },
       }),
-    }),
+    }, { collapsed: true }),
   });
 
   useEffect(() => {

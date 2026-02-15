@@ -46,7 +46,7 @@ function LakeDebugPanel({ onChange }) {
         label: "Size Z",
       },
     }),
-  });
+  }, { collapsed: true });
 
   useEffect(() => {
     onChange(values);

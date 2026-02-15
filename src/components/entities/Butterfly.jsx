@@ -340,7 +340,7 @@ export default forwardRef(function Butterfly(
               glowSize: { value: glowSize, min: 1.0, max: 2.0, step: 0.01 },
               glowColor: { value: glowColor },
             },
-            { collapsed: false }
+            { collapsed: true }
           ),
         }
       : {}

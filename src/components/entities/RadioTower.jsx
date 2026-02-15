@@ -127,7 +127,7 @@ function RadioTowerDebugPanel({ onChange, onReplay }) {
           Replay: button(() => onReplay()),
         }),
       },
-      { collapsed: false }
+      { collapsed: true }
     ),
   });
 

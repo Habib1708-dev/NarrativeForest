@@ -124,7 +124,7 @@ function MushroomDebugPanel({ onChange, onReplay, onResetAll }) {
           label: "Intensity",
         },
       },
-      { collapsed: false }
+      { collapsed: true }
     ),
   });
 
@@ -169,7 +169,7 @@ function MushroomDebugPanel({ onChange, onReplay, onResetAll }) {
         },
         color: { value: MUSHROOM_DEFAULTS.fireflyCtl.color, label: "Color" },
       },
-      { collapsed: false }
+      { collapsed: true }
     ),
   });
 
@@ -209,7 +209,7 @@ function MushroomDebugPanel({ onChange, onReplay, onResetAll }) {
         },
         ResetAll: button(() => onResetAll()),
       },
-      { collapsed: false }
+      { collapsed: true }
     ),
   });
 

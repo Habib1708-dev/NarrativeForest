@@ -71,7 +71,7 @@ function ManDebugPanel({ defaultClip, names, onChange }) {
           label: "Manual Trigger Wave",
         },
       }),
-    }),
+    }, { collapsed: true }),
   });
   useEffect(() => {
     onChange(values);

@@ -130,7 +130,7 @@ function CameraDebugPanel({ waypoints }) {
         },
       }),
     },
-    { collapsed: false }
+    { collapsed: true }
   );
   return null;
 }
@@ -224,9 +224,8 @@ export default function CameraControllerR3F() {
     if (seg !== lastSegRef.current) {
       lastSegRef.current = seg;
     }
-    // Apply pose always (enabled only controls scrolling, not camera positioning)
-    // Lock/pause still prevents updates during those states
-    if (!(locked || paused)) {
+    // When disabled, stop overwriting camera so OrbitControls can take over
+    if (enabled && !(locked || paused)) {
       const { position, quaternion, fov } = getPose();
       camera.position.copy(position);
       camera.quaternion.copy(quaternion);
