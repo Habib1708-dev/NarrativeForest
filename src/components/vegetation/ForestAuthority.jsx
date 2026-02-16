@@ -32,9 +32,9 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   treeTargetPerChunk: 14,
   rockTargetPerChunk: 12,
   treeScaleMin: 0.03,
-  treeScaleMax: 0.06,
-  rockScaleMin: 0.36,
-  rockScaleMax: 0.48,
+  treeScaleMax: 0.072,
+  rockScaleMin: 0.216,
+  rockScaleMax: 0.288,
   renderMidTrees: false,
   renderExtraChunks: 3, // Keep original
   treeTint: "#000000",
