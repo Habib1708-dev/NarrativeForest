@@ -7,7 +7,10 @@ import DebugModeIndicator from "../components/ui/DebugModeIndicator";
 import ClickAndDragHint from "../components/ui/ClickAndDragHint";
 import PresetSelector from "../components/ui/PresetSelector";
 import StopCircleOverlay from "../components/ui/StopCircleOverlay";
-import CabinPropsPlacementPanel from "../components/ui/CabinPropsPlacementPanel";
+// Cabin props placement panel deactivated for now
+// import CabinPropsPlacementPanel from "../components/ui/CabinPropsPlacementPanel";
+// Crystal placement panel deactivated
+// import CrystalPlacementPanel from "../components/ui/CrystalPlacementPanel";
 
 import CanvasErrorBoundary from "../components/shared/CanvasErrorBoundary";
 import { useDebugStore } from "../state/useDebugStore";
@@ -177,7 +180,8 @@ export default function Home() {
         currentPreset={currentPreset}
         onPresetChange={handlePresetChange}
       />
-      <CabinPropsPlacementPanel />
+      {/* <CabinPropsPlacementPanel /> */}
+      {/* <CrystalPlacementPanel /> */}
 
       <CanvasErrorBoundary>
         <Canvas

@@ -228,7 +228,8 @@ import TerrainTiledOpt from "./components/terrain/TerrainTiledOpt";
 // Scene pieces - Vegetation
 import ForestAuthority from "./components/vegetation/ForestAuthority";
 import ForestDynamicSampled from "./components/vegetation/ForestDynamicSampled";
-import UnifiedCrystalClusters from "./components/vegetation/UnifiedCrystalClusters";
+// UnifiedCrystalClusters deactivated; using CrystalClustersB (50 crystal B + 12 tall rods, same material/dissolve/Leva)
+import CrystalClustersB from "./components/vegetation/CrystalClustersB";
 
 // Scene pieces - Environment
 import DistanceFade from "./components/environment/DistanceFade";
@@ -241,6 +242,8 @@ import CameraControllerR3F from "./components/camera/CameraControllerR3F";
 // Scene pieces - UI
 import IntroText from "./components/ui/IntroText";
 import CabinPropsPlacementDebug from "./components/debug/CabinPropsPlacementDebug";
+// Crystal placement debug deactivated
+// import CrystalPlacementDebug from "./components/debug/CrystalPlacementDebug";
 
 // Preset system
 import { PRESETS, PRESET_NAMES } from "./utils/presets";
@@ -906,11 +909,13 @@ export default function Experience() {
             }}
           />
         )}
-        <UnifiedCrystalClusters />
+        <CrystalClustersB />
         {/* <Butterfly /> */}
         <IntroButterfly position={[-0.131, -3.836, -5.104]} />
         <IntroText />
-        {isDebugMode && <CabinPropsPlacementDebug />}
+        {/* Cabin props placement debug deactivated for now */}
+        {/* {isDebugMode && <CabinPropsPlacementDebug />} */}
+        {/* {isDebugMode && <CrystalPlacementDebug />} */}
       </Suspense>
 
       <DistanceFade

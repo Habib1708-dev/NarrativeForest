@@ -8,7 +8,7 @@ const SCALE_MAX = 3;
 
 const round3 = (value) => Number(value.toFixed(3));
 
-// Placed cabin props only (23 rocks + 11 trees). Non-edited extras removed.
+// Placed cabin props (27 rocks + 11 trees). rock-18..27 are placeable extras.
 const CABIN_PROPS_DEFAULTS = [
   { id: "rock-01", type: "rock", position: [-0.9, -4.85, -2.2], rotationX: -1.479, rotationY: 1.218, rotationZ: 1.305, scale: 0.34, edited: false },
   { id: "rock-02", type: "rock", position: [-0.7, -4.92, -2.51], rotationX: -4.35, rotationY: -1.37, rotationZ: -3.219, scale: 0.268, edited: false },
@@ -27,12 +27,16 @@ const CABIN_PROPS_DEFAULTS = [
   { id: "rock-15", type: "rock", position: [-2.3, -4.75, -3.9], rotationX: 0, rotationY: 0.694, rotationZ: 0, scale: 0.29, edited: false },
   { id: "rock-16", type: "rock", position: [-2.7, -4.75, -3.6], rotationX: 0, rotationY: -0.262, rotationZ: -1.834, scale: 0.238, edited: false },
   { id: "rock-17", type: "rock", position: [-1.4, -4.8, -2.2], rotationX: 0, rotationY: -2.25, rotationZ: 0, scale: 0.186, edited: false },
+  { id: "rock-18", type: "rock", position: [-1.25, -3.85, -2.65], rotationX: 0, rotationY: 0, rotationZ: 0, scale: 0.22, edited: false },
+  { id: "rock-19", type: "rock", position: [-1.35, -3.85, -2.7], rotationX: 0, rotationY: 0.5, rotationZ: 0, scale: 0.24, edited: false },
   { id: "rock-20", type: "rock", position: [-1.4, -4.7, -1.45], rotationX: -1.131, rotationY: 1, rotationZ: 0, scale: 0.26, edited: false },
   { id: "rock-21", type: "rock", position: [-3.13, -4.9, -1.38], rotationX: 0, rotationY: 0.804, rotationZ: 0, scale: 0.53, edited: false },
   { id: "rock-22", type: "rock", position: [-2.27, -4.7, -1.32], rotationX: 0.348, rotationY: -0.523, rotationZ: 0.261, scale: 0.29, edited: false },
   { id: "rock-23", type: "rock", position: [-0.77, -4.75, -1.78], rotationX: 0, rotationY: 2.5, rotationZ: 0, scale: 0.23, edited: false },
   { id: "rock-24", type: "rock", position: [-0.33, -4.9, -2.42], rotationX: -0.087, rotationY: 1.956, rotationZ: 0, scale: 0.3, edited: false },
   { id: "rock-25", type: "rock", position: [-2.81, -4.85, -2.91], rotationX: 0, rotationY: 3.5, rotationZ: 0, scale: 0.21, edited: false },
+  { id: "rock-26", type: "rock", position: [-1.31, -3.85, -2.69], rotationX: 0, rotationY: 4, rotationZ: 0, scale: 0.27, edited: false },
+  { id: "rock-27", type: "rock", position: [-1.29, -3.85, -2.74], rotationX: 0, rotationY: 4.5, rotationZ: 0, scale: 0.22, edited: false },
   { id: "tree-01", type: "tree", position: [-3.1, -4.75, -2.7], rotationX: 0, rotationY: 0, rotationZ: 0, scale: 0.05, edited: false },
   { id: "tree-02", type: "tree", position: [-3.4, -4.95, -3.1], rotationX: 0, rotationY: 0.29, rotationZ: 0, scale: 0.036, edited: false },
   { id: "tree-03", type: "tree", position: [-2.8, -4.75, -4], rotationX: 0, rotationY: 0.58, rotationZ: 0, scale: 0.047, edited: false },
@@ -49,6 +53,10 @@ const CABIN_PROPS_DEFAULTS = [
 function createDefaultObjects() {
   return CABIN_PROPS_DEFAULTS.map((entry) => ({ ...entry }));
 }
+
+// Exported for use in Cabin component (baked placement)
+export const CABIN_PROPS_PLACED_ROCKS = CABIN_PROPS_DEFAULTS.filter((e) => e.type === "rock");
+export const CABIN_PROPS_PLACED_TREES = CABIN_PROPS_DEFAULTS.filter((e) => e.type === "tree");
 
 export const useCabinPropsPlacementStore = create((set, get) => ({
   initialized: false,

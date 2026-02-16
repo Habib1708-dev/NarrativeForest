@@ -6,12 +6,15 @@ import React, {
   useState,
   forwardRef,
   useImperativeHandle,
+  createRef,
 } from "react";
 import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useDebugStore } from "../../state/useDebugStore";
+import { CABIN_PROPS_PLACED_ROCKS, CABIN_PROPS_PLACED_TREES } from "../../state/useCabinPropsPlacementStore";
+import { useInstancedTree } from "../../hooks/useInstancedTree";
 
 // ── Static defaults (used when debug panel is off) ──────────────────────────
 const CABIN_DEFAULTS = Object.freeze({
@@ -223,69 +226,63 @@ export default forwardRef(function Cabin(_, ref) {
     [bulb2X, bulb2Y, bulb2Z]
   );
 
-  // -------------------- Rock instanced meshes (baked transforms) --------------------
+  // -------------------- Rock instanced meshes (original 5 + 27 saved placement) --------------------
   const ROCK_GLB = "/models/rocks/MateriallessRock.glb";
   const { scene: rockScene } = useGLTF(ROCK_GLB);
 
+  const d2r = (deg) => (deg * Math.PI) / 180;
+
   const rockGeoMat = useMemo(() => {
     let geo = null;
-
     if (rockScene) {
       rockScene.traverse((o) => {
-        if (!geo && o.isMesh && o.geometry) {
-          geo = o.geometry;
-        }
+        if (!geo && o.isMesh && o.geometry) geo = o.geometry;
       });
     }
-
-    // Fallback geometry if GLB failed to load/has no meshes
-    if (!geo) {
-      geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-    }
-
-    // Material-less → provide a solid MeshStandardMaterial with #444444
+    if (!geo) geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     const mat = new THREE.MeshStandardMaterial({
       color: "#444444",
       metalness: 0.0,
       roughness: 0.95,
     });
-
     return { geometry: geo, material: mat };
   }, [rockScene]);
 
-  const instRef = useRef(null);
-  const COUNT = 5;
-  const d2r = (deg) => (deg * Math.PI) / 180;
+  // Exclude floating rocks (placement preview height Y ≈ -3.85) from render
+  const FLOATING_ROCK_IDS = new Set(["rock-18", "rock-19", "rock-26", "rock-27"]);
 
-  const rockTransforms = useMemo(
-    () => [
-      {
-        position: [-1.944, -4.832, -1.841],
-        scale: 0.168,
-        rotDeg: [0, -100.9, -67.3],
-      },
-      {
-        position: [-1.505, -4.862, -1.664],
-        scale: 0.2,
-        rotDeg: [3.4, 53.8, -6.7],
-      },
-      {
-        position: [-1.411, -5.023, -1.72],
-        scale: 0.278,
-        rotDeg: [40.3, -10.1, 0],
-      },
-      {
-        position: [-1.262, -4.841, -1.623],
-        scale: 0.294,
-        rotDeg: [0, 0, -97.6],
-      },
+  const rockTransforms = useMemo(() => {
+    const original5 = [
+      { position: [-1.944, -4.832, -1.841], scale: 0.168, rotDeg: [0, -100.9, -67.3] },
+      { position: [-1.505, -4.862, -1.664], scale: 0.2, rotDeg: [3.4, 53.8, -6.7] },
+      { position: [-1.411, -5.023, -1.72], scale: 0.278, rotDeg: [40.3, -10.1, 0] },
+      { position: [-1.262, -4.841, -1.623], scale: 0.294, rotDeg: [0, 0, -97.6] },
       { position: [-1.0, -4.855, -1.804], scale: 0.241, rotDeg: [0, 0, 0] },
-    ],
-    []
-  );
+    ];
+    const out = original5.map((t) => ({
+      position: t.position,
+      scale: t.scale,
+      rotationX: d2r(t.rotDeg[0]),
+      rotationY: d2r(t.rotDeg[1]),
+      rotationZ: d2r(t.rotDeg[2]),
+    }));
+    CABIN_PROPS_PLACED_ROCKS.filter((e) => !FLOATING_ROCK_IDS.has(e.id)).forEach((e) => {
+      out.push({
+        position: e.position,
+        scale: e.scale,
+        rotationX: e.rotationX ?? 0,
+        rotationY: e.rotationY ?? 0,
+        rotationZ: e.rotationZ ?? 0,
+      });
+    });
+    return out;
+  }, []);
+
+  const ROCK_COUNT = rockTransforms.length;
+  const rockInstRef = useRef(null);
 
   useEffect(() => {
-    const inst = instRef.current;
+    const inst = rockInstRef.current;
     const { geometry, material } = rockGeoMat || {};
     if (!inst || !geometry || !material) return;
 
@@ -293,26 +290,68 @@ export default forwardRef(function Cabin(_, ref) {
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
+    const euler = new THREE.Euler();
 
-    for (let i = 0; i < COUNT; i++) {
+    for (let i = 0; i < ROCK_COUNT; i++) {
       const t = rockTransforms[i];
-      const [rx, ry, rz] = t.rotDeg;
       p.fromArray(t.position);
-      q.setFromEuler(new THREE.Euler(d2r(rx), d2r(ry), d2r(rz)));
+      euler.set(t.rotationX, t.rotationY, t.rotationZ);
+      q.setFromEuler(euler);
       s.setScalar(t.scale);
       m4.compose(p, q, s);
       inst.setMatrixAt(i, m4);
     }
-    inst.count = COUNT;
+    inst.count = ROCK_COUNT;
     inst.instanceMatrix.needsUpdate = true;
-  }, [rockGeoMat, rockTransforms]);
+  }, [rockGeoMat, rockTransforms, ROCK_COUNT]);
 
   useEffect(() => {
-    if (!instRef.current) return;
-    instRef.current.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-    instRef.current.frustumCulled = false;
-    instRef.current.matrixAutoUpdate = false;
+    if (!rockInstRef.current) return;
+    rockInstRef.current.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    rockInstRef.current.frustumCulled = false;
+    rockInstRef.current.matrixAutoUpdate = false;
   }, []);
+
+  // -------------------- Tree instanced meshes (11 saved placement) --------------------
+  const TREE_GLB = "/models/tree/Spruce_Fir/Spruce1_draco.glb";
+  const treeParts = useInstancedTree(TREE_GLB);
+  const treeRefs = useMemo(() => treeParts.map(() => createRef()), [treeParts.length]);
+
+  useEffect(() => {
+    const m4 = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const euler = new THREE.Euler();
+
+    treeParts.forEach((_, partIndex) => {
+      const mesh = treeRefs[partIndex]?.current;
+      if (!mesh) return;
+
+      for (let i = 0; i < CABIN_PROPS_PLACED_TREES.length; i++) {
+        const e = CABIN_PROPS_PLACED_TREES[i];
+        p.fromArray(e.position);
+        euler.set(e.rotationX ?? 0, e.rotationY ?? 0, e.rotationZ ?? 0);
+        q.setFromEuler(euler);
+        s.setScalar(e.scale);
+        m4.compose(p, q, s);
+        mesh.setMatrixAt(i, m4);
+      }
+      mesh.count = CABIN_PROPS_PLACED_TREES.length;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+  }, [treeParts, treeRefs]);
+
+  useEffect(() => {
+    treeRefs.forEach((ref) => {
+      const mesh = ref?.current;
+      if (mesh) {
+        mesh.frustumCulled = false;
+        mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        mesh.matrixAutoUpdate = false;
+      }
+    });
+  }, [treeRefs]);
   // ----------------------------------------------------------------------------------
 
   // Helper to render a tiny emissive bulb + point light
@@ -353,13 +392,22 @@ export default forwardRef(function Cabin(_, ref) {
         <primitive object={clonedScene} />
       </group>
 
-      {/* Rock instances (absolute/world space) */}
+      {/* Rock instances (original 5 + 23 saved placement; 4 floating rocks excluded) */}
       {rockGeoMat?.geometry && rockGeoMat?.material && (
         <instancedMesh
-          ref={instRef}
-          args={[rockGeoMat.geometry, rockGeoMat.material, COUNT]}
+          ref={rockInstRef}
+          args={[rockGeoMat.geometry, rockGeoMat.material, ROCK_COUNT]}
         />
       )}
+
+      {/* Tree instances (11 saved placement, world space) */}
+      {treeParts.map((part, index) => (
+        <instancedMesh
+          key={`cabin-tree-${part.name ?? index}`}
+          ref={treeRefs[index]}
+          args={[part.geometry, part.material, CABIN_PROPS_PLACED_TREES.length]}
+        />
+      ))}
 
       {/* Bulb 1 */}
       {bulbEnabled && (
@@ -387,3 +435,4 @@ export default forwardRef(function Cabin(_, ref) {
 // Preload assets used here
 useGLTF.preload("/models/cabin/Cabin2.glb");
 useGLTF.preload("/models/rocks/MateriallessRock.glb");
+useGLTF.preload("/models/tree/Spruce_Fir/Spruce1_draco.glb");
