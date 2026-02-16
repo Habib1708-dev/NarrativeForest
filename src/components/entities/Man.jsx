@@ -8,9 +8,9 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { useGLTF, useAnimations } from "@react-three/drei";
+import { useThree, useFrame } from "@react-three/fiber";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { useCameraStore } from "../../state/useCameraStore";
 import { useDebugStore } from "../../state/useDebugStore";
 
 // Static defaults — used when not in debug mode to avoid Leva overhead
@@ -224,39 +224,28 @@ export default forwardRef(function Man(_, ref) {
 
   // Switch animation on control change
   const currentActionRef = useRef(null);
-  const [lastWaypointIndex, setLastWaypointIndex] = useState(-1);
   const waveActionRef = useRef(null);
+  const { camera } = useThree();
 
-  // Subscribe to camera store to detect stop-5
-  const currentWaypointIndex = useCameraStore((state) => {
-    const waypoints = state.waypoints || [];
-    const t = state.t ?? 0;
-    const nSeg = waypoints.length - 1;
-    if (nSeg <= 0) return -1;
-    // Find nearest waypoint
-    const nearestIdx = Math.round(t * nSeg);
-    const WAYPOINT_EPS = 1e-4;
-    const atWaypoint = Math.abs(t - nearestIdx / nSeg) <= WAYPOINT_EPS;
-    return atWaypoint ? nearestIdx : -1;
-  });
+  // Wave once when camera is at exact position (3 decimal precision). One-shot per session.
+  const waveTriggeredRef = useRef(false);
+  // Target position -1.974, -4.492, -3.485 (3 decimals) as integer thousandths for fast comparison
+  const TARGET_X = -1974;
+  const TARGET_Y = -4492;
+  const TARGET_Z = -3485;
 
-  // Detect arrival at stop-5 and trigger wave animation
-  useEffect(() => {
-    if (!waveOnStop5 || !actions) return;
-
-    const stop5Index = 5; // stop-5 is at index 5 in the waypoints array
-
-    // Check if we just arrived at stop-5
+  useFrame(() => {
+    if (!waveOnStop5 || !actions || waveTriggeredRef.current) return;
+    const p = camera.position;
     if (
-      currentWaypointIndex === stop5Index &&
-      lastWaypointIndex !== stop5Index
-    ) {
-      if (process.env.NODE_ENV !== "production") console.log("Camera reached stop-5, triggering wave animation");
-      triggerWaveAnimation();
-    }
-
-    setLastWaypointIndex(currentWaypointIndex);
-  }, [currentWaypointIndex, waveOnStop5, actions, lastWaypointIndex]);
+      Math.round(p.x * 1000) !== TARGET_X ||
+      Math.round(p.y * 1000) !== TARGET_Y ||
+      Math.round(p.z * 1000) !== TARGET_Z
+    )
+      return;
+    waveTriggeredRef.current = true;
+    triggerWaveAnimation();
+  });
 
   // Manual trigger for testing
   useEffect(() => {
