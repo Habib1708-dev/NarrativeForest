@@ -246,6 +246,7 @@ import { PRESETS, PRESET_NAMES } from "./utils/presets";
 import { usePresetTransition } from "./hooks/usePresetTransition";
 import { heightAt as sampleHeight } from "./proc/heightfield";
 import { useCameraStore } from "./state/useCameraStore";
+import { useWorldAnchorStore } from "./state/useWorldAnchorStore";
 
 // Terrain system selector: "authority" | "tiled" | "opt"
 //   "authority" — TerrainAuthority (anchored, freeflight)
@@ -693,6 +694,20 @@ export default function Experience() {
   const TERRAIN_LOAD_RADIUS = 2;
 
   const [lakeExclusion, setLakeExclusion] = useState(null);
+  const anchorMode = useWorldAnchorStore((s) => s.mode);
+  const anchorOrigin = useWorldAnchorStore((s) => s.origin);
+
+  // Forest placement uses sample-space (anchor-relative) in FREEFLIGHT; pass exclusion in same space
+  const exclusionForForest = useMemo(() => {
+    if (!lakeExclusion) return null;
+    if (anchorMode === "AUTHORED") return lakeExclusion;
+    return {
+      centerX: lakeExclusion.centerX - anchorOrigin.x,
+      centerZ: lakeExclusion.centerZ - anchorOrigin.z,
+      width: lakeExclusion.width,
+      depth: lakeExclusion.depth,
+    };
+  }, [lakeExclusion, anchorMode, anchorOrigin.x, anchorOrigin.z]);
 
   useEffect(() => {
     let rafId = 0;
@@ -705,8 +720,20 @@ export default function Experience() {
         rafId = requestAnimationFrame(updateFootprint);
         return;
       }
-      const footprint = lake.getFootprint(0.35);
-      setLakeExclusion(footprint);
+      const raw = lake.getFootprint(0.46);
+      if (!raw) {
+        setLakeExclusion(null);
+        return;
+      }
+      // Square with side = largest current side, then 3x area (side *= sqrt(3)) for visibility test
+      const side = Math.max(raw.width, raw.depth);
+      const sideBigger = side * Math.sqrt(3);
+      setLakeExclusion({
+        centerX: raw.centerX,
+        centerZ: raw.centerZ,
+        width: sideBigger,
+        depth: sideBigger,
+      });
     };
 
     updateFootprint();
@@ -858,7 +885,7 @@ export default function Experience() {
             terrainGroup={terrainGroupHandle}
             tileSize={TERRAIN_TILE_SIZE}
             terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-            exclusion={lakeExclusion}
+            exclusion={exclusionForForest}
             onInitialReady={() => {
               performanceMonitor.markTimeToInteractive();
               performanceMonitor.markTotalLoadTime();
@@ -870,7 +897,7 @@ export default function Experience() {
             terrainGroup={terrainGroupHandle}
             tileSize={TERRAIN_TILE_SIZE}
             terrainLoadRadius={TERRAIN_LOAD_RADIUS}
-            exclusion={lakeExclusion}
+            exclusion={exclusionForForest}
             onInitialReady={() => {
               performanceMonitor.markTimeToInteractive();
               performanceMonitor.markTotalLoadTime();

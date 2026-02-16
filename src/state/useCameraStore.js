@@ -831,7 +831,7 @@ export const useCameraStore = create((set, get) => {
     terrainCollider: null,
 
     // flags
-    enabled: wasExploreButtonClicked, // Disabled until Explore button is clicked (or already clicked on page refresh)
+    enabled: false, // Narrative camera off by default for debugging (Explore button enables it)
     paused: false,
     locked: false,
 
