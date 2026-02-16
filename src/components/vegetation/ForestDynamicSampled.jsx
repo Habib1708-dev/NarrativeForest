@@ -33,6 +33,7 @@ const DEFAULT_FOREST_PARAMS = Object.freeze({
   treeTintIntensity: 1,
   rockTint: "#444444",
   rockTintIntensity: 1,
+  usePoissonPlacement: true, // true = Bridson's PDS, false = original rejection sampling
 });
 
 // Reuse transform helpers + matrix instances to reduce per-chunk GC pressure
@@ -113,6 +114,7 @@ export default function ForestDynamicSampled({
     treeTintIntensity,
     rockTint,
     rockTintIntensity,
+    usePoissonPlacement,
   } = settings;
 
   // Terrain half-extent clamp so forest never outruns loaded tiles
@@ -333,6 +335,7 @@ export default function ForestDynamicSampled({
     rockScaleMin,
     rockScaleMax,
     sampleHeight,
+    usePoissonPlacement,
   ]);
   // ------------------------------------------------------------------------
 
@@ -467,7 +470,8 @@ export default function ForestDynamicSampled({
           coldCacheRef.current.delete(key);
         }
 
-        const result = buildChunkSampled(cx, cz, {
+        const buildFn = usePoissonPlacement ? buildChunkPoisson : buildChunkSampled;
+        const result = buildFn(cx, cz, {
           chunkSize,
           treeMinSpacing,
           rockMinSpacing,
@@ -856,4 +860,202 @@ function releaseCacheMap(map) {
   if (!map) return;
   for (const rec of map.values()) releaseChunkRecord(rec);
   map.clear();
+}
+
+/**
+ * Bridson's Poisson Disk Sampling — deterministic variant.
+ * Returns array of {x, z} points with minimum distance `r` apart,
+ * within the rectangle [minX, minZ] → [maxX, maxZ].
+ */
+function poissonDiskSample(minX, minZ, maxX, maxZ, r, maxPoints, rng, reject, k = 30) {
+  const width = maxX - minX;
+  const height = maxZ - minZ;
+  if (width <= 0 || height <= 0 || r <= 0 || maxPoints <= 0) return [];
+
+  const cellSize = r / Math.SQRT2;
+  const gridW = Math.max(1, Math.ceil(width / cellSize));
+  const gridH = Math.max(1, Math.ceil(height / cellSize));
+  const grid = new Int32Array(gridW * gridH).fill(-1);
+
+  const points = [];
+  const active = [];
+
+  const toGridX = (x) => Math.floor((x - minX) / cellSize);
+  const toGridZ = (z) => Math.floor((z - minZ) / cellSize);
+
+  const tooClose = (x, z) => {
+    const gx = toGridX(x);
+    const gz = toGridZ(z);
+    const rSq = r * r;
+    for (let dz = -2; dz <= 2; dz++) {
+      const nz = gz + dz;
+      if (nz < 0 || nz >= gridH) continue;
+      const row = nz * gridW;
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = gx + dx;
+        if (nx < 0 || nx >= gridW) continue;
+        const idx = grid[row + nx];
+        if (idx === -1) continue;
+        const p = points[idx];
+        const ddx = x - p.x;
+        const ddz = z - p.z;
+        if (ddx * ddx + ddz * ddz < rSq) return true;
+      }
+    }
+    return false;
+  };
+
+  // Find a valid seed point
+  let seedX, seedZ, seedValid = false;
+  for (let i = 0; i < 20; i++) {
+    seedX = minX + rng() * width;
+    seedZ = minZ + rng() * height;
+    if (!reject(seedX, seedZ)) { seedValid = true; break; }
+  }
+  if (!seedValid) return points;
+
+  points.push({ x: seedX, z: seedZ });
+  grid[toGridZ(seedZ) * gridW + toGridX(seedX)] = 0;
+  active.push(0);
+
+  while (active.length > 0 && points.length < maxPoints) {
+    const aIdx = Math.floor(rng() * active.length);
+    const pt = points[active[aIdx]];
+    let found = false;
+
+    for (let i = 0; i < k; i++) {
+      const angle = rng() * Math.PI * 2;
+      const dist = r + rng() * r;
+      const cx = pt.x + Math.cos(angle) * dist;
+      const cz = pt.z + Math.sin(angle) * dist;
+
+      if (cx < minX || cx >= maxX || cz < minZ || cz >= maxZ) continue;
+      if (reject(cx, cz)) continue;
+      if (tooClose(cx, cz)) continue;
+
+      const newIdx = points.length;
+      points.push({ x: cx, z: cz });
+      grid[toGridZ(cz) * gridW + toGridX(cx)] = newIdx;
+      active.push(newIdx);
+      found = true;
+      if (points.length >= maxPoints) break;
+    }
+
+    if (!found) {
+      active[aIdx] = active[active.length - 1];
+      active.pop();
+    }
+  }
+
+  return points;
+}
+
+/** --------- Chunk builder using Bridson's Poisson Disk Sampling --------- */
+function buildChunkPoisson(cx, cz, opts) {
+  const {
+    chunkSize,
+    treeMinSpacing,
+    rockMinSpacing,
+    treeTargetPerChunk,
+    rockTargetPerChunk,
+    treeScaleMin,
+    treeScaleMax,
+    rockScaleMin,
+    rockScaleMax,
+    seed,
+    treeBaseMinY,
+    rockBottomPerPart,
+    insideExclusion,
+    sampleHeight,
+  } = opts;
+
+  const rng = mulberry32(
+    ((cx * 73856093) ^ (cz * 19349663) ^ (seed ^ 0x9e3779b9)) >>> 0
+  );
+
+  const minX = cx * chunkSize;
+  const minZ = cz * chunkSize;
+  const maxX = minX + chunkSize;
+  const maxZ = minZ + chunkSize;
+
+  const trees = [];
+  const rockByPart = rockBottomPerPart.map(() => []);
+
+  // --- Trees via Poisson Disk ---
+  {
+    const tMin = Math.max(0.001, Math.min(treeScaleMin, treeScaleMax));
+    const tMax = Math.max(tMin + 1e-4, Math.max(treeScaleMin, treeScaleMax));
+
+    const treePoints = poissonDiskSample(
+      minX, minZ, maxX, maxZ,
+      treeMinSpacing,
+      treeTargetPerChunk,
+      rng,
+      insideExclusion
+    );
+
+    for (let i = 0; i < treePoints.length; i++) {
+      const { x, z } = treePoints[i];
+      const scale = tMin + rng() * (tMax - tMin);
+
+      const terrainY = sampleHeight(x, z);
+      if (!Number.isFinite(terrainY)) continue;
+
+      const bottomAlign = -treeBaseMinY * scale;
+      const sink = 0.02;
+      const y = terrainY - bottomAlign - sink;
+      const rotY = rng() * Math.PI * 2;
+
+      const m4 = acquireMatrix();
+      TMP_POS.set(x, y, z);
+      TMP_QUAT.setFromAxisAngle(Y_AXIS, rotY);
+      TMP_SCALE.setScalar(scale);
+      m4.compose(TMP_POS, TMP_QUAT, TMP_SCALE);
+      trees.push(m4);
+    }
+  }
+
+  // --- Rocks via Poisson Disk ---
+  {
+    const rMin = Math.max(0.02, Math.min(rockScaleMin, rockScaleMax));
+    const rMax = Math.max(rMin + 1e-4, Math.max(rockScaleMin, rockScaleMax));
+
+    const rockPoints = poissonDiskSample(
+      minX, minZ, maxX, maxZ,
+      rockMinSpacing,
+      rockTargetPerChunk,
+      rng,
+      insideExclusion
+    );
+
+    for (let i = 0; i < rockPoints.length; i++) {
+      const { x, z } = rockPoints[i];
+      const scale = rMin + rng() * (rMax - rMin);
+
+      const terrainY = sampleHeight(x, z);
+      if (!Number.isFinite(terrainY)) continue;
+
+      const pick = Math.floor(rng() * Math.max(1, rockBottomPerPart.length));
+
+      let y = terrainY;
+      const bottomAlign = (rockBottomPerPart[pick] || 0) * scale;
+      const sink = 0.4 * scale;
+      y += bottomAlign - sink;
+
+      const rx = (rng() - 0.5) * 0.2;
+      const ry = rng() * Math.PI * 2;
+
+      const m4 = acquireMatrix();
+      TMP_POS.set(x, y, z);
+      TMP_EULER.set(rx, ry, 0);
+      TMP_QUAT.setFromEuler(TMP_EULER);
+      TMP_SCALE.setScalar(scale);
+      m4.compose(TMP_POS, TMP_QUAT, TMP_SCALE);
+      rockByPart[pick].push(m4);
+    }
+  }
+
+  const cost = Math.max(1, trees.length + rockByPart.reduce((s, a) => s + a.length, 0));
+
+  return { treeMatrices: trees, rockMatricesByPart: rockByPart, cost };
 }
