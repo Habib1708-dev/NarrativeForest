@@ -11,6 +11,7 @@ import { useGLTF, useAnimations } from "@react-three/drei";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useControls, folder } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { useCameraStore } from "../../state/useCameraStore";
 import { useDebugStore } from "../../state/useDebugStore";
 
 // Static defaults — used when not in debug mode to avoid Leva overhead
@@ -227,23 +228,40 @@ export default forwardRef(function Man(_, ref) {
   const waveActionRef = useRef(null);
   const { camera } = useThree();
 
-  // Wave once when camera is at exact position (3 decimal precision). One-shot per session.
-  const waveTriggeredRef = useRef(false);
-  // Target position -1.974, -4.492, -3.485 (3 decimals) as integer thousandths for fast comparison
+  // Wave every time camera enters trigger position (3 decimal precision). Resets when camera leaves.
+  const wasAtTriggerRef = useRef(false);
+  // Target position -1.974, -4.492, -3.486 (3 decimals) as integer thousandths for fast comparison
   const TARGET_X = -1974;
   const TARGET_Y = -4492;
-  const TARGET_Z = -3485;
+  const TARGET_Z = -3486;
+  // Only run position check when path t is near stop-5 (avoids camera read + 3 round() on most frames)
+  const stop5T = useCameraStore((s) => {
+    const wps = s.waypoints || [];
+    const n = wps.length - 1;
+    if (n <= 0) return -1;
+    const i = wps.findIndex((w) => w?.name === "stop-5");
+    return i >= 0 ? i / n : -1;
+  });
+  const T_NEAR = 0.02; // within 2% of path length of stop-5
 
   useFrame(() => {
-    if (!waveOnStop5 || !actions || waveTriggeredRef.current) return;
-    const p = camera.position;
-    if (
-      Math.round(p.x * 1000) !== TARGET_X ||
-      Math.round(p.y * 1000) !== TARGET_Y ||
-      Math.round(p.z * 1000) !== TARGET_Z
-    )
+    if (!waveOnStop5 || !actions) return;
+    const t = useCameraStore.getState().t ?? 0;
+    if (Math.abs(t - stop5T) > T_NEAR) {
+      wasAtTriggerRef.current = false;
       return;
-    waveTriggeredRef.current = true;
+    }
+    const p = camera.position;
+    const atPosition =
+      Math.round(p.x * 1000) === TARGET_X &&
+      Math.round(p.y * 1000) === TARGET_Y &&
+      Math.round(p.z * 1000) === TARGET_Z;
+    if (!atPosition) {
+      wasAtTriggerRef.current = false;
+      return;
+    }
+    if (wasAtTriggerRef.current) return;
+    wasAtTriggerRef.current = true;
     triggerWaveAnimation();
   });
 

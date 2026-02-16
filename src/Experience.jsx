@@ -326,6 +326,18 @@ export default function Experience() {
     };
   }, [gl, isDebugMode, enabled]);
 
+  // Debug: log exact camera position when Space is pressed
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.code === "Space" || e.key === " ") {
+        const p = camera.position;
+        console.log("[Camera] position:", p.x, p.y, p.z, "→", { x: p.x, y: p.y, z: p.z });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [camera]);
+
   useEffect(() => {
     let cancelled = false;
     let rafId = 0;
