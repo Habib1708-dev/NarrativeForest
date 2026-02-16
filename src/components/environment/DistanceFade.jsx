@@ -198,8 +198,13 @@ void DFade_doDiscard(float df_vViewDist){
     m.morphTargets = !!srcMat?.morphTargets;
     m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
-      // Only patch if this shader uses the standard project_vertex chunk
       if (!shader.vertexShader.includes("#include <project_vertex>")) return;
+
+      // Match the actual depth output line (RGBADepthPacking in Three.js r178)
+      const depthOutputRe = /gl_FragColor\s*=\s*packDepthToRGBA\(\s*fragCoordZ\s*\)\s*;/;
+      const match = shader.fragmentShader.match(depthOutputRe);
+      if (!match) return; // Can't find output — skip to avoid orphaned code
+
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
         "varying float df_vViewDist;\n" +
@@ -215,8 +220,8 @@ df_vViewDist = length(mvPosition.xyz);
         GLSL_SHARED +
         "\n" +
         shader.fragmentShader.replace(
-          "gl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );",
-          `DFade_doDiscard(df_vViewDist);\ngl_FragColor = vec4( vec3( 1.0 ), fragCoordZ );`
+          match[0],
+          `DFade_doDiscard(df_vViewDist);\n${match[0]}`
         );
     };
     depthMatCache.current.set(srcMat, m);
@@ -232,6 +237,12 @@ df_vViewDist = length(mvPosition.xyz);
     m.side = srcMat?.side ?? THREE.FrontSide;
     m.onBeforeCompile = (shader) => {
       if (!shader.vertexShader.includes("#include <project_vertex>")) return;
+
+      // Match the actual distance output line (Three.js r178 uses "dist" not "fragCoordZ")
+      const distOutputRe = /gl_FragColor\s*=\s*packDepthToRGBA\(\s*dist\s*\)\s*;/;
+      const match = shader.fragmentShader.match(distOutputRe);
+      if (!match) return; // Can't find output — skip to avoid orphaned code
+
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader =
         "varying float df_vViewDist;\n" +
@@ -247,8 +258,8 @@ df_vViewDist = length(mvPosition.xyz);
         GLSL_SHARED +
         "\n" +
         shader.fragmentShader.replace(
-          "gl_FragColor = packDepthToRGBA( fragCoordZ );",
-          `DFade_doDiscard(df_vViewDist);\ngl_FragColor = packDepthToRGBA( fragCoordZ );`
+          match[0],
+          `DFade_doDiscard(df_vViewDist);\n${match[0]}`
         );
     };
     distMatCache.current.set(srcMat, m);
@@ -291,23 +302,27 @@ df_vViewDist = length(mvPosition.xyz);
           return;
         }
         prev?.call(this, shader);
-        Object.assign(shader.uniforms, uniforms);
 
-        shader.vertexShader =
-          "varying float df_vViewDist;\n" +
-          shader.vertexShader.replace(
-            "#include <project_vertex>",
-            `
+        // Validate both replacements will succeed before modifying shader
+        const newVert = shader.vertexShader.replace(
+          "#include <project_vertex>",
+          `
 #include <project_vertex>
 df_vViewDist = length(mvPosition.xyz);
 `
-          );
+        );
+        if (newVert === shader.vertexShader) return; // replace failed
 
+        const newFrag = insertDiscardBlock(shader.fragmentShader);
+        if (newFrag === shader.fragmentShader) return; // no valid anchor
+
+        Object.assign(shader.uniforms, uniforms);
+        shader.vertexShader = "varying float df_vViewDist;\n" + newVert;
         shader.fragmentShader =
           "varying float df_vViewDist;\n" +
           GLSL_SHARED +
           "\n" +
-          insertDiscardBlock(shader.fragmentShader);
+          newFrag;
       };
 
       patched.current.add(mat);
