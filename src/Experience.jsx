@@ -240,6 +240,7 @@ import CameraControllerR3F from "./components/camera/CameraControllerR3F";
 
 // Scene pieces - UI
 import IntroText from "./components/ui/IntroText";
+import CabinPropsPlacementDebug from "./components/debug/CabinPropsPlacementDebug";
 
 // Preset system
 import { PRESETS, PRESET_NAMES } from "./utils/presets";
@@ -909,6 +910,7 @@ export default function Experience() {
         {/* <Butterfly /> */}
         <IntroButterfly position={[-0.131, -3.836, -5.104]} />
         <IntroText />
+        {isDebugMode && <CabinPropsPlacementDebug />}
       </Suspense>
 
       <DistanceFade

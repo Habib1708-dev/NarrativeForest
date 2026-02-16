@@ -17,12 +17,12 @@ import { useDebugStore } from "../../state/useDebugStore";
 
 /* ─── static defaults (used when debug panel is off) ─── */
 const RADIOTOWER_DEFAULTS = Object.freeze({
-  positionX: 0.0,
-  positionY: -4.7,
-  positionZ: -1.9,
+  positionX: -0.4,
+  positionY: -4.9,
+  positionZ: -1.8,
   rotationYDeg: 0,
-  scale: 0.03,
-  heightScale: 1.8,
+  scale: 0.04,
+  heightScale: 2,
   tintColor: "#ffffff",
   tintIntensity: 0.0,
   build: false,
@@ -31,7 +31,7 @@ const RADIOTOWER_DEFAULTS = Object.freeze({
   noiseAmp: 0.8,
   edgeWidth: 0.15,
   glowStrength: 10.0,
-  glowColor: "#ffffff",
+  glowColor: "#ffc06b",
   seed: 184,
 });
 
