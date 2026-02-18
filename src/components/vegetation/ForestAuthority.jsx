@@ -18,6 +18,10 @@ import {
   worldToAnchoredChunk,
 } from "../../proc/anchoredHeightfield";
 import { useWorldAnchorStore } from "../../state/useWorldAnchorStore";
+import {
+  getCabinBakedRockMatrices,
+  getCabinBakedTreeMatrices,
+} from "./cabinBakedVegetation";
 
 const DEFAULT_FOREST_PARAMS = Object.freeze({
   seed: 6,
@@ -53,6 +57,8 @@ const TMP_SCALE = new THREE.Vector3();
 const TMP_QUAT = new THREE.Quaternion();
 const TMP_EULER = new THREE.Euler();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const CABIN_BAKED_TREES = getCabinBakedTreeMatrices();
+const CABIN_BAKED_ROCKS = getCabinBakedRockMatrices();
 
 function acquireMatrix() {
   return MATRIX_POOL.length ? MATRIX_POOL.pop() : new THREE.Matrix4();
@@ -656,33 +662,51 @@ export default function ForestAuthority({
 
   // Aggregate matrices from active chunks → upload to instanced meshes
   function applyInstancing() {
+    if (!highParts.length || !lodParts.length || !rockParts.length) return;
+
     const modes = modesRef.current;
     let hasAnyModes = false;
     for (const _ in modes) {
       hasAnyModes = true;
       break;
     }
-    if (!hasAnyModes) return;
 
     const nearImmediateTrees = [];
     const nearBufferTrees = [];
     const rocksByPart = rockParts.map(() => []);
 
-    for (const key in modes) {
-      if (!Object.hasOwn(modes, key)) continue;
-      const mode = modes[key];
-      const rec = cacheRef.current.get(key);
-      if (!rec) continue;
+    // Always keep cabin baked trees/rocks rendered in forest instancing.
+    for (let i = 0; i < CABIN_BAKED_TREES.length; i++)
+      nearImmediateTrees.push(CABIN_BAKED_TREES[i]);
+    if (rocksByPart.length) {
+      const rocks0 = rocksByPart[0];
+      for (let i = 0; i < CABIN_BAKED_ROCKS.length; i++)
+        rocks0.push(CABIN_BAKED_ROCKS[i]);
+    }
 
-      if (mode === "highImmediate") {
-        for (let j = 0; j < rec.trees.length; j++) nearImmediateTrees.push(rec.trees[j]);
-      } else if (mode === "highBuffer" || mode === "highPredicted") {
-        for (let j = 0; j < rec.trees.length; j++) nearBufferTrees.push(rec.trees[j]);
-      }
-      if (mode === "highImmediate" || mode === "highBuffer" || mode === "highPredicted") {
-        rec.rocksByPart.forEach((arr, i) => {
-          for (let j = 0; j < arr.length; j++) rocksByPart[i].push(arr[j]);
-        });
+    if (hasAnyModes) {
+      for (const key in modes) {
+        if (!Object.hasOwn(modes, key)) continue;
+        const mode = modes[key];
+        const rec = cacheRef.current.get(key);
+        if (!rec) continue;
+
+        if (mode === "highImmediate") {
+          for (let j = 0; j < rec.trees.length; j++)
+            nearImmediateTrees.push(rec.trees[j]);
+        } else if (mode === "highBuffer" || mode === "highPredicted") {
+          for (let j = 0; j < rec.trees.length; j++)
+            nearBufferTrees.push(rec.trees[j]);
+        }
+        if (
+          mode === "highImmediate" ||
+          mode === "highBuffer" ||
+          mode === "highPredicted"
+        ) {
+          rec.rocksByPart.forEach((arr, i) => {
+            for (let j = 0; j < arr.length; j++) rocksByPart[i].push(arr[j]);
+          });
+        }
       }
     }
 

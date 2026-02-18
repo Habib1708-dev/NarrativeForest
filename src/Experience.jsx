@@ -238,6 +238,10 @@ import CustomSky from "./components/environment/CustomSky";
 
 // Scene pieces - Camera
 import CameraControllerR3F from "./components/camera/CameraControllerR3F";
+import SplineCameraController from "./components/camera/SplineCameraController";
+
+// Toggle: true = new spline camera system, false = original waypoint system
+const USE_SPLINE_CAMERA = true;
 
 // Scene pieces - UI
 import IntroText from "./components/ui/IntroText";
@@ -961,7 +965,7 @@ export default function Experience() {
       )}
 
       {/* New camera waypoints controller (disabled by default; toggle via Leva) */}
-      <CameraControllerR3F />
+      {USE_SPLINE_CAMERA ? <SplineCameraController /> : <CameraControllerR3F />}
     </>
   );
 }

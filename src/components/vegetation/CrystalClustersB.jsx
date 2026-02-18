@@ -12,6 +12,8 @@ const GLB_TALL_ROD = "/models/magicPlantsAndCrystal/TallRod.glb";
 
 const COUNT_B = 50;
 const COUNT_ROD = 12;
+const CRYSTAL_Y_OFFSET = 0.04;
+const CRYSTAL_SCALE_OFFSET = 0.01;
 
 // Baked 50 Crystal B instances (position, rotationX/Y/Z in radians, scale)
 const PLACED_CRYSTAL_B = [
@@ -84,10 +86,10 @@ const PLACED_TALL_ROD = [
 ];
 
 const CRYSTAL_DEFAULTS = Object.freeze({
-  U_colorA: "#ecfaff", U_colorB: "#bc00f5", U_bottomColor: "#2ec5ff",
+  U_colorA: "#ecfaff", U_colorB: "#bc00f5",
   U_mid: 0.38, U_softness: 0.44,
   U_bottomEmissiveBoost: 2.0, U_bottomFresnelBoost: 3.0, U_bottomFresnelPower: 0.5,
-  U_roughness: 0.15, U_emissiveIntensity: 0.3,
+  U_roughness: 0.15, U_emissiveIntensity: 0.03,
   U_reflectBoost: 1.2, U_reflectPower: 2.0, U_rimBoost: 1.6, U_rimPower: 1.4,
   U_hoverEnabled: true, U_hoverEase: 2.0, U_cycleTime: 10, U_coolTime: 5.0,
   Pair_A_Bottom: "#2ec5ff", Pair_A_Top: "#b000ff",
@@ -101,7 +103,6 @@ function CrystalBDebugPanel({ onChange, onReplay }) {
   const unifiedGradient = useControls("Crystals B / Gradient", {
     U_colorA: { value: "#ecfaff", label: "Bottom Color (A)" },
     U_colorB: { value: "#bc00f5", label: "Top Color (B)" },
-    U_bottomColor: { value: "#2ec5ff", label: "Custom Bottom Tint" },
     U_mid: { value: 0.38, min: 0, max: 1, step: 0.001, label: "Blend Midpoint" },
     U_softness: { value: 0.44, min: 0, max: 0.5, step: 0.001, label: "Blend Softness" },
     U_bottomEmissiveBoost: { value: 2.0, min: 0, max: 2, step: 0.01, label: "Bottom Glow +" },
@@ -111,7 +112,7 @@ function CrystalBDebugPanel({ onChange, onReplay }) {
 
   const unifiedSurface = useControls("Crystals B / Surface", {
     U_roughness: { value: 0.15, min: 0, max: 1, step: 0.001 },
-    U_emissiveIntensity: { value: 0.3, min: 0, max: 2, step: 0.01 },
+    U_emissiveIntensity: { value: 0.03, min: 0, max: 2, step: 0.01 },
   }, { collapsed: true });
 
   const unifiedShine = useControls("Crystals B / Shine", {
@@ -211,7 +212,6 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
       shader.uniforms.uObjMaxY = { value: 1.0 };
       shader.uniforms.uU_ColorA = { value: new THREE.Color(unified.U_colorA) };
       shader.uniforms.uU_ColorB = { value: new THREE.Color(unified.U_colorB) };
-      shader.uniforms.uU_BottomColor = { value: new THREE.Color(unified.U_bottomColor) };
       shader.uniforms.uU_Mid = { value: unified.U_mid };
       shader.uniforms.uU_Soft = { value: unified.U_softness };
       shader.uniforms.uU_BottomEmissiveBoost = { value: unified.U_bottomEmissiveBoost };
@@ -234,7 +234,7 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
         "#include <common>",
         `
         #include <common>
-        uniform vec3  uU_ColorA, uU_ColorB, uU_BottomColor;
+        uniform vec3  uU_ColorA, uU_ColorB;
         uniform float uU_Mid, uU_Soft;
         uniform float uU_BottomEmissiveBoost, uU_BottomFresnelBoost, uU_BottomFresnelPower;
         uniform float uU_EmissiveIntensity;
@@ -265,7 +265,6 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
         float tMix = clamp(tLocal + bias, 0.0, 1.0);
         vec3 grad = mix(uU_ColorA, uU_ColorB, tMix);
         float bottom = 1.0 - vH;
-        grad = mix(grad, uU_BottomColor, bottom);
         gl_FragColor.rgb *= grad;
         vec3 N = normalize(normal);
         vec3 V = normalize(-vViewPosition);
@@ -297,7 +296,6 @@ function useUnifiedCrystalMaterial(unified, dissolveParams, progressRef) {
     if (s) {
       s.uniforms.uU_ColorA.value.set(unified.U_colorA);
       s.uniforms.uU_ColorB.value.set(unified.U_colorB);
-      s.uniforms.uU_BottomColor.value.set(unified.U_bottomColor);
       s.uniforms.uU_Mid.value = unified.U_mid;
       s.uniforms.uU_Soft.value = unified.U_softness;
       s.uniforms.uU_BottomEmissiveBoost.value = unified.U_bottomEmissiveBoost;
@@ -452,13 +450,13 @@ export default forwardRef(function CrystalClustersB(props, ref) {
     const worldY = new Float32Array(COUNT_B);
     for (let i = 0; i < COUNT_B; i++) {
       const d = PLACED_CRYSTAL_B[i];
-      p.set(d.position[0], d.position[1], d.position[2]);
+      p.set(d.position[0], d.position[1] + CRYSTAL_Y_OFFSET, d.position[2]);
       e.set(d.rotationX ?? 0, d.rotationY ?? 0, d.rotationZ ?? 0);
       q.setFromEuler(e);
-      s.setScalar(d.scale);
+      s.setScalar(d.scale + CRYSTAL_SCALE_OFFSET);
       m4.compose(p, q, s);
       mesh.setMatrixAt(i, m4);
-      worldY[i] = d.position[1];
+      worldY[i] = d.position[1] + CRYSTAL_Y_OFFSET;
     }
     mesh.count = COUNT_B;
     mesh.instanceMatrix.needsUpdate = true;
@@ -487,15 +485,15 @@ export default forwardRef(function CrystalClustersB(props, ref) {
     const worldY = new Float32Array(COUNT_ROD);
     for (let i = 0; i < COUNT_ROD; i++) {
       const d = PLACED_TALL_ROD[i];
-      p.set(d.position[0], d.position[1], d.position[2]);
+      p.set(d.position[0], d.position[1] + CRYSTAL_Y_OFFSET, d.position[2]);
       e.set(d.rotationX ?? 0, d.rotationY ?? 0, d.rotationZ ?? 0);
       q.setFromEuler(e);
-      const sx = d.scaleX ?? d.scale;
-      const sy = d.scaleY ?? d.scale;
-      s.set(sx, sy, d.scale);
+      const sx = (d.scaleX ?? d.scale) + CRYSTAL_SCALE_OFFSET;
+      const sy = (d.scaleY ?? d.scale) + CRYSTAL_SCALE_OFFSET;
+      s.set(sx, sy, d.scale + CRYSTAL_SCALE_OFFSET);
       m4.compose(p, q, s);
       mesh.setMatrixAt(i, m4);
-      worldY[i] = d.position[1];
+      worldY[i] = d.position[1] + CRYSTAL_Y_OFFSET;
     }
     mesh.count = COUNT_ROD;
     mesh.instanceMatrix.needsUpdate = true;

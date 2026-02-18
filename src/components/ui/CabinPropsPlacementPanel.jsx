@@ -130,7 +130,7 @@ export default function CabinPropsPlacementPanel() {
           Cabin Props Placement
         </div>
         <div style={{ fontSize: "12px", opacity: 0.8, marginBottom: "8px" }}>
-          27 rocks + 11 trees, single active checkpoint.
+          24 rocks + 11 trees, single active checkpoint.
         </div>
 
         <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
