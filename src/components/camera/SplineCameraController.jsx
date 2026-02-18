@@ -12,15 +12,16 @@ import SplineCameraDebugPanel from "./SplineCameraDebugPanel";
 export default function SplineCameraController() {
   const { camera } = useThree();
   const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const splineEnabled = useSplineCameraStore((s) => s.enabled);
   const getPose = useSplineCameraStore((s) => s.getPose);
   const applyWheel = useSplineCameraStore((s) => s.applyWheel);
 
-  // Signal to Experience.jsx that a narrative camera is active,
-  // so OrbitControls stays disabled (it gates on useCameraStore.enabled).
+  // Sync spline enabled state to global camera store so Experience.jsx can show
+  // OrbitControls when spline is disabled (free roam for debugging).
   useEffect(() => {
-    useCameraStore.getState().setEnabled(true);
+    useCameraStore.getState().setEnabled(splineEnabled);
     return () => useCameraStore.getState().setEnabled(false);
-  }, []);
+  }, [splineEnabled]);
 
   // Apply camera pose every frame
   useFrame(() => {

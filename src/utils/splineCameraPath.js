@@ -21,29 +21,32 @@ export const SPLINE_WAYPOINTS = [
     dir: [0.6141963905759642, -0.06925810123429565, 0.7861082045220478],
     name: "Focus on man" },
 
-  { pos: [-1.959358204104523, -4.255603846586547, -3.315397466991112],
+  { pos: [-1.8868430414547763, -4.298094640661437, -3.1099631340175717],
     dir: [0.6254456604933333, -0.12561047542093048, 0.7700907311704162],
     name: "Focus on cat" },
 
+  /* Look along path toward arc/tower so view follows motion */
   { pos: [-0.26214251379676456, -3.8656579355773606, -4.372777920792019],
-    dir: [-0.6450087719764547, -0.1389709534520352, 0.7514324707983133],
+    dir: [-0.543, -0.113, 0.832],
     name: "Surrounded by nature" },
+
+  /* Arc point: path bulges right; look along path toward Focus on tower */
+  { pos: [-1.24, -4.07, -2.88],
+    dir: [-0.926, -0.117, -0.348],
+    name: "Arc to tower" },
 
   { pos: [-2.916796367924667, -4.2813842816247725, -3.5099455795932846],
     dir: [0.9155067787235391, 0.34164523753358894, 0.21242850510669758],
     name: "Focus on tower" },
 
+  /* Same look angle for stop 7–8 */
   { pos: [-1.3678624673659563, -3.4102265358042487, -3.6680525943822753],
-    dir: [0.10455921319589376, 0.23323946174558335, 0.9667816322316465],
+    dir: [-0.10396332339736762, 0.25065747695331503, 0.9624772499314322],
     name: "Seventh place" },
 
-  { pos: [-1.8010822079796402, -2.8748063068460863, -0.05366466709301476],
-    dir: [0.47261409071424826, 0.2279894150094293, 0.8512677298605901],
+  { pos: [-3.1679199941413945, -0.37895494540152597, 13.16602432749402],
+    dir: [-0.10396332339736762, 0.25065747695331503, 0.9624772499314322],
     name: "Eighth place" },
-
-  { pos: [-0.596151208267888, -1.3101743927121208, 5.0447951625564675],
-    dir: [-0.005415530093808769, 0.1990135394065256, 0.9799817769564343],
-    name: "Ninth place" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -109,6 +112,7 @@ function computeWaypointArcLengths(curve, waypointCount) {
 // Pre-allocated objects reused every frame to avoid GC pressure
 const _sampledPos = new THREE.Vector3();
 const _sampledQuat = new THREE.Quaternion();
+const _eulerNoRoll = new THREE.Euler(0, 0, 0, "YXZ");
 
 export function createSplineSampler(waypoints = SPLINE_WAYPOINTS) {
   const curve = buildPositionSpline(waypoints);
@@ -139,6 +143,11 @@ export function createSplineSampler(waypoints = SPLINE_WAYPOINTS) {
 
     // Slerp direction quaternions
     _sampledQuat.slerpQuaternions(quats[segIdx], quats[segIdx + 1], localT);
+
+    // Keep horizontal tilt (roll) always 0 for a stable horizon
+    _eulerNoRoll.setFromQuaternion(_sampledQuat, "YXZ");
+    _eulerNoRoll.z = 0;
+    _sampledQuat.setFromEuler(_eulerNoRoll);
 
     return { position: _sampledPos, quaternion: _sampledQuat, segmentIndex: segIdx };
   }

@@ -96,7 +96,7 @@ const CRYSTAL_DEFAULTS = Object.freeze({
   Pair_B_Bottom: "#00ff23", Pair_B_Top: "#f9ff87",
   Pair_C_Bottom: "#ffc300", Pair_C_Top: "#adadad",
   build: false, speed: 0.24,
-  edgeWidth: 0.15, glowStrength: 2.0, glowColor: "#ffb900", coolTimeAfterBuild: 1.5,
+  edgeWidth: 0.15, glowStrength: 66, glowColor: "#ffb900", coolTimeAfterBuild: 1.5,
 });
 
 function CrystalBDebugPanel({ onChange, onReplay }) {
@@ -139,7 +139,7 @@ function CrystalBDebugPanel({ onChange, onReplay }) {
     build: { value: false, label: "Build Crystals" },
     speed: { value: 0.24, min: 0.05, max: 3, step: 0.01, label: "Speed (units/sec)" },
     edgeWidth: { value: 0.15, min: 0.0, max: 0.4, step: 0.005, label: "Edge Width" },
-    glowStrength: { value: 2.0, min: 0.0, max: 50, step: 0.1, label: "Glow Strength" },
+    glowStrength: { value: 66, min: 0.0, max: 100, step: 0.1, label: "Glow Strength" },
     glowColor: { value: "#ffb900", label: "Glow Color" },
     coolTimeAfterBuild: { value: 1.5, min: 0.1, max: 30, step: 0.05, label: "Glow Cooldown (s)" },
     Replay: button(() => onReplay()),

@@ -239,6 +239,8 @@ import CustomSky from "./components/environment/CustomSky";
 // Scene pieces - Camera
 import CameraControllerR3F from "./components/camera/CameraControllerR3F";
 import SplineCameraController from "./components/camera/SplineCameraController";
+import { useSplineCameraStore } from "./state/useSplineCameraStore";
+import { SPLINE_WAYPOINTS } from "./utils/splineCameraPath";
 
 // Toggle: true = new spline camera system, false = original waypoint system
 const USE_SPLINE_CAMERA = true;
@@ -335,12 +337,30 @@ export default function Experience() {
     };
   }, [gl, isDebugMode, enabled]);
 
-  // Debug: log exact camera position when Space is pressed
+  // Debug: log camera position, look angle (direction), and scroll path when Space is pressed
   useEffect(() => {
+    const dir = new THREE.Vector3();
     const handleKeyDown = (e) => {
       if (e.code === "Space" || e.key === " ") {
         const p = camera.position;
+        camera.getWorldDirection(dir);
         console.log("[Camera] position:", p.x, p.y, p.z, "→", { x: p.x, y: p.y, z: p.z });
+        console.log("[Camera] direction (look):", dir.x, dir.y, dir.z, "→", { x: dir.x, y: dir.y, z: dir.z });
+        if (USE_SPLINE_CAMERA) {
+          const { t, getPose } = useSplineCameraStore.getState();
+          const { segmentIndex } = getPose();
+          const waypoints = SPLINE_WAYPOINTS;
+          const seg = Math.max(0, Math.min(segmentIndex, waypoints.length - 2));
+          const fromName = waypoints[seg]?.name ?? `waypoint ${seg}`;
+          const toName = waypoints[seg + 1]?.name ?? `waypoint ${seg + 1}`;
+          console.log(
+            "[Scroll camera] progress:",
+            t.toFixed(4),
+            "| segment:",
+            segmentIndex,
+            `| between "${fromName}" and "${toName}"`
+          );
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
