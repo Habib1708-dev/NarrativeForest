@@ -15,8 +15,8 @@ import { useDebugStore } from "../../state/useDebugStore";
 // Static defaults — used when not in debug mode to avoid Leva overhead
 const CATKTX2_DEFAULTS = Object.freeze({
   positionX: -1.71,
-  positionY: -4.38,
-  positionZ: -2.91,
+  positionY: -4.303,
+  positionZ: -2.946,
   rotationYDeg: 180,
   scale: 0.07,
   tintColor: "#ffffff",

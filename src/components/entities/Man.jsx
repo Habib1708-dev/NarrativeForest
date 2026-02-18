@@ -17,10 +17,10 @@ import { useDebugStore } from "../../state/useDebugStore";
 // Static defaults — used when not in debug mode to avoid Leva overhead
 const MAN_DEFAULTS = Object.freeze({
   positionX: -1.6,
-  positionY: -4.433,
+  positionY: -4.37,
   positionZ: -2.95,
   rotationYDeg: 12.9,
-  scale: 0.06,
+  scale: 0.07,
   playbackSpeed: 1,
   waveOnStop5: true,
   waveDuration: 3.0,
