@@ -8,10 +8,12 @@ import { useSplineCameraStore } from "../../state/useSplineCameraStore";
 import { useCameraStore } from "../../state/useCameraStore";
 import { useDebugStore } from "../../state/useDebugStore";
 import SplineCameraDebugPanel from "./SplineCameraDebugPanel";
+import SplineCameraDebugView from "./SplineCameraDebugView";
 
 export default function SplineCameraController() {
   const { camera } = useThree();
   const isDebugMode = useDebugStore((s) => s.isDebugMode);
+  const showSplineGeometry = useSplineCameraStore((s) => s.showSplineGeometry);
   const splineEnabled = useSplineCameraStore((s) => s.enabled);
   const getPose = useSplineCameraStore((s) => s.getPose);
   const applyWheel = useSplineCameraStore((s) => s.applyWheel);
@@ -111,5 +113,10 @@ export default function SplineCameraController() {
     };
   }, [applyWheel]);
 
-  return <>{isDebugMode && <SplineCameraDebugPanel />}</>;
+  return (
+    <>
+      {isDebugMode && <SplineCameraDebugPanel />}
+      {(isDebugMode || showSplineGeometry) && <SplineCameraDebugView />}
+    </>
+  );
 }

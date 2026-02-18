@@ -30,11 +30,6 @@ export const SPLINE_WAYPOINTS = [
     dir: [-0.543, -0.113, 0.832],
     name: "Surrounded by nature" },
 
-  /* Arc point: path bulges right; look along path toward Focus on tower */
-  { pos: [-1.24, -4.07, -2.88],
-    dir: [-0.926, -0.117, -0.348],
-    name: "Arc to tower" },
-
   { pos: [-2.916796367924667, -4.2813842816247725, -3.5099455795932846],
     dir: [0.9155067787235391, 0.34164523753358894, 0.21242850510669758],
     name: "Focus on tower" },
@@ -49,16 +44,55 @@ export const SPLINE_WAYPOINTS = [
     name: "Eighth place" },
 ];
 
+export const DEFAULT_CURVE_PARAMS = {
+  curveType: "catmullrom", // "centripetal" | "chordal" | "catmullrom"
+  tension: 0.5,
+  closed: false,
+};
+
+const _smoothStep = (x) => x * x * (3 - 2 * x);
+const _clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+export const WEIGHT_FNS = {
+  linear: (t) => _clamp01(t),
+  bell: (t) => 4 * _clamp01(t) * (1 - _clamp01(t)),
+  easeIn: (t) => {
+    const c = _clamp01(t);
+    return c * c * c;
+  },
+  easeOut: (t) => {
+    const c = _clamp01(t);
+    return 1 - Math.pow(1 - c, 3);
+  },
+  smooth: (t) => _smoothStep(_clamp01(t)),
+};
+
+export const WEIGHT_FN_LABELS = {
+  linear: "Linear",
+  bell: "Bell (middle bulge)",
+  easeIn: "Ease In",
+  easeOut: "Ease Out",
+  smooth: "Smooth",
+};
+
+export const WEIGHT_FN_NAMES = Object.keys(WEIGHT_FNS);
+
+export function formatWaypointsForExport(waypoints) {
+  return JSON.stringify(waypoints, null, 2);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Build the CatmullRomCurve3 position spline                       */
 /* ------------------------------------------------------------------ */
 
 const ARC_LENGTH_DIVISIONS = 200;
 
-function buildPositionSpline(waypoints) {
+function buildPositionSpline(waypoints, params = DEFAULT_CURVE_PARAMS) {
   const points = waypoints.map((w) => new THREE.Vector3(...w.pos));
-  // centripetal Catmull-Rom avoids cusps and self-intersections
-  return new THREE.CatmullRomCurve3(points, false, "centripetal", 0.5);
+  const curveType = params.curveType ?? DEFAULT_CURVE_PARAMS.curveType;
+  const closed = !!params.closed;
+  const tension = params.tension ?? DEFAULT_CURVE_PARAMS.tension;
+  return new THREE.CatmullRomCurve3(points, closed, curveType, tension);
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,11 +148,47 @@ const _sampledPos = new THREE.Vector3();
 const _sampledQuat = new THREE.Quaternion();
 const _eulerNoRoll = new THREE.Euler(0, 0, 0, "YXZ");
 
-export function createSplineSampler(waypoints = SPLINE_WAYPOINTS) {
-  const curve = buildPositionSpline(waypoints);
+export function createSplineSampler(
+  waypoints = SPLINE_WAYPOINTS,
+  curveParams = DEFAULT_CURVE_PARAMS,
+  segmentOffsets = null,
+  segmentWeightFns = null,
+  segmentGroups = null
+) {
+  const curve = buildPositionSpline(waypoints, curveParams);
   const quats = buildDirectionQuaternions(waypoints);
   const N = waypoints.length;
   const uAtWaypoint = computeWaypointArcLengths(curve, N);
+  const totalLength = curve.getLength();
+  const uAtAuthored = uAtWaypoint;
+  const segmentLengths = Array.from({ length: N - 1 }, (_, i) => {
+    return (uAtAuthored[i + 1] - uAtAuthored[i]) * totalLength;
+  });
+
+  const normalizedOffsets = Array.from({ length: N - 1 }, (_, i) => {
+    const off = segmentOffsets?.[i] ?? [0, 0, 0];
+    return [off[0] ?? 0, off[1] ?? 0, off[2] ?? 0];
+  });
+  const normalizedWeightFns = Array.from({ length: N - 1 }, (_, i) => {
+    const fnName = segmentWeightFns?.[i] ?? "bell";
+    return WEIGHT_FNS[fnName] ? fnName : "bell";
+  });
+  const normalizedGroups = (segmentGroups ?? [])
+    .map((g) => {
+      const start = Number(g?.start);
+      const end = Number(g?.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+      if (start < 0 || end < start || end >= N - 1) return null;
+      const off = g?.offset ?? [0, 0, 0];
+      const fnName = WEIGHT_FNS[g?.weightFn] ? g.weightFn : "bell";
+      return {
+        start,
+        end,
+        offset: [Number(off[0]) || 0, Number(off[1]) || 0, Number(off[2]) || 0],
+        weightFn: fnName,
+      };
+    })
+    .filter(Boolean);
 
   function sample(u) {
     const cu = Math.max(0, Math.min(1, u));
@@ -141,6 +211,37 @@ export function createSplineSampler(waypoints = SPLINE_WAYPOINTS) {
     const localT =
       segEnd > segStart ? (cu - segStart) / (segEnd - segStart) : 0;
 
+    // Group deformation: selected multiple segments behave as one long segment.
+    // Internal waypoints are ignored by evaluating one weight function on the whole span.
+    let handledByGroup = false;
+    for (let i = 0; i < normalizedGroups.length; i++) {
+      const g = normalizedGroups[i];
+      if (segIdx < g.start || segIdx > g.end) continue;
+      const uStart = uAtWaypoint[g.start];
+      const uEnd = uAtWaypoint[g.end + 1];
+      const rangeT = uEnd > uStart ? (cu - uStart) / (uEnd - uStart) : 0;
+      const fn = WEIGHT_FNS[g.weightFn] ?? WEIGHT_FNS.bell;
+      const w = fn(rangeT);
+      _sampledPos.x += g.offset[0] * w;
+      _sampledPos.y += g.offset[1] * w;
+      _sampledPos.z += g.offset[2] * w;
+      handledByGroup = true;
+      break;
+    }
+
+    // Per-segment deformation for non-grouped segments.
+    if (!handledByGroup) {
+      const offset = normalizedOffsets[segIdx];
+      if (offset) {
+        const fnName = normalizedWeightFns[segIdx] ?? "bell";
+        const fn = WEIGHT_FNS[fnName] ?? WEIGHT_FNS.bell;
+        const w = fn(localT);
+        _sampledPos.x += offset[0] * w;
+        _sampledPos.y += offset[1] * w;
+        _sampledPos.z += offset[2] * w;
+      }
+    }
+
     // Slerp direction quaternions
     _sampledQuat.slerpQuaternions(quats[segIdx], quats[segIdx + 1], localT);
 
@@ -152,5 +253,21 @@ export function createSplineSampler(waypoints = SPLINE_WAYPOINTS) {
     return { position: _sampledPos, quaternion: _sampledQuat, segmentIndex: segIdx };
   }
 
-  return { curve, sample, uAtWaypoint, quats };
+  return {
+    curve,
+    sample,
+    uAtWaypoint,
+    uAtAuthored,
+    quats,
+    totalLength,
+    segmentLengths,
+    curveParams: {
+      curveType: curveParams.curveType ?? DEFAULT_CURVE_PARAMS.curveType,
+      tension: curveParams.tension ?? DEFAULT_CURVE_PARAMS.tension,
+      closed: !!curveParams.closed,
+    },
+    segmentOffsets: normalizedOffsets,
+    segmentWeightFns: normalizedWeightFns,
+    segmentGroups: normalizedGroups,
+  };
 }
