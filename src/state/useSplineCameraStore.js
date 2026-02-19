@@ -38,6 +38,8 @@ export const useSplineCameraStore = create((set, get) => {
   const initialSegmentGroups = [];
   let velocityTween = null;
   let tickerActive = false;
+  const diveOffsetRef = { value: 0 };
+  let diveReturnTween = null;
 
   const rebuild = (
     waypoints,
@@ -128,6 +130,13 @@ export const useSplineCameraStore = create((set, get) => {
     scrollSensitivity: 5.5,
     /** Extra scroll multiplier: effective scroll = baseScroll * (1 + scrollSlideFactor). 0 = no slide, 0.5 = 50% extra. */
     scrollSlideFactor: 1.3,
+    segment0DiveOffset: 0,
+    segment0Dive: {
+      enabled: true,
+      dipAmount: -0.05,
+      returnDuration: 0.95,
+      returnEase: "sine.out",
+    },
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
@@ -158,6 +167,41 @@ export const useSplineCameraStore = create((set, get) => {
       set({ scrollSensitivity: Math.max(0.01, Math.min(10, Number(v) || 1)) }),
     setScrollSlideFactor: (v) =>
       set({ scrollSlideFactor: Math.max(0, Math.min(2, Number(v) ?? 0)) }),
+    setSegment0Dive: (patch) =>
+      set((s) => ({ segment0Dive: { ...s.segment0Dive, ...patch } })),
+    triggerSegment0Dive: () => {
+      const state = get();
+      const { sampler: sm, segment0Dive: diveCfg } = state;
+      const uSeg = sm.scrollToU ? sm.scrollToU(state.t) : state.t;
+      const { segmentIndex: segIdx } = sm.sample(uSeg);
+      if (segIdx !== 0 || diveCfg?.enabled === false) return;
+      diveOffsetRef.value = diveCfg.dipAmount;
+      set({ segment0DiveOffset: diveOffsetRef.value });
+      if (diveReturnTween) diveReturnTween.kill();
+      diveReturnTween = gsap.to(diveOffsetRef, {
+        value: 0,
+        duration: diveCfg.returnDuration ?? 0.5,
+        ease: diveCfg.returnEase ?? "power2.out",
+        overwrite: "auto",
+        onUpdate: () => set({ segment0DiveOffset: diveOffsetRef.value }),
+        onComplete: () => {
+          diveReturnTween = null;
+          set({ segment0DiveOffset: 0 });
+        },
+      });
+    },
+    resetSegment0Dive: () => {
+      if (diveReturnTween) {
+        diveReturnTween.kill();
+        diveReturnTween = null;
+      }
+      diveOffsetRef.value = 0;
+      set({ segment0DiveOffset: 0 });
+    },
+    setSegment0DiveOffset: (v) => {
+      diveOffsetRef.value = Number(v);
+      set({ segment0DiveOffset: diveOffsetRef.value });
+    },
     setCurveParams: (patch) => {
       const curveParams = { ...get().curveParams, ...patch };
       const sampler = rebuildFromCurrent({ curveParams });
@@ -533,6 +577,27 @@ export const useSplineCameraStore = create((set, get) => {
       tDriver.value = baseT;
       set({ t: baseT });
 
+      // First-segment dive: at scroll start in segment 0, apply constant dip then ease back
+      const { sampler: sm, segment0Dive: diveCfg } = get();
+      const uSeg = sm.scrollToU ? sm.scrollToU(baseT) : baseT;
+      const { segmentIndex: segIdx } = sm.sample(uSeg);
+      if (segIdx === 0 && diveCfg?.enabled !== false) {
+        diveOffsetRef.value = diveCfg.dipAmount;
+        set({ segment0DiveOffset: diveOffsetRef.value });
+        if (diveReturnTween) diveReturnTween.kill();
+        diveReturnTween = gsap.to(diveOffsetRef, {
+          value: 0,
+          duration: diveCfg.returnDuration ?? 0.5,
+          ease: diveCfg.returnEase ?? "power2.out",
+          overwrite: "auto",
+          onUpdate: () => set({ segment0DiveOffset: diveOffsetRef.value }),
+          onComplete: () => {
+            diveReturnTween = null;
+            set({ segment0DiveOffset: 0 });
+          },
+        });
+      }
+
       if (!isBrowser) return;
 
       // Inertia impulse
@@ -558,10 +623,16 @@ export const useSplineCameraStore = create((set, get) => {
     /* -- pose getter (called every frame in useFrame) -- */
 
     getPose: () => {
-      const { t, fov, sampler } = get();
+      const { t, fov, sampler, segment0DiveOffset: diveOff } = get();
       const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
       const { position, quaternion, segmentIndex } = sampler.sample(u);
-      return { position, quaternion, fov, segmentIndex };
+      if (segmentIndex !== 0 || (diveOff ?? 0) === 0) {
+        return { position, quaternion, fov, segmentIndex };
+      }
+      // Apply dip along camera-local "down" so it reads as a view-aligned dip, not world Y (which felt like backward motion on a 3D path)
+      const down = new THREE.Vector3(0, -1, 0).applyQuaternion(quaternion);
+      const offsetPosition = position.clone().add(down.multiplyScalar(-diveOff));
+      return { position: offsetPosition, quaternion, fov, segmentIndex };
     },
   };
 });
