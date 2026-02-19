@@ -337,36 +337,62 @@ export default function Experience() {
     };
   }, [gl, isDebugMode, enabled]);
 
-  // Free roam: arrow keys rotate view only (camera position fixed, only look direction changes)
+  // Free roam (debug only): Ctrl+Arrow = rotate view only; Arrow (no Ctrl) = move camera position
   useEffect(() => {
     if (!isDebugMode || enabled || !camera || !gl) return undefined;
     const controls = get().controls;
     if (!controls || !controls.target) return undefined;
 
-    const AZIMUTH_SPEED = 0.03; // radians per keypress (left/right)
-    const PITCH_SPEED = 0.03;   // radians per keypress (up/down)
+    const AZIMUTH_SPEED = 0.03;   // radians per keypress (rotate left/right)
+    const PITCH_SPEED = 0.03;     // radians per keypress (rotate up/down)
+    const MOVE_SPEED = 0.2;       // units per keypress (move position)
     const minPitch = 0.05;
     const maxPitch = Math.PI - 0.05;
 
     const dir = new THREE.Vector3();
     const spherical = new THREE.Spherical();
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const delta = new THREE.Vector3();
 
     const handleKeyDown = (e) => {
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) return;
       e.preventDefault();
 
-      dir.subVectors(controls.target, camera.position);
-      spherical.setFromVector3(dir);
+      const ctrl = e.ctrlKey || e.metaKey;
 
-      switch (e.code) {
-        case "ArrowRight": spherical.theta -= AZIMUTH_SPEED; break;
-        case "ArrowLeft":  spherical.theta += AZIMUTH_SPEED; break;
-        case "ArrowUp":    spherical.phi = Math.max(minPitch, spherical.phi - PITCH_SPEED); break;  // look up = toward +Y = smaller phi
-        case "ArrowDown":  spherical.phi = Math.min(maxPitch, spherical.phi + PITCH_SPEED); break;  // look down = toward -Y = larger phi
+      if (ctrl) {
+        // Rotate only: move target on sphere around camera (position fixed)
+        dir.subVectors(controls.target, camera.position);
+        spherical.setFromVector3(dir);
+
+        switch (e.code) {
+          case "ArrowRight": spherical.theta -= AZIMUTH_SPEED; break;
+          case "ArrowLeft":  spherical.theta += AZIMUTH_SPEED; break;
+          case "ArrowUp":    spherical.phi = Math.max(minPitch, spherical.phi - PITCH_SPEED); break;
+          case "ArrowDown":  spherical.phi = Math.min(maxPitch, spherical.phi + PITCH_SPEED); break;
+        }
+
+        dir.setFromSpherical(spherical);
+        controls.target.copy(camera.position).add(dir);
+      } else {
+        // Move position: translate camera and target together (no zoom)
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+        delta.set(0, 0, 0);
+        switch (e.code) {
+          case "ArrowUp":    delta.copy(forward).multiplyScalar(MOVE_SPEED); break;
+          case "ArrowDown":  delta.copy(forward).multiplyScalar(-MOVE_SPEED); break;
+          case "ArrowRight": delta.copy(right).multiplyScalar(MOVE_SPEED); break;
+          case "ArrowLeft":  delta.copy(right).multiplyScalar(-MOVE_SPEED); break;
+        }
+
+        camera.position.add(delta);
+        controls.target.add(delta);
       }
-
-      dir.setFromSpherical(spherical);
-      controls.target.copy(camera.position).add(dir);
     };
 
     document.addEventListener("keydown", handleKeyDown);
