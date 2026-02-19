@@ -96,7 +96,7 @@ export default function SplineCameraDebugPanel() {
       scrollSensitivity: {
         value: useSplineCameraStore.getState().scrollSensitivity,
         min: 0.1,
-        max: 5,
+        max: 10,
         step: 0.05,
         onChange: (v) => useSplineCameraStore.getState().setScrollSensitivity(v),
       },

@@ -125,7 +125,7 @@ export const useSplineCameraStore = create((set, get) => {
     t: 0,
     enabled: true,
     fov: 50,
-    scrollSensitivity: 1,
+    scrollSensitivity: 5.5,
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
