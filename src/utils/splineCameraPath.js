@@ -274,9 +274,10 @@ export function createSplineSampler(
     const segT = ct * numSegments;
     const segIdx = Math.min(Math.floor(segT), numSegments - 1);
     const localT = segT - segIdx;
+    const easedLocalT = _smoothStep(localT);
     const u0 = uAtWaypoint[segIdx];
     const u1 = uAtWaypoint[segIdx + 1];
-    return u0 + localT * (u1 - u0);
+    return u0 + easedLocalT * (u1 - u0);
   }
 
   /**

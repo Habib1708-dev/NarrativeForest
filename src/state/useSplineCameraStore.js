@@ -652,13 +652,13 @@ export const useSplineCameraStore = create((set, get) => {
       const { t, fov, sampler, segment0DiveOffset: diveOff } = get();
       const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
       const { position, quaternion, segmentIndex } = sampler.sample(u);
-      if (segmentIndex !== 0 || (diveOff ?? 0) === 0) {
-        return { position, quaternion, fov, segmentIndex };
+      // Apply dive offset whenever it's non-zero, so leaving segment 0 doesn't snap.
+      if ((diveOff ?? 0) !== 0) {
+        const dipDistance = Math.abs(diveOff);
+        const offsetPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
+        return { position: offsetPosition, quaternion, fov, segmentIndex };
       }
-      // Keep dive purely vertical so it never injects backward/forward displacement.
-      const dipDistance = Math.abs(diveOff);
-      const offsetPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
-      return { position: offsetPosition, quaternion, fov, segmentIndex };
+      return { position, quaternion, fov, segmentIndex };
     },
   };
 });
