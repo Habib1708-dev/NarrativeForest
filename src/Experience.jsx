@@ -266,7 +266,7 @@ const TERRAIN_MODE = "opt";
 const USE_AUTHORITY_TERRAIN = TERRAIN_MODE === "authority";
 
 export default function Experience() {
-  const { gl, camera } = useThree();
+  const { gl, camera, get } = useThree();
   usePerformanceMonitor("Experience");
   const isDebugMode = useDebugStore((state) => state.isDebugMode);
   const enabled = useCameraStore((s) => s.enabled);
@@ -336,6 +336,42 @@ export default function Experience() {
       canvas.style.touchAction = previous;
     };
   }, [gl, isDebugMode, enabled]);
+
+  // Free roam: arrow keys rotate view only (camera position fixed, only look direction changes)
+  useEffect(() => {
+    if (!isDebugMode || enabled || !camera || !gl) return undefined;
+    const controls = get().controls;
+    if (!controls || !controls.target) return undefined;
+
+    const AZIMUTH_SPEED = 0.03; // radians per keypress (left/right)
+    const PITCH_SPEED = 0.03;   // radians per keypress (up/down)
+    const minPitch = 0.05;
+    const maxPitch = Math.PI - 0.05;
+
+    const dir = new THREE.Vector3();
+    const spherical = new THREE.Spherical();
+
+    const handleKeyDown = (e) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) return;
+      e.preventDefault();
+
+      dir.subVectors(controls.target, camera.position);
+      spherical.setFromVector3(dir);
+
+      switch (e.code) {
+        case "ArrowRight": spherical.theta -= AZIMUTH_SPEED; break;
+        case "ArrowLeft":  spherical.theta += AZIMUTH_SPEED; break;
+        case "ArrowUp":    spherical.phi = Math.max(minPitch, spherical.phi - PITCH_SPEED); break;  // look up = toward +Y = smaller phi
+        case "ArrowDown":  spherical.phi = Math.min(maxPitch, spherical.phi + PITCH_SPEED); break;  // look down = toward -Y = larger phi
+      }
+
+      dir.setFromSpherical(spherical);
+      controls.target.copy(camera.position).add(dir);
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isDebugMode, enabled, camera, gl, get]);
 
   // Debug: log camera position, look angle (direction), and scroll path when Space is pressed
   useEffect(() => {
@@ -814,7 +850,7 @@ export default function Experience() {
         <OrbitControls
           makeDefault
           minDistance={0.05}
-          maxDistance={600}
+          maxDistance={Infinity}
           target={[-1.25, -4.45, -2.9]}
           enableDamping
           dampingFactor={0.05}

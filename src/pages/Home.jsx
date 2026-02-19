@@ -4,6 +4,7 @@ import Experience from "../Experience";
 import LoadingScreen from "../components/ui/LoadingScreen";
 import FreeFlyJoystickOverlay from "../components/ui/FreeFlyJoystickOverlay";
 import DebugModeIndicator from "../components/ui/DebugModeIndicator";
+import DebugGridOverlay from "../components/ui/DebugGridOverlay";
 import ClickAndDragHint from "../components/ui/ClickAndDragHint";
 import PresetSelector from "../components/ui/PresetSelector";
 import StopCircleOverlay from "../components/ui/StopCircleOverlay";
@@ -173,6 +174,7 @@ export default function Home() {
       />
 
       <DebugModeIndicator />
+      <DebugGridOverlay />
       <ClickAndDragHint />
       <StopCircleOverlay />
       <PresetSelector

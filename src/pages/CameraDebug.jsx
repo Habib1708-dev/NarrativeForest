@@ -9,6 +9,7 @@ import { useDebugStore } from "../state/useDebugStore";
 import Experience from "../Experience";
 import SplineCameraDebugView from "../components/camera/SplineCameraDebugView";
 import CameraDebugSidebar from "../components/camera/CameraDebugSidebar";
+import DebugGridOverlay from "../components/ui/DebugGridOverlay";
 
 // ------------------------------------------------------------------
 // CameraBridge — lives inside Canvas, pushes the R3F camera into store
@@ -45,9 +46,11 @@ export default function CameraDebug() {
 
   return (
     <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden" }}>
-      {/* ---- 3D Canvas (left, fills remaining width) ---- */}
-      <Canvas
-        style={{ flex: 1, height: "100%" }}
+      {/* ---- 3D Canvas (left, fills remaining width) with grid overlay ---- */}
+      <div style={{ position: "relative", flex: 1 }}>
+        <DebugGridOverlay contained />
+        <Canvas
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
         gl={{ preserveDrawingBuffer: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
@@ -61,6 +64,7 @@ export default function CameraDebug() {
         {/* Bridge: keeps store._cameraRef in sync for Capture Pose */}
         <CameraBridge />
       </Canvas>
+      </div>
 
       {/* ---- Custom sidebar (right, fixed 340px) ---- */}
       <CameraDebugSidebar />

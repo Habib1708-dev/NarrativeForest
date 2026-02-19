@@ -40,7 +40,12 @@ export default function SplineCameraController() {
   // Mouse wheel scroll
   useEffect(() => {
     const onWheel = (e) => {
-      if (!useSplineCameraStore.getState().enabled) return;
+      const splineEnabled = useSplineCameraStore.getState().enabled;
+      if (!splineEnabled) {
+        // Free roam: prevent document scroll so OrbitControls can zoom continuously
+        e.preventDefault();
+        return;
+      }
       applyWheel(-e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
