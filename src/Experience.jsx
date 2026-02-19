@@ -404,6 +404,8 @@ export default function Experience() {
     const dir = new THREE.Vector3();
     const handleKeyDown = (e) => {
       if (e.code === "Space" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
         const p = camera.position;
         camera.getWorldDirection(dir);
         console.log("[Camera] position:", p.x, p.y, p.z, "→", { x: p.x, y: p.y, z: p.z });
