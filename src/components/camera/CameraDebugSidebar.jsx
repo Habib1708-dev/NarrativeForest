@@ -290,19 +290,20 @@ export default function CameraDebugSidebar() {
         <div style={S.sectionTitle}>Jump to Waypoint</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
           {waypoints.map((wp, i) => {
-            const u = sampler.uAtWaypoint[i];
-            const isActive = u !== undefined && Math.abs(t - u) < 0.002;
+            const u = sampler.uAtWaypoint?.[i];
+            const scrollT = u !== undefined && sampler.uToScroll ? sampler.uToScroll(u) : u;
+            const isActive = scrollT !== undefined && Math.abs(t - scrollT) < 0.002;
             return (
               <button
                 key={i}
-                title={`${wp.name}\nt = ${u?.toFixed(4)}`}
+                title={`${wp.name}\nscroll t = ${scrollT?.toFixed(4)}`}
                 style={{
                   ...S.btn(isActive),
                   flex: "0 0 auto",
                   fontSize: 10,
                   padding: "3px 7px",
                 }}
-                onClick={() => setT(u)}
+                onClick={() => setT(scrollT ?? u ?? 0)}
               >
                 {i}: {wp.name.length > 14 ? wp.name.slice(0, 13) + "…" : wp.name}
               </button>

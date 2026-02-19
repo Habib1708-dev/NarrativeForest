@@ -29,7 +29,7 @@ export const useSplineCameraStore = create((set, get) => {
   const initialCurveParams = { ...DEFAULT_CURVE_PARAMS };
   const segCount = Math.max(0, initialWaypoints.length - 1);
   const initialSegmentOffsets = Array.from({ length: segCount }, (_, i) =>
-    i === 4 ? [0, 0, 1.99] : [0, 0, 0]
+    i === 4 ? [0, 0, 0.06] : [0, 0, 0]
   );
   const initialSegmentWeightFns = Array.from(
     { length: segCount },
@@ -551,7 +551,8 @@ export const useSplineCameraStore = create((set, get) => {
 
     getPose: () => {
       const { t, fov, sampler } = get();
-      const { position, quaternion, segmentIndex } = sampler.sample(t);
+      const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
+      const { position, quaternion, segmentIndex } = sampler.sample(u);
       return { position, quaternion, fov, segmentIndex };
     },
   };

@@ -21,9 +21,17 @@ export const SPLINE_WAYPOINTS = [
     dir: [0.6122135243916704, -0.2198348125019774, 0.7595177784384972],
     name: "Focus on the man" },
 
+  { pos: [-2.2392938748292877, -4.540963485727188, -3.5282437623050615],
+    dir: [0.7358609096239768, -0.12510276224309952, 0.66547578510906],
+    name: "Focus on the man 2" },
+
   { pos: [-1.983157690457547, -4.296959971702041, -3.228022908039281],
     dir: [0.7153149258826197, -0.0005199552342225933, 0.6988020366714001],
     name: "Focus on the cat" },
+
+  { pos: [-0.4072517670678266, -3.9604248384970417, -3.9039148238641768],
+    dir: [-0.761878668078747, -0.23438654719780766, 0.6038243466598912],
+    name: "Leaving the cat" },
 
   { pos: [-0.7283058541437051, -4.057843847545405, -4.868305707212735],
     dir: [-0.4182660193692662, -0.1269196114656235, 0.8994136697128878],
@@ -255,9 +263,48 @@ export function createSplineSampler(
     return { position: _sampledPos, quaternion: _sampledQuat, segmentIndex: segIdx };
   }
 
+  /**
+   * Map scroll t (0..1) to spline u (0..1) so that each segment gets equal scroll distance.
+   * scroll 0 → segment 0 start, 1/N → segment 0 end, 2/N → segment 1 end, … 1 → path end.
+   */
+  function scrollToU(t) {
+    const ct = Math.max(0, Math.min(1, t));
+    const numSegments = N - 1;
+    if (numSegments <= 0) return 0;
+    const segT = ct * numSegments;
+    const segIdx = Math.min(Math.floor(segT), numSegments - 1);
+    const localT = segT - segIdx;
+    const u0 = uAtWaypoint[segIdx];
+    const u1 = uAtWaypoint[segIdx + 1];
+    return u0 + localT * (u1 - u0);
+  }
+
+  /**
+   * Inverse of scrollToU: given spline u (0..1), return scroll t (0..1) so that scrollToU(t) === u.
+   * Use when jumping to a waypoint so the scrubber shows the correct scroll position.
+   */
+  function uToScroll(u) {
+    const cu = Math.max(0, Math.min(1, u));
+    const numSegments = N - 1;
+    if (numSegments <= 0) return 0;
+    let segIdx = N - 2;
+    for (let i = 0; i < N - 1; i++) {
+      if (cu <= uAtWaypoint[i + 1]) {
+        segIdx = i;
+        break;
+      }
+    }
+    const u0 = uAtWaypoint[segIdx];
+    const u1 = uAtWaypoint[segIdx + 1];
+    const localU = u1 > u0 ? (cu - u0) / (u1 - u0) : 0;
+    return (segIdx + localU) / numSegments;
+  }
+
   return {
     curve,
     sample,
+    scrollToU,
+    uToScroll,
     uAtWaypoint,
     uAtAuthored,
     quats,
