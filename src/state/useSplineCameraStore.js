@@ -126,6 +126,8 @@ export const useSplineCameraStore = create((set, get) => {
     enabled: true,
     fov: 50,
     scrollSensitivity: 5.5,
+    /** Extra scroll multiplier: effective scroll = baseScroll * (1 + scrollSlideFactor). 0 = no slide, 0.5 = 50% extra. */
+    scrollSlideFactor: 1.3,
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
@@ -154,6 +156,8 @@ export const useSplineCameraStore = create((set, get) => {
     setShowSplineGeometry: (v) => set({ showSplineGeometry: !!v }),
     setScrollSensitivity: (v) =>
       set({ scrollSensitivity: Math.max(0.01, Math.min(10, Number(v) || 1)) }),
+    setScrollSlideFactor: (v) =>
+      set({ scrollSlideFactor: Math.max(0, Math.min(2, Number(v) ?? 0)) }),
     setCurveParams: (patch) => {
       const curveParams = { ...get().curveParams, ...patch };
       const sampler = rebuildFromCurrent({ curveParams });
@@ -517,6 +521,10 @@ export const useSplineCameraStore = create((set, get) => {
       const steps = mag / Math.max(1, baseStep);
       let stepSize = Math.pow(steps, power) * scaleFactor * sensitivity;
       stepSize = Math.min(stepSize, maxStep * sensitivity);
+
+      // Sliding: effective scroll = baseScroll * (1 + scrollSlideFactor)
+      const slideFactor = Math.max(0, state.scrollSlideFactor ?? 0);
+      stepSize *= 1 + slideFactor;
 
       // Immediate portion (32%) + inertia portion (68%)
       const immediateRatio = 0.32;

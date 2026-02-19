@@ -862,6 +862,8 @@ export const useCameraStore = create((set, get) => {
       maxStep: 0.03, // cap immediate step
     },
 
+    /** Extra scroll multiplier: effective scroll = baseScroll * (1 + scrollSlideFactor). 0 = no slide. */
+    scrollSlideFactor: 1.3,
     scrollDynamics: {
       immediateStepRatio: 0.32,
       velocityScale: 7.5,
@@ -919,6 +921,8 @@ export const useCameraStore = create((set, get) => {
     setMagnitudeMap: (patch) =>
       set((s) => ({ magnitudeMap: { ...s.magnitudeMap, ...patch } })),
 
+    setScrollSlideFactor: (v) =>
+      set({ scrollSlideFactor: Math.max(0, Math.min(2, Number(v) ?? 0)) }),
     setScrollDynamics: (patch) =>
       set((s) => ({ scrollDynamics: { ...s.scrollDynamics, ...patch } })),
 
@@ -1189,6 +1193,9 @@ export const useCameraStore = create((set, get) => {
         );
         totalStep = stepSize + y;
       }
+      // Sliding: effective scroll = baseScroll * (1 + scrollSlideFactor)
+      const slideFactor = Math.max(0, state.scrollSlideFactor ?? 0);
+      totalStep *= 1 + slideFactor;
 
       const dynamics = state.scrollDynamics ?? {};
       const immediateRatio = clamp01(dynamics.immediateStepRatio ?? 0.3);

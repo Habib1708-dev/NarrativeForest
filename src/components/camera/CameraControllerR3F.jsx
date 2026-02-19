@@ -72,6 +72,13 @@ function CameraDebugPanel({ waypoints }) {
           ])
         )
       ),
+      "Scroll slide (extra %)": {
+        value: useCameraStore.getState().scrollSlideFactor,
+        min: 0,
+        max: 2,
+        step: 0.05,
+        onChange: (v) => useCameraStore.getState().setScrollSlideFactor(v),
+      },
       "Step Model": folder({
         baseStep: {
           value: useCameraStore.getState().magnitudeMap.baseStep,

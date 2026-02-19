@@ -15,6 +15,7 @@ export default function SplineCameraDebugPanel() {
   const activeAxis = useSplineCameraStore((s) => s.activeAxis);
   const segmentOffsets = useSplineCameraStore((s) => s.segmentOffsets);
   const curveParams = useSplineCameraStore((s) => s.curveParams);
+  const scrollSlideFactor = useSplineCameraStore((s) => s.scrollSlideFactor);
 
   const primarySelectedSegment = selectedSegments[selectedSegments.length - 1] ?? -1;
   const selectedRangeStart = selectedSegments.length ? Math.min(...selectedSegments) : -1;
@@ -99,6 +100,14 @@ export default function SplineCameraDebugPanel() {
         max: 10,
         step: 0.05,
         onChange: (v) => useSplineCameraStore.getState().setScrollSensitivity(v),
+      },
+      scrollSlideFactor: {
+        value: scrollSlideFactor,
+        min: 0,
+        max: 2,
+        step: 0.05,
+        label: "Scroll slide (extra %)",
+        onChange: (v) => useSplineCameraStore.getState().setScrollSlideFactor(v),
       },
       t: {
         value: 0,
