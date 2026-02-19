@@ -16,6 +16,8 @@ export default function SplineCameraDebugPanel() {
   const segmentOffsets = useSplineCameraStore((s) => s.segmentOffsets);
   const curveParams = useSplineCameraStore((s) => s.curveParams);
   const scrollSlideFactor = useSplineCameraStore((s) => s.scrollSlideFactor);
+  const segment0Dive = useSplineCameraStore((s) => s.segment0Dive);
+  const segment0DiveOffset = useSplineCameraStore((s) => s.segment0DiveOffset);
 
   const primarySelectedSegment = selectedSegments[selectedSegments.length - 1] ?? -1;
   const selectedRangeStart = selectedSegments.length ? Math.min(...selectedSegments) : -1;
@@ -109,6 +111,47 @@ export default function SplineCameraDebugPanel() {
         label: "Scroll slide (extra %)",
         onChange: (v) => useSplineCameraStore.getState().setScrollSlideFactor(v),
       },
+      "First segment dive": folder({
+        enabled: {
+          value: segment0Dive?.enabled ?? true,
+          label: "Enabled",
+          onChange: (v) => useSplineCameraStore.getState().setSegment0Dive({ enabled: v }),
+        },
+        dipAmount: {
+          value: segment0Dive?.dipAmount ?? -0.2,
+          min: -0.5,
+          max: 0,
+          step: 0.01,
+          label: "Dip amount",
+          onChange: (v) => useSplineCameraStore.getState().setSegment0Dive({ dipAmount: v }),
+        },
+        returnDuration: {
+          value: segment0Dive?.returnDuration ?? 0.5,
+          min: 0.3,
+          max: 1.5,
+          step: 0.05,
+          label: "Return duration (s)",
+          onChange: (v) => useSplineCameraStore.getState().setSegment0Dive({ returnDuration: v }),
+        },
+        returnEase: {
+          value: segment0Dive?.returnEase ?? "power2.out",
+          options: ["power2.out", "power3.out", "sine.out", "expo.out"],
+          label: "Return ease",
+          onChange: (v) => useSplineCameraStore.getState().setSegment0Dive({ returnEase: v }),
+        },
+        "Debug": folder({
+          currentOffsetY: {
+            value: segment0DiveOffset ?? 0,
+            min: -0.5,
+            max: 0,
+            step: 0.001,
+            label: "Current offset (Y)",
+            onChange: (v) => useSplineCameraStore.getState().setSegment0DiveOffset(v),
+          },
+          "Trigger dive": button(() => useSplineCameraStore.getState().triggerSegment0Dive()),
+          "Reset dive": button(() => useSplineCameraStore.getState().resetSegment0Dive()),
+        }, { collapsed: false }),
+      }, { collapsed: true }),
       t: {
         value: 0,
         min: 0,

@@ -38,8 +38,47 @@ export const useSplineCameraStore = create((set, get) => {
   const initialSegmentGroups = [];
   let velocityTween = null;
   let tickerActive = false;
+  let skipNextVelocityTick = false;
   const diveOffsetRef = { value: 0 };
-  let diveReturnTween = null;
+  let diveTween = null;
+  let lastScrollInputAt = 0;
+  const DIVE_BURST_GAP_MS = 140;
+
+  const startSegment0Dive = (diveCfg) => {
+    const dipAmount = Number(diveCfg?.dipAmount ?? -0.05);
+    const returnDuration = Math.max(0.05, Number(diveCfg?.returnDuration ?? 0.5));
+    const returnEase = diveCfg?.returnEase ?? "power2.out";
+    const attackDuration = Math.min(0.18, Math.max(0.06, returnDuration * 0.2));
+
+    if (diveTween) diveTween.kill();
+    if (!Number.isFinite(dipAmount) || dipAmount === 0) {
+      diveOffsetRef.value = 0;
+      set({ segment0DiveOffset: 0 });
+      return;
+    }
+
+    diveTween = gsap.timeline({
+      overwrite: "auto",
+      onUpdate: () => set({ segment0DiveOffset: diveOffsetRef.value }),
+      onComplete: () => {
+        diveTween = null;
+        diveOffsetRef.value = 0;
+        set({ segment0DiveOffset: 0 });
+      },
+    });
+
+    diveTween
+      .to(diveOffsetRef, {
+        value: dipAmount,
+        duration: attackDuration,
+        ease: "sine.out",
+      })
+      .to(diveOffsetRef, {
+        value: 0,
+        duration: returnDuration,
+        ease: returnEase,
+      });
+  };
 
   const rebuild = (
     waypoints,
@@ -78,12 +117,16 @@ export const useSplineCameraStore = create((set, get) => {
     if (!tickerActive) return;
     gsap.ticker.remove(tick);
     tickerActive = false;
+    skipNextVelocityTick = false;
   };
 
   const ensureTicker = () => {
     if (tickerActive) return;
     gsap.ticker.add(tick);
     tickerActive = true;
+    // When waking from idle, immediateDelta was already applied in applyWheel.
+    // Skip one velocity integration tick to avoid a startup double-kick.
+    skipNextVelocityTick = true;
   };
 
   function tick() {
@@ -99,6 +142,11 @@ export const useSplineCameraStore = create((set, get) => {
     if (Math.abs(scrollState.velocity) <= 0.0004) {
       scrollState.velocity = 0;
       stopTicker();
+      return;
+    }
+
+    if (skipNextVelocityTick) {
+      skipNextVelocityTick = false;
       return;
     }
 
@@ -175,25 +223,12 @@ export const useSplineCameraStore = create((set, get) => {
       const uSeg = sm.scrollToU ? sm.scrollToU(state.t) : state.t;
       const { segmentIndex: segIdx } = sm.sample(uSeg);
       if (segIdx !== 0 || diveCfg?.enabled === false) return;
-      diveOffsetRef.value = diveCfg.dipAmount;
-      set({ segment0DiveOffset: diveOffsetRef.value });
-      if (diveReturnTween) diveReturnTween.kill();
-      diveReturnTween = gsap.to(diveOffsetRef, {
-        value: 0,
-        duration: diveCfg.returnDuration ?? 0.5,
-        ease: diveCfg.returnEase ?? "power2.out",
-        overwrite: "auto",
-        onUpdate: () => set({ segment0DiveOffset: diveOffsetRef.value }),
-        onComplete: () => {
-          diveReturnTween = null;
-          set({ segment0DiveOffset: 0 });
-        },
-      });
+      startSegment0Dive(diveCfg);
     },
     resetSegment0Dive: () => {
-      if (diveReturnTween) {
-        diveReturnTween.kill();
-        diveReturnTween = null;
+      if (diveTween) {
+        diveTween.kill();
+        diveTween = null;
       }
       diveOffsetRef.value = 0;
       set({ segment0DiveOffset: 0 });
@@ -552,7 +587,8 @@ export const useSplineCameraStore = create((set, get) => {
       const state = get();
       if (!state.enabled || deltaY === 0) return;
 
-      const dir = deltaY < 0 ? +1 : -1;
+      // Positive deltaY drives progression forward along the spline.
+      const dir = deltaY > 0 ? +1 : -1;
       const mag = Math.abs(deltaY);
       const sensitivity = Math.max(0.01, Math.min(10, state.scrollSensitivity ?? 1));
 
@@ -581,21 +617,11 @@ export const useSplineCameraStore = create((set, get) => {
       const { sampler: sm, segment0Dive: diveCfg } = get();
       const uSeg = sm.scrollToU ? sm.scrollToU(baseT) : baseT;
       const { segmentIndex: segIdx } = sm.sample(uSeg);
-      if (segIdx === 0 && diveCfg?.enabled !== false) {
-        diveOffsetRef.value = diveCfg.dipAmount;
-        set({ segment0DiveOffset: diveOffsetRef.value });
-        if (diveReturnTween) diveReturnTween.kill();
-        diveReturnTween = gsap.to(diveOffsetRef, {
-          value: 0,
-          duration: diveCfg.returnDuration ?? 0.5,
-          ease: diveCfg.returnEase ?? "power2.out",
-          overwrite: "auto",
-          onUpdate: () => set({ segment0DiveOffset: diveOffsetRef.value }),
-          onComplete: () => {
-            diveReturnTween = null;
-            set({ segment0DiveOffset: 0 });
-          },
-        });
+      const now = isBrowser && typeof performance !== "undefined" ? performance.now() : Date.now();
+      const isNewScrollBurst = now - lastScrollInputAt > DIVE_BURST_GAP_MS;
+      lastScrollInputAt = now;
+      if (segIdx === 0 && diveCfg?.enabled !== false && isNewScrollBurst) {
+        startSegment0Dive(diveCfg);
       }
 
       if (!isBrowser) return;
@@ -629,9 +655,9 @@ export const useSplineCameraStore = create((set, get) => {
       if (segmentIndex !== 0 || (diveOff ?? 0) === 0) {
         return { position, quaternion, fov, segmentIndex };
       }
-      // Apply dip along camera-local "down" so it reads as a view-aligned dip, not world Y (which felt like backward motion on a 3D path)
-      const down = new THREE.Vector3(0, -1, 0).applyQuaternion(quaternion);
-      const offsetPosition = position.clone().add(down.multiplyScalar(-diveOff));
+      // Keep dive purely vertical so it never injects backward/forward displacement.
+      const dipDistance = Math.abs(diveOff);
+      const offsetPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
       return { position: offsetPosition, quaternion, fov, segmentIndex };
     },
   };

@@ -46,7 +46,8 @@ export default function SplineCameraController() {
         e.preventDefault();
         return;
       }
-      applyWheel(-e.deltaY);
+      // Pass native wheel delta directly; sign normalization happens in the store.
+      applyWheel(e.deltaY);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
@@ -85,8 +86,9 @@ export default function SplineCameraController() {
       if (Math.abs(dy) < MIN_TOUCH_DELTA) return;
 
       lastY = event.clientY;
-      const deltaY = -dy * TOUCH_DELTA_MULTIPLIER;
-      applyWheel(-deltaY);
+      // Positive dy (finger moving down) maps to positive deltaY.
+      const deltaY = dy * TOUCH_DELTA_MULTIPLIER;
+      applyWheel(deltaY);
       event.preventDefault();
     };
 
