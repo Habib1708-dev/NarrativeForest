@@ -18,6 +18,7 @@ export default function SplineCameraDebugPanel() {
   const scrollSlideFactor = useSplineCameraStore((s) => s.scrollSlideFactor);
   const segment0Dive = useSplineCameraStore((s) => s.segment0Dive);
   const segment0DiveOffset = useSplineCameraStore((s) => s.segment0DiveOffset);
+  const segment1Float = useSplineCameraStore((s) => s.segment1Float);
 
   const primarySelectedSegment = selectedSegments[selectedSegments.length - 1] ?? -1;
   const selectedRangeStart = selectedSegments.length ? Math.min(...selectedSegments) : -1;
@@ -151,6 +152,29 @@ export default function SplineCameraDebugPanel() {
           "Trigger dive": button(() => useSplineCameraStore.getState().triggerSegment0Dive()),
           "Reset dive": button(() => useSplineCameraStore.getState().resetSegment0Dive()),
         }, { collapsed: false }),
+      }, { collapsed: true }),
+      "Float (segments 2–4)": folder({
+        enabled: {
+          value: segment1Float?.enabled ?? true,
+          label: "Enabled",
+          onChange: (v) => useSplineCameraStore.getState().setSegment1Float({ enabled: v }),
+        },
+        amplitude: {
+          value: segment1Float?.amplitude ?? 0.01,
+          min: 0,
+          max: 0.1,
+          step: 0.005,
+          label: "Amplitude",
+          onChange: (v) => useSplineCameraStore.getState().setSegment1Float({ amplitude: v }),
+        },
+        frequency: {
+          value: segment1Float?.frequency ?? 0.45,
+          min: 0.2,
+          max: 2,
+          step: 0.05,
+          label: "Frequency (Hz)",
+          onChange: (v) => useSplineCameraStore.getState().setSegment1Float({ frequency: v }),
+        },
       }, { collapsed: true }),
       t: {
         value: 0,

@@ -14,6 +14,10 @@ import {
 } from "../utils/splineCameraPath";
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const smoothStep = (x) => {
+  const c = clamp01(x);
+  return c * c * (3 - 2 * c);
+};
 const isBrowser = typeof window !== "undefined";
 const axisMap = { x: 0, y: 1, z: 2 };
 const cloneWaypoints = (wps) =>
@@ -185,6 +189,11 @@ export const useSplineCameraStore = create((set, get) => {
       returnDuration: 0.95,
       returnEase: "sine.out",
     },
+    segment1Float: {
+      enabled: true,
+      amplitude: 0.01,
+      frequency: 0.45,
+    },
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
@@ -217,6 +226,8 @@ export const useSplineCameraStore = create((set, get) => {
       set({ scrollSlideFactor: Math.max(0, Math.min(2, Number(v) ?? 0)) }),
     setSegment0Dive: (patch) =>
       set((s) => ({ segment0Dive: { ...s.segment0Dive, ...patch } })),
+    setSegment1Float: (patch) =>
+      set((s) => ({ segment1Float: { ...s.segment1Float, ...patch } })),
     triggerSegment0Dive: () => {
       const state = get();
       const { sampler: sm, segment0Dive: diveCfg } = state;
@@ -649,16 +660,33 @@ export const useSplineCameraStore = create((set, get) => {
     /* -- pose getter (called every frame in useFrame) -- */
 
     getPose: () => {
-      const { t, fov, sampler, segment0DiveOffset: diveOff } = get();
+      const { t, fov, sampler, segment0DiveOffset: diveOff, segment1Float: floatCfg } = get();
       const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
       const { position, quaternion, segmentIndex } = sampler.sample(u);
+      let outPosition = position;
       // Apply dive offset whenever it's non-zero, so leaving segment 0 doesn't snap.
       if ((diveOff ?? 0) !== 0) {
         const dipDistance = Math.abs(diveOff);
-        const offsetPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
-        return { position: offsetPosition, quaternion, fov, segmentIndex };
+        outPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
       }
-      return { position, quaternion, fov, segmentIndex };
+      // Segments 1–3 (2nd, 3rd, 4th): subtle vertical float, blended at boundaries.
+      if ([1, 2, 3].includes(segmentIndex) && floatCfg?.enabled) {
+        const uAtWaypoint = sampler.uAtWaypoint;
+        let floatBlend = 1;
+        if (Array.isArray(uAtWaypoint) && segmentIndex >= 0 && segmentIndex < uAtWaypoint.length - 1) {
+          const u0 = uAtWaypoint[segmentIndex];
+          const u1 = uAtWaypoint[segmentIndex + 1];
+          const localT = clamp01(u1 > u0 ? (u - u0) / (u1 - u0) : 0);
+          if (segmentIndex === 1) floatBlend = smoothStep(localT);
+          else if (segmentIndex === 3) floatBlend = smoothStep(1 - localT);
+        }
+        const time = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
+        const amplitude = Number(floatCfg.amplitude ?? 0.01);
+        const frequency = Number(floatCfg.frequency ?? 0.45);
+        const dy = floatBlend * amplitude * Math.sin(2 * Math.PI * frequency * time);
+        outPosition = outPosition.clone().add(new THREE.Vector3(0, dy, 0));
+      }
+      return { position: outPosition, quaternion, fov, segmentIndex };
     },
   };
 });
