@@ -32,9 +32,11 @@ export const useSplineCameraStore = create((set, get) => {
   const initialWaypoints = cloneWaypoints(SPLINE_WAYPOINTS);
   const initialCurveParams = { ...DEFAULT_CURVE_PARAMS };
   const segCount = Math.max(0, initialWaypoints.length - 1);
-  const initialSegmentOffsets = Array.from({ length: segCount }, (_, i) =>
-    i === 4 ? [0, 0, 0.06] : [0, 0, 0]
-  );
+  const initialSegmentOffsets = Array.from({ length: segCount }, (_, i) => {
+    if (i === 3) return [0, -0.13, -0.13];  // segment 3: y and z axis offset
+    if (i === 4) return [0, 0, 0.06];
+    return [0, 0, 0];
+  });
   const initialSegmentWeightFns = Array.from(
     { length: segCount },
     () => "bell"
