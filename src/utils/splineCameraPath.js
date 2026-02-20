@@ -103,6 +103,34 @@ export const WEIGHT_FN_LABELS = {
 
 export const WEIGHT_FN_NAMES = Object.keys(WEIGHT_FNS);
 
+/**
+ * Butterfly habitat aligned to the spline camera's first segment:
+ * - Start: first waypoint position + 0.2 units ahead in waypoint look direction
+ * - End: midpoint of the second segment (halfway between waypoint 1 and waypoint 2)
+ * - Width/height unchanged; depth = distance(start, end); center = midpoint; yaw from start→end
+ */
+export function getButterflyHabitatFromFirstSegment() {
+  const wp0 = SPLINE_WAYPOINTS[0];
+  const wp1 = SPLINE_WAYPOINTS[1];
+  const wp2 = SPLINE_WAYPOINTS[2];
+  const dir = new THREE.Vector3(...wp0.dir).normalize();
+  const start = new THREE.Vector3(...wp0.pos).addScaledVector(dir, 0.2);
+  const endSecondSeg = new THREE.Vector3(...wp1.pos).add(new THREE.Vector3(...wp2.pos)).multiplyScalar(0.5);
+  const end = endSecondSeg;
+  const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+  const forward = new THREE.Vector3().subVectors(end, start).normalize();
+  const depth = start.distanceTo(end);
+  const yawRad = Math.atan2(forward.x, forward.z);
+  const yawDeg = THREE.MathUtils.radToDeg(yawRad);
+  return {
+    center: [center.x, center.y, center.z],
+    depth,
+    yawDeg,
+    width: 0.439,
+    height: 0.35,
+  };
+}
+
 export function formatWaypointsForExport(waypoints) {
   return JSON.stringify(waypoints, null, 2);
 }
