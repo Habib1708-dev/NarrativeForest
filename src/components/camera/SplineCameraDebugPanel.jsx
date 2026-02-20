@@ -19,6 +19,9 @@ export default function SplineCameraDebugPanel() {
   const segment0Dive = useSplineCameraStore((s) => s.segment0Dive);
   const segment0DiveOffset = useSplineCameraStore((s) => s.segment0DiveOffset);
   const segment1Float = useSplineCameraStore((s) => s.segment1Float);
+  const waypointGravityEnabled = useSplineCameraStore((s) => s.waypointGravityEnabled);
+  const waypointGravityStrength = useSplineCameraStore((s) => s.waypointGravityStrength);
+  const waypointGravityRadius = useSplineCameraStore((s) => s.waypointGravityRadius);
 
   const primarySelectedSegment = selectedSegments[selectedSegments.length - 1] ?? -1;
   const selectedRangeStart = selectedSegments.length ? Math.min(...selectedSegments) : -1;
@@ -174,6 +177,29 @@ export default function SplineCameraDebugPanel() {
           step: 0.05,
           label: "Frequency (Hz)",
           onChange: (v) => useSplineCameraStore.getState().setSegment1Float({ frequency: v }),
+        },
+      }, { collapsed: true }),
+      "Waypoint gravity": folder({
+        enabled: {
+          value: waypointGravityEnabled ?? true,
+          label: "Enabled",
+          onChange: (v) => useSplineCameraStore.getState().setWaypointGravityEnabled(v),
+        },
+        strength: {
+          value: waypointGravityStrength ?? 0.6,
+          min: 0,
+          max: 1,
+          step: 0.05,
+          label: "Strength (slowdown at waypoint)",
+          onChange: (v) => useSplineCameraStore.getState().setWaypointGravityStrength(v),
+        },
+        radius: {
+          value: waypointGravityRadius ?? 0.05,
+          min: 0.02,
+          max: 0.15,
+          step: 0.005,
+          label: "Radius (u space)",
+          onChange: (v) => useSplineCameraStore.getState().setWaypointGravityRadius(v),
         },
       }, { collapsed: true }),
       t: {

@@ -24,6 +24,18 @@ const cloneWaypoints = (wps) =>
   wps.map((w) => ({ pos: [...w.pos], dir: [...w.dir], name: w.name }));
 const clampStep = (v) => Math.max(0.001, Math.min(10, Number(v) || 0.05));
 
+/** Waypoint names that get incoming-only gravity (slowdown when approaching). */
+const GRAVITY_WAYPOINT_NAMES = [
+  "Focus on the man 2",
+  "Focus on the cat",
+  "Surrounded by nature",
+  "Focus on the tower",
+  "Focus on crystals 1",
+  "Focus on crystals 2",
+];
+
+const WAYPOINT_GRAVITY_MIN_FACTOR = 0.15;
+
 /* ---- mutable refs shared by the tick loop and applyWheel ---- */
 const scrollState = { velocity: 0 };
 const tDriver = { value: 0 };
@@ -135,6 +147,38 @@ export const useSplineCameraStore = create((set, get) => {
     skipNextVelocityTick = true;
   };
 
+  /**
+   * Returns a factor in [minFactor, 1] to scale displacement/impulse when approaching
+   * a gravity waypoint. 1 = no slowdown; lower = slower. Only applies when incoming.
+   */
+  function getWaypointGravityFactor(t, velocity) {
+    const state = get();
+    if (!state.waypointGravityEnabled || (state.waypointGravityStrength ?? 0) <= 0) return 1;
+    const strength = Math.max(0, Math.min(1, Number(state.waypointGravityStrength) ?? 0));
+    const radius = Math.max(0.001, Number(state.waypointGravityRadius) ?? 0.05);
+    const sampler = state.sampler;
+    const waypoints = state.waypoints;
+    const uAtWaypoint = sampler?.uAtWaypoint;
+    if (!sampler?.scrollToU || !Array.isArray(uAtWaypoint) || !Array.isArray(waypoints)) return 1;
+
+    const u = sampler.scrollToU(t);
+    let factor = 1;
+    for (let i = 0; i < waypoints.length; i++) {
+      const name = waypoints[i]?.name;
+      if (!name || !GRAVITY_WAYPOINT_NAMES.includes(name)) continue;
+      const uWp = uAtWaypoint[i];
+      if (uWp == null) continue;
+      const incoming = (velocity > 0 && u < uWp) || (velocity < 0 && u > uWp);
+      if (!incoming) continue;
+      const distance = Math.abs(u - uWp);
+      if (distance >= radius) continue;
+      const proximity = 1 - distance / radius;
+      const waypointFactor = 1 - strength * proximity;
+      factor = Math.min(factor, waypointFactor);
+    }
+    return Math.max(WAYPOINT_GRAVITY_MIN_FACTOR, factor);
+  }
+
   function tick() {
     if (!isBrowser) { stopTicker(); return; }
     const { enabled } = get();
@@ -156,7 +200,9 @@ export const useSplineCameraStore = create((set, get) => {
       return;
     }
 
-    let nextT = tDriver.value + scrollState.velocity * dt;
+    const gravityFactor = getWaypointGravityFactor(tDriver.value, scrollState.velocity);
+    const effectiveVelocity = scrollState.velocity * gravityFactor;
+    let nextT = tDriver.value + effectiveVelocity * dt;
 
     // Clamp at boundaries and kill velocity
     if (nextT <= 0 || nextT >= 1) {
@@ -196,6 +242,9 @@ export const useSplineCameraStore = create((set, get) => {
       amplitude: 0.01,
       frequency: 0.45,
     },
+    waypointGravityEnabled: true,
+    waypointGravityStrength: 0.6,
+    waypointGravityRadius: 0.05,
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
@@ -230,6 +279,11 @@ export const useSplineCameraStore = create((set, get) => {
       set((s) => ({ segment0Dive: { ...s.segment0Dive, ...patch } })),
     setSegment1Float: (patch) =>
       set((s) => ({ segment1Float: { ...s.segment1Float, ...patch } })),
+    setWaypointGravityEnabled: (v) => set({ waypointGravityEnabled: !!v }),
+    setWaypointGravityStrength: (v) =>
+      set({ waypointGravityStrength: Math.max(0, Math.min(1, Number(v) ?? 0)) }),
+    setWaypointGravityRadius: (v) =>
+      set({ waypointGravityRadius: Math.max(0.001, Math.min(0.2, Number(v) ?? 0.05)) }),
     triggerSegment0Dive: () => {
       const state = get();
       const { sampler: sm, segment0Dive: diveCfg } = state;
@@ -621,7 +675,8 @@ export const useSplineCameraStore = create((set, get) => {
 
       // Immediate portion (32%) + inertia portion (68%)
       const immediateRatio = 0.32;
-      const immediateDelta = dir * stepSize * immediateRatio;
+      const gravityFactor = getWaypointGravityFactor(state.t, dir);
+      const immediateDelta = dir * stepSize * immediateRatio * gravityFactor;
       const baseT = clamp01(state.t + immediateDelta);
       tDriver.value = baseT;
       set({ t: baseT });
@@ -639,8 +694,8 @@ export const useSplineCameraStore = create((set, get) => {
 
       if (!isBrowser) return;
 
-      // Inertia impulse
-      const impulse = dir * stepSize * (1 - immediateRatio);
+      // Inertia impulse (same gravity factor so scroll input slows when approaching)
+      const impulse = dir * stepSize * (1 - immediateRatio) * gravityFactor;
       const velocityScale = 7.5;
       const maxVelocity = 0.24;
 
@@ -671,7 +726,7 @@ export const useSplineCameraStore = create((set, get) => {
         const dipDistance = Math.abs(diveOff);
         outPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
       }
-      // Segments 1–3 (2nd, 3rd, 4th): subtle vertical float, blended at boundaries.
+      // Segments 1–3 (2nd, 3rd, 4th): subtle vertical float (flood effect), blended at boundaries.
       if ([1, 2, 3].includes(segmentIndex) && floatCfg?.enabled) {
         const uAtWaypoint = sampler.uAtWaypoint;
         let floatBlend = 1;
@@ -680,7 +735,8 @@ export const useSplineCameraStore = create((set, get) => {
           const u1 = uAtWaypoint[segmentIndex + 1];
           const localT = clamp01(u1 > u0 ? (u - u0) / (u1 - u0) : 0);
           if (segmentIndex === 1) floatBlend = smoothStep(localT);
-          else if (segmentIndex === 3) floatBlend = smoothStep(1 - localT);
+          // Segment 3: full float (flood effect) for the whole segment — no ramp-out
+          else if (segmentIndex === 3) floatBlend = 1;
         }
         const time = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
         const amplitude = Number(floatCfg.amplitude ?? 0.01);

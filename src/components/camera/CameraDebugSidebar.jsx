@@ -184,9 +184,13 @@ export default function CameraDebugSidebar() {
   const selectedWaypoint = useSplineCameraStore((s) => s.selectedWaypoint);
   const segmentWeightFns = useSplineCameraStore((s) => s.segmentWeightFns);
   const affectedWaypoints = useSplineCameraStore((s) => s.affectedWaypoints);
+  const waypointGravityEnabled = useSplineCameraStore((s) => s.waypointGravityEnabled);
+  const waypointGravityStrength = useSplineCameraStore((s) => s.waypointGravityStrength);
+  const waypointGravityRadius = useSplineCameraStore((s) => s.waypointGravityRadius);
 
   const {
     setEnabled, setT, setSelectedSegments, setActiveAxes, setNudgeStep,
+    setWaypointGravityEnabled, setWaypointGravityStrength, setWaypointGravityRadius,
     setInsertSegment, setInsertT, insertPointInSegment,
     nudgeSegmentsByAxis, captureCurrentPose,
     setSelectedWaypoint, setAffectedWaypoints, setSelectedSegmentsWeightFn,
@@ -283,6 +287,46 @@ export default function CameraDebugSidebar() {
             Orbit with mouse. Use "Capture Pose" to apply camera to a waypoint.
           </div>
         )}
+      </div>
+
+      {/* ---- Waypoint gravity (incoming slowdown) ---- */}
+      <div style={S.section}>
+        <div style={S.sectionTitle}>Waypoint gravity</div>
+        <div style={S.row}>
+          <label style={S.label}>
+            <input
+              type="checkbox"
+              style={S.checkbox}
+              checked={waypointGravityEnabled ?? true}
+              onChange={(e) => setWaypointGravityEnabled(e.target.checked)}
+            />
+            Enabled (slow when approaching)
+          </label>
+        </div>
+        <div style={S.row}>
+          <span style={S.dimText}>Strength:</span>
+          <input
+            type="number"
+            style={S.input}
+            min={0}
+            max={1}
+            step={0.05}
+            value={waypointGravityStrength ?? 0.6}
+            onChange={(e) => setWaypointGravityStrength(parseFloat(e.target.value) || 0)}
+          />
+        </div>
+        <div style={S.row}>
+          <span style={S.dimText}>Radius (u):</span>
+          <input
+            type="number"
+            style={S.input}
+            min={0.02}
+            max={0.15}
+            step={0.005}
+            value={waypointGravityRadius ?? 0.05}
+            onChange={(e) => setWaypointGravityRadius(parseFloat(e.target.value) || 0.05)}
+          />
+        </div>
       </div>
 
       {/* ---- 2. Jump to Waypoint ---- */}
