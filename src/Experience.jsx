@@ -327,6 +327,20 @@ export default function Experience() {
     performanceMonitor.markTimeToFirstFrame();
   });
 
+  // When switching from spline to free roam, sync OrbitControls target so position and angle are preserved
+  const orbitLookDistance = 10;
+  useFrame(() => {
+    if (enabled) {
+      orbitSyncedRef.current = false;
+      return;
+    }
+    if (!USE_SPLINE_CAMERA || !orbitControlsRef.current || orbitSyncedRef.current) return;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    orbitControlsRef.current.target.copy(camera.position).add(dir.multiplyScalar(orbitLookDistance));
+    orbitSyncedRef.current = true;
+  });
+
   useEffect(() => {
     const canvas = gl?.domElement;
     if (!canvas) return undefined;
@@ -463,6 +477,8 @@ export default function Experience() {
   const lakeRef = useRef(null);
   const [terrainGroupHandle, setTerrainGroupHandle] = useState(null);
   const firstFrameRef = useRef(true);
+  const orbitControlsRef = useRef(null);
+  const orbitSyncedRef = useRef(false);
 
   // Forest occluders (instanced trees + rocks) — NEW
   const [forestOccluders] = useState([]);
@@ -876,6 +892,7 @@ export default function Experience() {
       {/* OrbitControls - only active in debug mode when narrative camera is disabled */}
       {isDebugMode && !enabled && (
         <OrbitControls
+          ref={orbitControlsRef}
           makeDefault
           minDistance={0.05}
           maxDistance={Infinity}
