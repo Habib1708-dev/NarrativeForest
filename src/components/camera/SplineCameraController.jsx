@@ -15,8 +15,18 @@ export default function SplineCameraController() {
   const isDebugMode = useDebugStore((s) => s.isDebugMode);
   const showSplineGeometry = useSplineCameraStore((s) => s.showSplineGeometry);
   const splineEnabled = useSplineCameraStore((s) => s.enabled);
+  const mode = useSplineCameraStore((s) => s.mode);
+  const t = useSplineCameraStore((s) => s.t ?? 0);
   const getPose = useSplineCameraStore((s) => s.getPose);
   const applyWheel = useSplineCameraStore((s) => s.applyWheel);
+  const updateFreeFly = useSplineCameraStore((s) => s.updateFreeFly);
+  const enterFreeFlyAtEnd = useSplineCameraStore((s) => s.enterFreeFlyAtEnd);
+  const startFreeFlyDrag = useSplineCameraStore((s) => s.startFreeFlyDrag);
+  const dragFreeFly = useSplineCameraStore((s) => s.dragFreeFly);
+  const endFreeFlyDrag = useSplineCameraStore((s) => s.endFreeFlyDrag);
+
+  const isAtEnd = t >= 0.999;
+  const showJoystick = splineEnabled && (mode === "freeFly" || (mode === "path" && isAtEnd));
 
   // Sync spline enabled state to global camera store so Experience.jsx can show
   // OrbitControls when spline is disabled (free roam for debugging).
@@ -25,9 +35,13 @@ export default function SplineCameraController() {
     return () => useCameraStore.getState().setEnabled(false);
   }, [splineEnabled]);
 
-  // Apply camera pose every frame
-  useFrame(() => {
+  // Apply camera pose every frame; when in freefly, run physics then apply pose
+  useFrame((_, dt) => {
     if (!useSplineCameraStore.getState().enabled) return;
+    const store = useSplineCameraStore.getState();
+    if (store.mode === "freeFly") {
+      updateFreeFly(dt);
+    }
     const { position, quaternion, fov } = getPose();
     camera.position.copy(position);
     camera.quaternion.copy(quaternion);
@@ -52,6 +66,44 @@ export default function SplineCameraController() {
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
   }, [applyWheel]);
+
+  // Joystick: when at end of path, pointer-down enters freeflight then starts drag; when already freefly, just drag
+  useEffect(() => {
+    if (!showJoystick) return;
+    const ignoreSelector =
+      "button, input, textarea, select, a, [role='button'], [role='link'], [role='textbox'], [data-freefly-ignore]";
+    const isIgnoredTarget = (target) =>
+      target instanceof Element && Boolean(target.closest(ignoreSelector));
+
+    const onPointerDown = (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
+      if (isIgnoredTarget(e.target)) return;
+      e.preventDefault();
+      const store = useSplineCameraStore.getState();
+      if (store.mode === "path" && store.t >= 0.999) {
+        enterFreeFlyAtEnd();
+      }
+      startFreeFlyDrag(e.clientX, e.clientY);
+    };
+    const onPointerMove = (e) => {
+      if (!e.isPrimary) return;
+      e.preventDefault();
+      dragFreeFly(e.clientX, e.clientY);
+    };
+    const onPointerEnd = () => endFreeFlyDrag();
+
+    window.addEventListener("pointerdown", onPointerDown, { passive: false });
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+      endFreeFlyDrag();
+    };
+  }, [showJoystick, enterFreeFlyAtEnd, startFreeFlyDrag, dragFreeFly, endFreeFlyDrag]);
 
   // Touch / pointer drag scroll (same pattern as CameraControllerR3F)
   useEffect(() => {

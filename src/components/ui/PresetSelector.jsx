@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 /**
  * Preset Selector Component
@@ -11,7 +13,9 @@ export default function PresetSelector({
   currentPreset,
   onPresetChange,
 }) {
-  const mode = useCameraStore((state) => state.mode);
+  const cameraMode = useCameraStore((state) => state.mode);
+  const splineMode = useSplineCameraStore((state) => state.mode);
+  const mode = USE_SPLINE_CAMERA ? splineMode : cameraMode;
   const [isOpen, setIsOpen] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const panelRef = useRef(null);

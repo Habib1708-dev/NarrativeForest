@@ -11,6 +11,7 @@ import { useThree, useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
 import { useDebugStore } from "../../state/useDebugStore";
+import { getButterflyHabitatFromFirstSegment } from "../../utils/splineCameraPath";
 
 const UP = new THREE.Vector3(0, 1, 0);
 const Y_FLIP = new THREE.Quaternion().setFromAxisAngle(
@@ -19,6 +20,8 @@ const Y_FLIP = new THREE.Quaternion().setFromAxisAngle(
 );
 const EPS = 1e-6;
 const randPhase = () => Math.random() * Math.PI * 2.0;
+
+const BUTTERFLY_HABITAT = getButterflyHabitatFromFirstSegment();
 
 // clamp a point to an oriented box
 function clampPointToOrientedBox(
@@ -45,8 +48,8 @@ function clampPointToOrientedBox(
 
 export default forwardRef(function IntroButterfly(
   {
-    // initial transform
-    position = [-0.131, -3.934, -5.104],
+    // initial transform (default: center of habitat aligned to spline first segment)
+    position = BUTTERFLY_HABITAT.center,
     rotation,
     scale = 0.03,
 
@@ -221,30 +224,30 @@ export default forwardRef(function IntroButterfly(
               maxSpeed: { value: 1.5, min: 0.2, max: 4, step: 0.01 },
               orientationSmoothing: { value: 50.0, min: 0, max: 50, step: 0.1 },
 
-              // Habitat
+              // Habitat (aligned to spline camera first segment: start 0.2 ahead of wp0, end at wp1)
               showHabitat: { value: false, label: "Show Habitat" },
               habitatCenterX: {
-                value: position[0],
+                value: BUTTERFLY_HABITAT.center[0],
                 min: -10,
                 max: 10,
                 step: 0.001,
               },
               habitatCenterY: {
-                value: position[1],
+                value: BUTTERFLY_HABITAT.center[1],
                 min: -10,
                 max: 10,
                 step: 0.001,
               },
               habitatCenterZ: {
-                value: position[2],
+                value: BUTTERFLY_HABITAT.center[2],
                 min: -10,
                 max: 10,
                 step: 0.001,
               },
-              habitatYawDeg: { value: -33.6, min: -180, max: 180, step: 0.1 },
-              habitatWidth: { value: 0.439, min: 0.05, max: 10, step: 0.01 },
-              habitatHeight: { value: 0.35, min: 0.05, max: 10, step: 0.01 },
-              habitatDepth: { value: 5.0, min: 0.05, max: 20, step: 0.01 },
+              habitatYawDeg: { value: BUTTERFLY_HABITAT.yawDeg, min: -180, max: 180, step: 0.1 },
+              habitatWidth: { value: BUTTERFLY_HABITAT.width, min: 0.05, max: 10, step: 0.01 },
+              habitatHeight: { value: BUTTERFLY_HABITAT.height, min: 0.05, max: 10, step: 0.01 },
+              habitatDepth: { value: BUTTERFLY_HABITAT.depth, min: 0.05, max: 20, step: 0.01 },
               habitatWireColor: { value: "#7fc7ff" },
               habitatWireOpacity: { value: 0.45, min: 0, max: 1, step: 0.01 },
 
@@ -254,18 +257,18 @@ export default forwardRef(function IntroButterfly(
                 const k = get;
                 // recompute habitat basis (for clamping)
                 const hc = new THREE.Vector3(
-                  k("habitatCenterX", position[0]),
-                  k("habitatCenterY", position[1]),
-                  k("habitatCenterZ", position[2])
+                  k("habitatCenterX", BUTTERFLY_HABITAT.center[0]),
+                  k("habitatCenterY", BUTTERFLY_HABITAT.center[1]),
+                  k("habitatCenterZ", BUTTERFLY_HABITAT.center[2])
                 );
-                const yaw = THREE.MathUtils.degToRad(k("habitatYawDeg", -33.6));
+                const yaw = THREE.MathUtils.degToRad(k("habitatYawDeg", BUTTERFLY_HABITAT.yawDeg));
                 const q = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
                 const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
                 const up = UP.clone();
                 const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-                const halfW = Math.max(0.001, k("habitatWidth", 0.439) * 0.5);
-                const halfH = Math.max(0.001, k("habitatHeight", 0.35) * 0.5);
-                const halfD = Math.max(0.001, k("habitatDepth", 5.0) * 0.5);
+                const halfW = Math.max(0.001, k("habitatWidth", BUTTERFLY_HABITAT.width) * 0.5);
+                const halfH = Math.max(0.001, k("habitatHeight", BUTTERFLY_HABITAT.height) * 0.5);
+                const halfD = Math.max(0.001, k("habitatDepth", BUTTERFLY_HABITAT.depth) * 0.5);
 
                 const ahead = k("aheadDistance", 0.9);
                 const offY = k("heightOffset", -0.15);
@@ -493,14 +496,14 @@ export default forwardRef(function IntroButterfly(
       get("habitatCenterY", position[1]),
       get("habitatCenterZ", position[2])
     );
-    const yaw = THREE.MathUtils.degToRad(get("habitatYawDeg", -33.6));
+    const yaw = THREE.MathUtils.degToRad(get("habitatYawDeg", BUTTERFLY_HABITAT.yawDeg));
     const q = s.tmpHabitatQuat.setFromAxisAngle(UP, yaw);
     const right = s.right.set(1, 0, 0).applyQuaternion(q);
     const up = s.up.copy(UP);
     const forward = s.forward.set(0, 0, 1).applyQuaternion(q);
-    const halfW = (s.halfW = Math.max(0.001, get("habitatWidth", 0.439) * 0.5));
-    const halfH = (s.halfH = Math.max(0.001, get("habitatHeight", 0.35) * 0.5));
-    const halfD = (s.halfD = Math.max(0.001, get("habitatDepth", 5.0) * 0.5));
+    const halfW = (s.halfW = Math.max(0.001, get("habitatWidth", BUTTERFLY_HABITAT.width) * 0.5));
+    const halfH = (s.halfH = Math.max(0.001, get("habitatHeight", BUTTERFLY_HABITAT.height) * 0.5));
+    const halfD = (s.halfD = Math.max(0.001, get("habitatDepth", BUTTERFLY_HABITAT.depth) * 0.5));
     s.center.copy(hc);
 
     // ---- CAMERA TETHER (ahead, then clamp to habitat) ----
@@ -795,9 +798,9 @@ export default forwardRef(function IntroButterfly(
 
   // Habitat wire
   const showHabitat = enableControls ? knobs?.showHabitat ?? false : false;
-  const hw = enableControls ? knobs?.habitatWidth ?? 0.439 : 0.439;
-  const hh = enableControls ? knobs?.habitatHeight ?? 0.35 : 0.35;
-  const hd = enableControls ? knobs?.habitatDepth ?? 5.0 : 5.0;
+  const hw = enableControls ? knobs?.habitatWidth ?? BUTTERFLY_HABITAT.width : BUTTERFLY_HABITAT.width;
+  const hh = enableControls ? knobs?.habitatHeight ?? BUTTERFLY_HABITAT.height : BUTTERFLY_HABITAT.height;
+  const hd = enableControls ? knobs?.habitatDepth ?? BUTTERFLY_HABITAT.depth : BUTTERFLY_HABITAT.depth;
   const hcx = enableControls
     ? knobs?.habitatCenterX ?? position[0]
     : position[0];
@@ -808,7 +811,7 @@ export default forwardRef(function IntroButterfly(
     ? knobs?.habitatCenterZ ?? position[2]
     : position[2];
   const hyaw = THREE.MathUtils.degToRad(
-    enableControls ? knobs?.habitatYawDeg ?? -33.6 : -33.6
+    enableControls ? knobs?.habitatYawDeg ?? BUTTERFLY_HABITAT.yawDeg : BUTTERFLY_HABITAT.yawDeg
   );
   const hcol = enableControls
     ? knobs?.habitatWireColor ?? "#7fc7ff"

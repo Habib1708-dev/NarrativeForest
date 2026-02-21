@@ -1,7 +1,6 @@
 // src/state/useSplineCameraStore.js
 // Independent Zustand store for the spline-based scroll camera.
-// Mirrors the scroll-inertia pattern from useCameraStore but is much simpler —
-// no freeflight, no scenic pauses, no segment-local sensitivity.
+// Path + freeflight at last waypoint with joystick (mirrors useCameraStore pattern).
 
 import { create } from "zustand";
 import { gsap } from "gsap";
@@ -12,6 +11,9 @@ import {
   DEFAULT_CURVE_PARAMS,
   WEIGHT_FNS,
 } from "../utils/splineCameraPath";
+import { yawPitchFromQuaternion } from "../utils/cameraInterp";
+import { heightAt } from "../proc/heightfield";
+import { useWorldAnchorStore } from "./useWorldAnchorStore";
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const smoothStep = (x) => {
@@ -35,6 +37,25 @@ const GRAVITY_WAYPOINT_NAMES = [
 ];
 
 const WAYPOINT_GRAVITY_MIN_FACTOR = 0.15;
+
+const LAST_T_THRESHOLD = 0.999;
+const deg = (d) => (Math.PI * d) / 180;
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+const createFreeFlyState = () => ({
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+  yaw: 0,
+  pitch: 0,
+  fov: 50,
+  speed: 0,
+  speedTarget: 0,
+  command: { yawRate: 0, pitchRate: 0 },
+  turnRate: { yaw: 0, pitch: 0 },
+  dragging: false,
+  lastPointer: null,
+  joystick: { origin: null, input: { x: 0, y: 0 } },
+});
 
 /* ---- mutable refs shared by the tick loop and applyWheel ---- */
 const scrollState = { velocity: 0 };
@@ -179,6 +200,50 @@ export const useSplineCameraStore = create((set, get) => {
     return Math.max(WAYPOINT_GRAVITY_MIN_FACTOR, factor);
   }
 
+  const maybeActivateFreeFly = (tValue) => {
+    if (tValue >= LAST_T_THRESHOLD) activateFreeFly();
+  };
+
+  const activateFreeFly = () => {
+    const state = get();
+    if (state.mode === "freeFly") return;
+    const { sampler } = state;
+    const u = sampler.scrollToU ? sampler.scrollToU(1) : 1;
+    const { position, quaternion } = sampler.sample(u);
+    const nextFreeFly = createFreeFlyState();
+    nextFreeFly.position.copy(position);
+    nextFreeFly.quaternion.copy(quaternion);
+    nextFreeFly.fov = state.fov ?? 50;
+    const { yaw, pitch } = yawPitchFromQuaternion(quaternion);
+    nextFreeFly.yaw = yaw;
+    nextFreeFly.pitch = pitch;
+
+    scrollState.velocity = 0;
+    if (velocityTween) { velocityTween.kill(); velocityTween = null; }
+    stopTicker();
+    tDriver.value = 1;
+    set({
+      mode: "freeFly",
+      freeFly: nextFreeFly,
+      freeFlyUserHasDragged: false,
+      t: 1,
+    });
+    useWorldAnchorStore.getState().setFreeflightMode(nextFreeFly.position);
+  };
+
+  const exitFreeFly = () => {
+    const state = get();
+    if (state.mode !== "freeFly") return;
+    const exitT = LAST_T_THRESHOLD - 0.001;
+    tDriver.value = exitT;
+    set({
+      mode: "path",
+      t: exitT,
+      freeFlyUserHasDragged: false,
+    });
+    useWorldAnchorStore.getState().setAuthoredMode();
+  };
+
   function tick() {
     if (!isBrowser) { stopTicker(); return; }
     const { enabled } = get();
@@ -245,6 +310,31 @@ export const useSplineCameraStore = create((set, get) => {
     waypointGravityEnabled: true,
     waypointGravityStrength: 0.6,
     waypointGravityRadius: 0.05,
+    mode: "path",
+    freeFly: createFreeFlyState(),
+    freeFlyUserHasDragged: false,
+    freeFlyJoystickRadius: 80,
+    freeFlyJoystickInnerScale: 0.35,
+    freeFlyDeadZone: 0.05,
+    freeFlyStrengthPower: 0.85,
+    freeFlyStrengthScale: 1.0,
+    freeFlySpeed: 2.7,
+    freeFlyMinStrength: 0.25,
+    freeFlyYawRate: deg(52),
+    freeFlyPitchRate: deg(47),
+    freeFlyPitchMin: deg(-80),
+    freeFlyPitchMax: deg(80),
+    freeFlySpeedResponse: 3.5,
+    freeFlyTerrainOffset: 1.4,
+    freeFlyAltitudeResponse: 3.2,
+    freeFlyLookaheadSamples: 5,
+    freeFlyLookaheadTime: 1.2,
+    freeFlyLookaheadMinDist: 1.5,
+    freeFlyLookaheadBlend: 0.7,
+    freeFlyTurnResponse: 4.0,
+    freeFlyForwardBias: 0.24,
+    freeFlyNeutralBand: 0.12,
+    freeFlyIdleThrust: 0.15,
     showSplineViz: false,
     showSplineGeometry: false,
     waypoints: initialWaypoints,
@@ -284,6 +374,170 @@ export const useSplineCameraStore = create((set, get) => {
       set({ waypointGravityStrength: Math.max(0, Math.min(1, Number(v) ?? 0)) }),
     setWaypointGravityRadius: (v) =>
       set({ waypointGravityRadius: Math.max(0.001, Math.min(0.2, Number(v) ?? 0.05)) }),
+    exitFreeFly: () => exitFreeFly(),
+    /** Enter freeflight only when at end of path (call from joystick pointer down). */
+    enterFreeFlyAtEnd: () => {
+      const s = get();
+      if (s.mode === "freeFly") return;
+      if (s.t < LAST_T_THRESHOLD) return;
+      activateFreeFly();
+    },
+    skipToFreeFly: () => {
+      const state = get();
+      if (state.mode === "freeFly") return;
+      const { t, sampler } = state;
+      const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
+      const { position, quaternion } = sampler.sample(u);
+      const nextFreeFly = createFreeFlyState();
+      nextFreeFly.position.copy(position);
+      nextFreeFly.quaternion.copy(quaternion);
+      nextFreeFly.fov = state.fov ?? 50;
+      const { yaw, pitch } = yawPitchFromQuaternion(quaternion);
+      nextFreeFly.yaw = yaw;
+      nextFreeFly.pitch = pitch;
+      scrollState.velocity = 0;
+      if (velocityTween) { velocityTween.kill(); velocityTween = null; }
+      stopTicker();
+      tDriver.value = 1;
+      set({
+        mode: "freeFly",
+        freeFly: nextFreeFly,
+        freeFlyUserHasDragged: false,
+        t: 1,
+      });
+      useWorldAnchorStore.getState().setFreeflightMode(nextFreeFly.position);
+    },
+    updateFreeFly: (dt) => {
+      const state = get();
+      if (state.mode !== "freeFly" || !state.freeFly) return;
+      const freeFly = state.freeFly;
+      const s = state;
+      const turnResponse = s.freeFlyTurnResponse ?? 5.0;
+      const commandYawRate = freeFly.command?.yawRate ?? 0;
+      const commandPitchRate = freeFly.command?.pitchRate ?? 0;
+      const prevYawRate = freeFly.turnRate?.yaw ?? 0;
+      const prevPitchRate = freeFly.turnRate?.pitch ?? 0;
+      const yawRate = prevYawRate + (commandYawRate - prevYawRate) * Math.min(1, turnResponse * dt);
+      const pitchRate = prevPitchRate + (commandPitchRate - prevPitchRate) * Math.min(1, turnResponse * dt);
+      const pitchMin = s.freeFlyPitchMin ?? deg(-80);
+      const pitchMax = s.freeFlyPitchMax ?? deg(80);
+      const speedResponse = s.freeFlySpeedResponse ?? 6.0;
+      const prevSpeed = freeFly.speed ?? 0;
+      const targetSpeed = Math.max(0, freeFly.speedTarget ?? 0);
+      const speed = prevSpeed + (targetSpeed - prevSpeed) * Math.min(1, speedResponse * dt);
+      let yaw = (freeFly.yaw ?? 0) + yawRate * dt;
+      let pitch = clamp((freeFly.pitch ?? 0) + pitchRate * dt, pitchMin, pitchMax);
+      const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+      const nextPos = freeFly.position.clone().addScaledVector(forward, speed * dt);
+      const altitudeResponse = s.freeFlyAltitudeResponse ?? 3.2;
+      const offset = s.freeFlyTerrainOffset ?? 1.4;
+      const lookaheadSamples = s.freeFlyLookaheadSamples ?? 5;
+      const lookaheadTime = s.freeFlyLookaheadTime ?? 1.2;
+      const lookaheadMinDist = s.freeFlyLookaheadMinDist ?? 1.5;
+      const lookaheadBlend = s.freeFlyLookaheadBlend ?? 0.7;
+      const lookaheadDist = Math.max(lookaheadMinDist, speed * lookaheadTime);
+      const horizForwardX = -Math.sin(yaw);
+      const horizForwardZ = -Math.cos(yaw);
+      const currentGroundY = heightAt(nextPos.x, nextPos.z);
+      let maxAheadGroundY = currentGroundY;
+      for (let i = 1; i <= lookaheadSamples; i++) {
+        const sampleDist = (i / lookaheadSamples) * lookaheadDist;
+        const sampleX = nextPos.x + horizForwardX * sampleDist;
+        const sampleZ = nextPos.z + horizForwardZ * sampleDist;
+        const sampleGroundY = heightAt(sampleX, sampleZ);
+        if (sampleGroundY > maxAheadGroundY) maxAheadGroundY = sampleGroundY;
+      }
+      const effectiveGroundY = currentGroundY + (maxAheadGroundY - currentGroundY) * lookaheadBlend;
+      const desiredY = effectiveGroundY + offset;
+      const nextY = freeFly.position.y + (desiredY - freeFly.position.y) * Math.min(1, altitudeResponse * dt);
+      nextPos.y = nextY;
+      set({
+        freeFly: {
+          ...freeFly,
+          position: nextPos,
+          quaternion,
+          yaw,
+          pitch,
+          speed,
+          turnRate: { yaw: yawRate, pitch: pitchRate },
+        },
+      });
+      useWorldAnchorStore.getState().updateDistance(nextPos);
+    },
+    startFreeFlyDrag: (x, y) =>
+      set((s) => {
+        if (s.mode !== "freeFly") return {};
+        return {
+          freeFly: {
+            ...s.freeFly,
+            dragging: true,
+            lastPointer: { x, y },
+            joystick: { origin: { x, y }, input: { x: 0, y: 0 } },
+            speed: 0,
+            command: { yawRate: 0, pitchRate: 0 },
+            speedTarget: 0,
+            turnRate: { yaw: 0, pitch: 0 },
+          },
+        };
+      }),
+    dragFreeFly: (x, y) => {
+      set((s) => {
+        if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
+        const origin = s.freeFly.joystick?.origin;
+        let baseRadius = s.freeFlyJoystickRadius ?? 80;
+        if (typeof window !== "undefined" && window.innerWidth < 480) baseRadius *= 0.65;
+        else if (typeof window !== "undefined" && window.innerWidth < 768) baseRadius *= 0.8;
+        const radius = Math.max(10, baseRadius);
+        const nextFreeFly = { ...s.freeFly, lastPointer: { x, y } };
+        if (!origin) return { freeFly: nextFreeFly };
+        const rawX = x - origin.x;
+        const rawY = y - origin.y;
+        const vec2 = new THREE.Vector2(rawX, rawY);
+        const len = vec2.length();
+        const didRealDrag = len >= 6;
+        const nextHasDragged = s.freeFlyUserHasDragged || didRealDrag;
+        if (len > radius) vec2.multiplyScalar(radius / len);
+        nextFreeFly.joystick = { origin, input: { x: vec2.x, y: vec2.y } };
+        const norm = vec2.length() / radius;
+        const dead = s.freeFlyDeadZone ?? 0.05;
+        const unitX = vec2.x / radius;
+        const unitY = vec2.y / radius;
+        const baseSpeed = s.freeFlySpeed ?? 4.0;
+        if (norm <= dead) {
+          const idleThrust = s.freeFlyIdleThrust ?? 0.15;
+          nextFreeFly.command = { yawRate: 0, pitchRate: 0 };
+          nextFreeFly.speedTarget = baseSpeed * idleThrust;
+          return { freeFly: nextFreeFly, freeFlyUserHasDragged: nextHasDragged };
+        }
+        const minStrength = s.freeFlyMinStrength ?? 0.3;
+        const strengthPower = s.freeFlyStrengthPower ?? 0.85;
+        const strengthScale = s.freeFlyStrengthScale ?? 1.0;
+        const strength = clamp(Math.max(minStrength, Math.pow(norm, strengthPower)) * strengthScale, 0, 1);
+        const yawRateMax = s.freeFlyYawRate ?? deg(85);
+        const neutralBand = s.freeFlyNeutralBand ?? 0.12;
+        const forwardBias = s.freeFlyForwardBias ?? 0.24;
+        let thrust = clamp(-unitY, -1, 1);
+        if (thrust > -neutralBand && thrust < neutralBand) thrust = forwardBias;
+        nextFreeFly.command = { yawRate: -yawRateMax * unitX * strength, pitchRate: 0 };
+        nextFreeFly.speedTarget = baseSpeed * strength * thrust;
+        return { freeFly: nextFreeFly, freeFlyUserHasDragged: nextHasDragged };
+      });
+    },
+    endFreeFlyDrag: () =>
+      set((s) => {
+        if (s.mode !== "freeFly" || !s.freeFly.dragging) return {};
+        return {
+          freeFly: {
+            ...s.freeFly,
+            dragging: false,
+            lastPointer: null,
+            command: { yawRate: 0, pitchRate: 0 },
+            speedTarget: 0,
+            joystick: { origin: null, input: { x: 0, y: 0 } },
+          },
+        };
+      }),
     triggerSegment0Dive: () => {
       const state = get();
       const { sampler: sm, segment0Dive: diveCfg } = state;
@@ -654,8 +908,14 @@ export const useSplineCameraStore = create((set, get) => {
       const state = get();
       if (!state.enabled || deltaY === 0) return;
 
-      // Positive deltaY drives progression forward along the spline.
+      if (state.mode === "freeFly") {
+        if (deltaY > 0 && !state.freeFlyUserHasDragged) exitFreeFly();
+        return;
+      }
+
+      // Positive deltaY = scroll forward (increase t). Never scroll past the last endpoint.
       const dir = deltaY > 0 ? +1 : -1;
+      if (state.t >= 1 && dir > 0) return;
       const mag = Math.abs(deltaY);
       const sensitivity = Math.max(0.01, Math.min(10, state.scrollSensitivity ?? 1));
 
@@ -677,7 +937,8 @@ export const useSplineCameraStore = create((set, get) => {
       const immediateRatio = 0.32;
       const gravityFactor = getWaypointGravityFactor(state.t, dir);
       const immediateDelta = dir * stepSize * immediateRatio * gravityFactor;
-      const baseT = clamp01(state.t + immediateDelta);
+      let baseT = clamp01(state.t + immediateDelta);
+      if (baseT >= 1) baseT = 1;
       tDriver.value = baseT;
       set({ t: baseT });
 
@@ -693,6 +954,14 @@ export const useSplineCameraStore = create((set, get) => {
       }
 
       if (!isBrowser) return;
+
+      // At end (t >= 1), do not add forward velocity so we never overshoot
+      if (baseT >= 1 && dir > 0) {
+        scrollState.velocity = Math.min(0, scrollState.velocity);
+        if (velocityTween) velocityTween.kill();
+        velocityTween = gsap.to(scrollState, { velocity: 0, duration: 0.3, ease: "power2.out", overwrite: "auto", onComplete: () => { velocityTween = null; } });
+        return;
+      }
 
       // Inertia impulse (same gravity factor so scroll input slows when approaching)
       const impulse = dir * stepSize * (1 - immediateRatio) * gravityFactor;
@@ -717,7 +986,17 @@ export const useSplineCameraStore = create((set, get) => {
     /* -- pose getter (called every frame in useFrame) -- */
 
     getPose: () => {
-      const { t, fov, sampler, segment0DiveOffset: diveOff, segment1Float: floatCfg } = get();
+      const state = get();
+      if (state.mode === "freeFly") {
+        const { freeFly, waypoints } = state;
+        return {
+          position: freeFly.position.clone(),
+          quaternion: freeFly.quaternion.clone(),
+          fov: freeFly.fov,
+          segmentIndex: Math.max(0, waypoints.length - 2),
+        };
+      }
+      const { t, fov, sampler, segment0DiveOffset: diveOff, segment1Float: floatCfg } = state;
       const u = sampler.scrollToU ? sampler.scrollToU(t) : t;
       const { position, quaternion, segmentIndex } = sampler.sample(u);
       let outPosition = position;
@@ -726,8 +1005,9 @@ export const useSplineCameraStore = create((set, get) => {
         const dipDistance = Math.abs(diveOff);
         outPosition = position.clone().add(new THREE.Vector3(0, -dipDistance, 0));
       }
-      // Segments 1–3 (2nd, 3rd, 4th): subtle vertical float (flood effect), blended at boundaries.
-      if ([1, 2, 3].includes(segmentIndex) && floatCfg?.enabled) {
+      // Segments 1–3 (2nd, 3rd, 4th): subtle vertical float (flood effect), blended at boundaries. Last segment has no effect.
+      const lastSegmentIndex = Math.max(0, state.waypoints.length - 2);
+      if ([1, 2, 3].includes(segmentIndex) && segmentIndex !== lastSegmentIndex && floatCfg?.enabled) {
         const uAtWaypoint = sampler.uAtWaypoint;
         let floatBlend = 1;
         if (Array.isArray(uAtWaypoint) && segmentIndex >= 0 && segmentIndex < uAtWaypoint.length - 1) {

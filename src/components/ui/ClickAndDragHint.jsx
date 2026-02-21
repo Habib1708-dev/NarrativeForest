@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 /**
  * Click and Drag Hint Overlay
@@ -7,22 +9,25 @@ import { useCameraStore } from "../../state/useCameraStore";
  * Uses store flag to track if user has dragged, allowing proper scroll-back behavior.
  */
 export default function ClickAndDragHint() {
-  const mode = useCameraStore((state) => state.mode);
-  const t = useCameraStore((state) => state.t);
-  const freeFlyUserHasDragged = useCameraStore(
-    (state) => state.freeFlyUserHasDragged
-  );
+  const cameraMode = useCameraStore((state) => state.mode);
+  const cameraT = useCameraStore((state) => state.t);
+  const cameraHasDragged = useCameraStore((state) => state.freeFlyUserHasDragged);
+  const splineMode = useSplineCameraStore((state) => state.mode);
+  const splineT = useSplineCameraStore((state) => state.t);
+  const splineHasDragged = useSplineCameraStore((state) => state.freeFlyUserHasDragged);
+
+  const mode = USE_SPLINE_CAMERA ? splineMode : cameraMode;
+  const t = USE_SPLINE_CAMERA ? splineT : cameraT;
+  const freeFlyUserHasDragged = USE_SPLINE_CAMERA ? splineHasDragged : cameraHasDragged;
   const [isVisible, setIsVisible] = useState(false);
   const autoHideTimeoutRef = useRef(null);
 
   useEffect(() => {
-    // Show hint only when entering free-fly at the end of scroll path,
-    // and only until the user actually drag-interacts.
+    // Show hint at end of path (so user knows to click & drag to enter freeflight), or in freefly until first drag
     const isAtEnd = typeof t === "number" ? t >= 0.999 : false;
-    if (mode === "freeFly" && isAtEnd && !freeFlyUserHasDragged) {
+    if (isAtEnd && (mode === "path" || (mode === "freeFly" && !freeFlyUserHasDragged))) {
       setIsVisible(true);
-    } else if (mode !== "freeFly" || freeFlyUserHasDragged || !isAtEnd) {
-      // Hide when leaving freeflight or when user has dragged
+    } else if (!isAtEnd || (mode === "freeFly" && freeFlyUserHasDragged)) {
       setIsVisible(false);
     }
   }, [mode, t, freeFlyUserHasDragged]);
@@ -50,10 +55,9 @@ export default function ClickAndDragHint() {
     };
   }, [isVisible]);
 
-  // Don't show if not in freeflight mode or if user has already interacted
   const isAtEnd = typeof t === "number" ? t >= 0.999 : false;
-  if (!isVisible || mode !== "freeFly" || !isAtEnd || freeFlyUserHasDragged)
-    return null;
+  const showHint = isVisible && isAtEnd && (mode === "path" || (mode === "freeFly" && !freeFlyUserHasDragged));
+  if (!showHint) return null;
 
   return (
     <div

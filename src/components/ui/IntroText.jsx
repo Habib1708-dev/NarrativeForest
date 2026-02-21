@@ -3,6 +3,8 @@ import { Html } from "@react-three/drei";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 // Reusable Vector3 to avoid per-frame allocations
 const _displacement = new Vector3();
@@ -28,7 +30,9 @@ const createInitialCharStates = () =>
 
 export default function IntroText() {
   const { camera } = useThree();
-  const cameraMode = useCameraStore((state) => state.mode);
+  const cameraModeRaw = useCameraStore((state) => state.mode);
+  const splineModeRaw = useSplineCameraStore((state) => state.mode);
+  const cameraMode = USE_SPLINE_CAMERA ? splineModeRaw : cameraModeRaw;
   const [shouldRender, setShouldRender] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [fadeInOpacity, setFadeInOpacity] = useState(0);

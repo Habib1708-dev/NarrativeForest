@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 export default function FreeFlyJoystickOverlay() {
-  const mode = useCameraStore((s) => s.mode);
-  const freeFly = useCameraStore((s) => s.freeFly);
-  const baseRadius = useCameraStore((s) => s.freeFlyJoystickRadius ?? 80);
-  const innerScale = useCameraStore((s) => s.freeFlyJoystickInnerScale ?? 0.35);
+  const cameraMode = useCameraStore((s) => s.mode);
+  const cameraFreeFly = useCameraStore((s) => s.freeFly);
+  const cameraRadius = useCameraStore((s) => s.freeFlyJoystickRadius ?? 80);
+  const cameraInnerScale = useCameraStore((s) => s.freeFlyJoystickInnerScale ?? 0.35);
+
+  const splineMode = useSplineCameraStore((s) => s.mode);
+  const splineFreeFly = useSplineCameraStore((s) => s.freeFly);
+  const splineRadius = useSplineCameraStore((s) => s.freeFlyJoystickRadius ?? 80);
+  const splineInnerScale = useSplineCameraStore((s) => s.freeFlyJoystickInnerScale ?? 0.35);
+
+  const mode = USE_SPLINE_CAMERA ? splineMode : cameraMode;
+  const freeFly = USE_SPLINE_CAMERA ? splineFreeFly : cameraFreeFly;
+  const baseRadius = USE_SPLINE_CAMERA ? splineRadius : cameraRadius;
+  const innerScale = USE_SPLINE_CAMERA ? splineInnerScale : cameraInnerScale;
 
   // Calculate responsive radius based on screen size
   const [radius, setRadius] = useState(baseRadius);

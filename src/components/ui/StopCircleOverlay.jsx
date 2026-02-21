@@ -1,5 +1,7 @@
 import { useMemo, useEffect, useState } from "react";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const normalizeName = (value) => (value || "").trim().toLowerCase();
@@ -11,10 +13,20 @@ const PAW_ICON_URL =
   "https://upload.wikimedia.org/wikipedia/commons/5/51/Paw_icon.svg";
 
 export default function StopCircleOverlay() {
-  const t = useCameraStore((state) => state.t ?? 0);
-  const waypoints = useCameraStore((state) => state.waypoints || []);
-  const cameraMode = useCameraStore((state) => state.mode);
-  const setEnabled = useCameraStore((state) => state.setEnabled);
+  const cameraT = useCameraStore((state) => state.t ?? 0);
+  const cameraWaypoints = useCameraStore((state) => state.waypoints || []);
+  const cameraModeRaw = useCameraStore((state) => state.mode);
+  const cameraSetEnabled = useCameraStore((state) => state.setEnabled);
+  const splineT = useSplineCameraStore((state) => state.t ?? 0);
+  const splineWaypoints = useSplineCameraStore((state) => state.waypoints || []);
+  const splineModeRaw = useSplineCameraStore((state) => state.mode);
+
+  const t = USE_SPLINE_CAMERA ? splineT : cameraT;
+  const waypoints = USE_SPLINE_CAMERA ? splineWaypoints : cameraWaypoints;
+  const cameraMode = USE_SPLINE_CAMERA ? splineModeRaw : cameraModeRaw;
+  const setEnabled = USE_SPLINE_CAMERA
+    ? (v) => useSplineCameraStore.getState().setEnabled(v)
+    : cameraSetEnabled;
 
   const [isMobile, setIsMobile] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(() =>

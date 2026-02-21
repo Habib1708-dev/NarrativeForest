@@ -240,10 +240,8 @@ import CustomSky from "./components/environment/CustomSky";
 import CameraControllerR3F from "./components/camera/CameraControllerR3F";
 import SplineCameraController from "./components/camera/SplineCameraController";
 import { useSplineCameraStore } from "./state/useSplineCameraStore";
-import { SPLINE_WAYPOINTS } from "./utils/splineCameraPath";
-
-// Toggle: true = new spline camera system, false = original waypoint system
-const USE_SPLINE_CAMERA = true;
+import { SPLINE_WAYPOINTS, getButterflyHabitatFromFirstSegment } from "./utils/splineCameraPath";
+import { USE_SPLINE_CAMERA } from "./config";
 
 // Scene pieces - UI
 import IntroText from "./components/ui/IntroText";
@@ -1016,7 +1014,7 @@ export default function Experience() {
         )}
         <CrystalClustersB />
         {/* <Butterfly /> */}
-        <IntroButterfly position={[-0.131, -3.836, -5.104]} />
+        <IntroButterfly position={getButterflyHabitatFromFirstSegment().center} />
         <IntroText />
         {/* Cabin props placement debug deactivated for now */}
         {/* {isDebugMode && <CabinPropsPlacementDebug />} */}

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAudioStore } from "../../../state/useAudioStore";
 import { useCameraStore } from "../../../state/useCameraStore";
+import { useSplineCameraStore } from "../../../state/useSplineCameraStore";
+import { USE_SPLINE_CAMERA } from "../../../config";
 import "../../../styles/navbar.css";
 
 // Airplane icon as inline SVG for "Skip to Freeflight"
@@ -85,19 +87,30 @@ export default function Navbar() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const isMuted = useAudioStore((state) => state.isMuted);
   const toggleMute = useAudioStore((state) => state.toggleMute);
-  const skipToFreeFly = useCameraStore((state) => state.skipToFreeFly);
+  const cameraSkipToFreeFly = useCameraStore((state) => state.skipToFreeFly);
+  const cameraExitFreeFly = useCameraStore((state) => state.exitFreeFly);
   const cameraMode = useCameraStore((state) => state.mode);
+  const splineSkipToFreeFly = useSplineCameraStore((state) => state.skipToFreeFly);
+  const splineExitFreeFly = useSplineCameraStore((state) => state.exitFreeFly);
+  const splineMode = useSplineCameraStore((state) => state.mode);
 
   const isHomePage = location.pathname === "/";
-  const isInFreeFlight = isHomePage && cameraMode === "freeFly";
-  const canSkipToFreeFlight = isHomePage && cameraMode === "path";
+  const mode = USE_SPLINE_CAMERA ? splineMode : cameraMode;
+  const isInFreeFlight = isHomePage && mode === "freeFly";
+  const canSkipToFreeFlight = isHomePage && mode === "path";
 
   const handleFlightButtonClick = () => {
     if (isInFreeFlight) {
-      // Exit freeflight - reload to home page
+      if (USE_SPLINE_CAMERA) {
+        splineExitFreeFly();
+      }
       window.location.href = "/";
     } else if (canSkipToFreeFlight) {
-      skipToFreeFly();
+      if (USE_SPLINE_CAMERA) {
+        splineSkipToFreeFly();
+      } else {
+        cameraSkipToFreeFly();
+      }
     }
   };
 

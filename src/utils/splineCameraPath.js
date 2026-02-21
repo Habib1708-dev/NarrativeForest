@@ -283,8 +283,8 @@ export function createSplineSampler(
       break;
     }
 
-    // Per-segment deformation for non-grouped segments.
-    if (!handledByGroup) {
+    // Per-segment deformation for non-grouped segments. Last segment has no effect.
+    if (!handledByGroup && segIdx !== N - 2) {
       const offset = normalizedOffsets[segIdx];
       if (offset) {
         const fnName = normalizedWeightFns[segIdx] ?? "bell";
