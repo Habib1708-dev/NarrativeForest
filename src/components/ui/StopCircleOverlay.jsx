@@ -183,6 +183,10 @@ export default function StopCircleOverlay() {
   const t4 = stopT("stop-4");
   const t5 = stopT("stop-5");
   const t6 = stopT("stop-6");
+  // Spline sequence: man1 → man2 (Habib), man2 → cat (cat text)
+  const tFocusMan1 = stopT("Focus on the man");
+  const tFocusMan2 = stopT("Focus on the man 2");
+  const tFocusCat = stopT("Focus on the cat");
   const t8 = stopT("stop-8");
   const t9 = stopT("stop-9");
   const t10 = stopT("stop-10");
@@ -226,10 +230,121 @@ export default function StopCircleOverlay() {
     };
   }, [isMobile]);
 
+  // --- Text segment config (hooks: must run before any return) ---
+  // Spline: Habib = man1→man2, Cat = man2→cat. Legacy: unchanged.
+  const habibSegment = useMemo(() => {
+    if (USE_SPLINE_CAMERA && tFocusMan1 != null && tFocusMan2 != null) {
+      const span = safeSpan(tFocusMan1, tFocusMan2);
+      return [
+        {
+          text: "Hello, this is me Habib.",
+          startIn: tFocusMan1,
+          endIn: tFocusMan1 + span * 0.65,
+          startOut: tFocusMan1 + span * 0.65,
+          endOut: tFocusMan2,
+        },
+      ];
+    }
+    if (t4 != null && t5 != null && t6 != null) {
+      return [
+        {
+          text: "Hello, this is me Habib.",
+          startIn: t4,
+          endIn: t5,
+          startOut: t5,
+          endOut: t6,
+        },
+      ];
+    }
+    return [];
+  }, [
+    USE_SPLINE_CAMERA,
+    tFocusMan1,
+    tFocusMan2,
+    t4,
+    t5,
+    t6,
+  ]);
+
+  const catSegmentSpline = useMemo(() => {
+    if (
+      !USE_SPLINE_CAMERA ||
+      tFocusMan2 == null ||
+      tFocusCat == null
+    )
+      return [];
+    const span = safeSpan(tFocusMan2, tFocusCat);
+    return [
+      {
+        text: "This is my cat Skye",
+        startIn: tFocusMan2,
+        endIn: tFocusMan2 + span * 0.65,
+        startOut: tFocusMan2 + span * 0.65,
+        endOut: tFocusCat,
+        delayIn: 0.5,
+      },
+    ];
+  }, [USE_SPLINE_CAMERA, tFocusMan2, tFocusCat]);
+
+  const textSegments = useMemo(() => {
+    if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline];
+    return [
+      ...habibSegment,
+      {
+        text: "This is my cat Skye",
+        startIn: t5,
+        endIn: t6,
+        startOut: t8,
+        endOut: t9,
+        delayIn: 0.5,
+      },
+      {
+        text: "Nature is all around us",
+        startIn: t9,
+        endIn: t12 || t10,
+        startOut: t13 ? t13 - 0.02 : (t10 ?? 0) + 0.5,
+        endOut: t13 || (t10 ?? 0) + 1.0,
+        delayIn: 0.0,
+        type: "carousel",
+      },
+      {
+        text: "But, we are connected through technology",
+        startIn: t13,
+        endIn: t13b
+          ? t13 + (t13b - t13) * 0.8
+          : t14
+          ? t13 + (t14 - t13) * 0.8
+          : t13 + 0.06,
+        startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 ? t14 - 0.02 : t13 + 0.2,
+        endOut: t13b || t14 || t13 + 0.3,
+        delayIn: 0.0,
+        type: "carousel",
+      },
+    ];
+  }, [
+    USE_SPLINE_CAMERA,
+    habibSegment,
+    catSegmentSpline,
+    t5,
+    t6,
+    t8,
+    t9,
+    t10,
+    t12,
+    t13,
+    t13b,
+    t14,
+  ]);
+
   // ✅ Now it’s safe to early-return (after hooks)
   const EPS = 1e-4;
+  const habibSegmentStart = USE_SPLINE_CAMERA ? tFocusMan1 : t4;
+  const habibSegmentEnd = USE_SPLINE_CAMERA ? tFocusMan2 : t5;
   const shouldRender =
-    t4 !== null && t5 !== null && typeof t4 === "number" && t >= t4 - EPS;
+    (habibSegmentStart != null &&
+      typeof habibSegmentStart === "number" &&
+      t >= habibSegmentStart - EPS) ||
+    (t4 !== null && t5 !== null && typeof t4 === "number" && t >= t4 - EPS);
 
   // Unmount completely if fade-out is complete
   if (shouldUnmount) return null;
@@ -237,7 +352,13 @@ export default function StopCircleOverlay() {
   if (!shouldRender && !showWelcomeOverlay) return null;
 
   // --- Circle & Backdrop Logic ---
-  const progress45 = clamp01((t - t4) / safeSpan(t4, t5));
+  // Spline: grow circle over man1→man2, then keep full through man2→cat
+  const progress45 =
+    habibSegmentStart != null && habibSegmentEnd != null
+      ? t <= habibSegmentEnd
+        ? clamp01((t - habibSegmentStart) / safeSpan(habibSegmentStart, habibSegmentEnd))
+        : 1
+      : 0;
 
   let circleOpacity = progress45;
   let backdropOpacity = 0.8 * progress45;
@@ -284,7 +405,19 @@ export default function StopCircleOverlay() {
 
   // Halo Color Logic
   let haloColor = "255, 220, 100";
-  if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
+  const onCatSegment =
+    (USE_SPLINE_CAMERA &&
+      tFocusMan2 != null &&
+      tFocusCat != null &&
+      t >= tFocusMan2 &&
+      t <= tFocusCat) ||
+    (t5 != null &&
+      t6 != null &&
+      t > t5 &&
+      t <= t6);
+  if (onCatSegment) {
+    haloColor = "255, 140, 0"; // orange when on "This is my cat Skye" segment
+  } else if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
     const p56 = clamp01((t - t5) / safeSpan(t5, t6));
     const r = Math.round(255 + (255 - 255) * p56);
     const g = Math.round(220 + (140 - 220) * p56);
@@ -304,18 +437,24 @@ export default function StopCircleOverlay() {
     haloColor = `${r}, ${g}, ${b}`;
   }
 
-  // ✅ Paw trail: runs ONCE after "This is me Habib" finishes rendering
-  // Start paws 15% into t5→t6 window (after Habib text is fully visible)
+  // ✅ Paw trail: runs in "This is my cat Skye" segment (legacy: t5→t6; spline: man2→cat)
+  // Start paws 15% into the segment (after cat text starts appearing)
+  const PAW_DELAY = 0.15;
   let pawAnimProgress = 0;
   let pawLayerActive = false;
-  if (
+  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) {
+    const pawStartT = tFocusMan2 + safeSpan(tFocusMan2, tFocusCat) * PAW_DELAY;
+    if (t >= pawStartT && t <= tFocusCat) {
+      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, tFocusCat));
+      pawLayerActive = true;
+    }
+  } else if (
     t5 !== null &&
     t6 !== null &&
     Number.isFinite(t5) &&
     Number.isFinite(t6)
   ) {
-    const pawDelay = 0.15; // Delay as fraction of t5→t6 span
-    const pawStartT = t5 + safeSpan(t5, t6) * pawDelay;
+    const pawStartT = t5 + safeSpan(t5, t6) * PAW_DELAY;
     if (t >= pawStartT && t <= t6) {
       pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, t6));
       pawLayerActive = true;
@@ -348,47 +487,7 @@ export default function StopCircleOverlay() {
   // x3 size (kept)
   const pawSize = isMobile ? 48 : 60;
 
-  // --- Text Logic (unchanged) ---
-  const textSegments = [
-    {
-      text: "Hello, this is me Habib.",
-      startIn: t4,
-      endIn: t5,
-      startOut: t5,
-      endOut: t6,
-    },
-    {
-      text: "This is my cat Skye",
-      startIn: t5,
-      endIn: t6,
-      startOut: t8,
-      endOut: t9,
-      delayIn: 0.5,
-    },
-    {
-      text: "Nature is all around us",
-      startIn: t9,
-      endIn: t12 || t10,
-      startOut: t13 ? t13 - 0.02 : (t10 ?? 0) + 0.5,
-      endOut: t13 || (t10 ?? 0) + 1.0,
-      delayIn: 0.0,
-      type: "carousel",
-    },
-    {
-      text: "But, we are connected through technology",
-      startIn: t13,
-      endIn: t13b
-        ? t13 + (t13b - t13) * 0.8
-        : t14
-        ? t13 + (t14 - t13) * 0.8
-        : t13 + 0.06,
-      startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 ? t14 - 0.02 : t13 + 0.2,
-      endOut: t13b || t14 || t13 + 0.3,
-      delayIn: 0.0,
-      type: "carousel",
-    },
-  ];
-
+  // --- Text Logic ---
   const renderText = (segment, index) => {
     const {
       text,
