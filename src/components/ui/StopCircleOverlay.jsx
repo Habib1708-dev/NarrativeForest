@@ -4,6 +4,10 @@ import { useSplineCameraStore } from "../../state/useSplineCameraStore";
 import { USE_SPLINE_CAMERA } from "../../config";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
+const smoothStep = (x) => {
+  const c = clamp01(x);
+  return c * c * (3 - 2 * c);
+};
 const normalizeName = (value) => (value || "").trim().toLowerCase();
 const safeSpan = (a, b) => Math.max(1e-6, (b ?? 0) - (a ?? 0));
 const NAVBAR_SAFE_GAP_PX = 10;
@@ -403,20 +407,34 @@ export default function StopCircleOverlay() {
     Math.min(circleScale, maxAllowedScale)
   );
 
-  // Halo Color Logic
+  // Halo Color Logic — smooth transition to orange on cat segment
+  const HALO_DEFAULT = [255, 220, 100];
+  const HALO_ORANGE = [255, 140, 0];
+  const CAT_TRANSITION_FRAC = 0.25; // use first/last 25% of segment for blend in/out
   let haloColor = "255, 220, 100";
-  const onCatSegment =
-    (USE_SPLINE_CAMERA &&
-      tFocusMan2 != null &&
-      tFocusCat != null &&
-      t >= tFocusMan2 &&
-      t <= tFocusCat) ||
-    (t5 != null &&
-      t6 != null &&
-      t > t5 &&
-      t <= t6);
-  if (onCatSegment) {
-    haloColor = "255, 140, 0"; // orange when on "This is my cat Skye" segment
+
+  const catStart =
+    USE_SPLINE_CAMERA && tFocusMan2 != null ? tFocusMan2 : t5;
+  const catEnd =
+    USE_SPLINE_CAMERA && tFocusCat != null ? tFocusCat : t6;
+  const hasCatSegment =
+    (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) ||
+    (t5 != null && t6 != null);
+
+  if (hasCatSegment && catStart != null && catEnd != null && t >= catStart && t <= catEnd) {
+    const span = safeSpan(catStart, catEnd);
+    const blendInEnd = catStart + span * CAT_TRANSITION_FRAC;
+    const blendOutStart = catEnd - span * CAT_TRANSITION_FRAC;
+    let p = 1;
+    if (t < blendInEnd) {
+      p = smoothStep((t - catStart) / safeSpan(catStart, blendInEnd));
+    } else if (t > blendOutStart) {
+      p = smoothStep((catEnd - t) / safeSpan(blendOutStart, catEnd));
+    }
+    const r = Math.round(HALO_DEFAULT[0] + (HALO_ORANGE[0] - HALO_DEFAULT[0]) * p);
+    const g = Math.round(HALO_DEFAULT[1] + (HALO_ORANGE[1] - HALO_DEFAULT[1]) * p);
+    const b = Math.round(HALO_DEFAULT[2] + (HALO_ORANGE[2] - HALO_DEFAULT[2]) * p);
+    haloColor = `${r}, ${g}, ${b}`;
   } else if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
     const p56 = clamp01((t - t5) / safeSpan(t5, t6));
     const r = Math.round(255 + (255 - 255) * p56);
