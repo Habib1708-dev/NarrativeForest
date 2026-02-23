@@ -187,10 +187,11 @@ export default function StopCircleOverlay() {
   const t4 = stopT("stop-4");
   const t5 = stopT("stop-5");
   const t6 = stopT("stop-6");
-  // Spline sequence: man1 → man2 (Habib), man2 → cat (cat text)
+  // Spline sequence: man1 → man2 (Habib), man2 → Leaving the cat (cat text & paws)
   const tFocusMan1 = stopT("Focus on the man");
   const tFocusMan2 = stopT("Focus on the man 2");
   const tFocusCat = stopT("Focus on the cat");
+  const tLeavingCat = stopT("Leaving the cat");
   const t8 = stopT("stop-8");
   const t9 = stopT("stop-9");
   const t10 = stopT("stop-10");
@@ -274,21 +275,21 @@ export default function StopCircleOverlay() {
     if (
       !USE_SPLINE_CAMERA ||
       tFocusMan2 == null ||
-      tFocusCat == null
+      tLeavingCat == null
     )
       return [];
-    const span = safeSpan(tFocusMan2, tFocusCat);
+    const span = safeSpan(tFocusMan2, tLeavingCat);
     return [
       {
         text: "This is my cat Skye",
         startIn: tFocusMan2,
         endIn: tFocusMan2 + span * 0.65,
         startOut: tFocusMan2 + span * 0.65,
-        endOut: tFocusCat,
+        endOut: tLeavingCat,
         delayIn: 0.5,
       },
     ];
-  }, [USE_SPLINE_CAMERA, tFocusMan2, tFocusCat]);
+  }, [USE_SPLINE_CAMERA, tFocusMan2, tLeavingCat]);
 
   const textSegments = useMemo(() => {
     if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline];
@@ -416,9 +417,9 @@ export default function StopCircleOverlay() {
   const catStart =
     USE_SPLINE_CAMERA && tFocusMan2 != null ? tFocusMan2 : t5;
   const catEnd =
-    USE_SPLINE_CAMERA && tFocusCat != null ? tFocusCat : t6;
+    USE_SPLINE_CAMERA && tLeavingCat != null ? tLeavingCat : t6;
   const hasCatSegment =
-    (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) ||
+    (USE_SPLINE_CAMERA && tFocusMan2 != null && tLeavingCat != null) ||
     (t5 != null && t6 != null);
 
   if (hasCatSegment && catStart != null && catEnd != null && t >= catStart && t <= catEnd) {
@@ -455,15 +456,17 @@ export default function StopCircleOverlay() {
     haloColor = `${r}, ${g}, ${b}`;
   }
 
-  // ✅ Paw trail: runs in "This is my cat Skye" segment (legacy: t5→t6; spline: man2→cat)
+  // ✅ Paw trail: runs in "This is my cat Skye" segment
+  //    - legacy: t5→t6
+  //    - spline: from "Focus on the man 2" → "Leaving the cat"
   // Start paws 15% into the segment (after cat text starts appearing)
   const PAW_DELAY = 0.15;
   let pawAnimProgress = 0;
   let pawLayerActive = false;
-  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) {
-    const pawStartT = tFocusMan2 + safeSpan(tFocusMan2, tFocusCat) * PAW_DELAY;
-    if (t >= pawStartT && t <= tFocusCat) {
-      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, tFocusCat));
+  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tLeavingCat != null) {
+    const pawStartT = tFocusMan2 + safeSpan(tFocusMan2, tLeavingCat) * PAW_DELAY;
+    if (t >= pawStartT && t <= tLeavingCat) {
+      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, tLeavingCat));
       pawLayerActive = true;
     }
   } else if (
