@@ -187,7 +187,7 @@ export default function StopCircleOverlay() {
   const t4 = stopT("stop-4");
   const t5 = stopT("stop-5");
   const t6 = stopT("stop-6");
-  // Spline sequence: man1 → man2 (Habib), man2 → Leaving the cat (cat text & paws)
+  // Spline sequence: man1 → man2 (Habib), man2 → Focus on the cat (cat text & paws)
   const tFocusMan1 = stopT("Focus on the man");
   const tFocusMan2 = stopT("Focus on the man 2");
   const tFocusCat = stopT("Focus on the cat");
@@ -275,21 +275,21 @@ export default function StopCircleOverlay() {
     if (
       !USE_SPLINE_CAMERA ||
       tFocusMan2 == null ||
-      tLeavingCat == null
+      tFocusCat == null
     )
       return [];
-    const span = safeSpan(tFocusMan2, tLeavingCat);
+    const span = safeSpan(tFocusMan2, tFocusCat);
     return [
       {
         text: "This is my cat Skye",
         startIn: tFocusMan2,
         endIn: tFocusMan2 + span * 0.65,
         startOut: tFocusMan2 + span * 0.65,
-        endOut: tLeavingCat,
+        endOut: tFocusCat,
         delayIn: 0.5,
       },
     ];
-  }, [USE_SPLINE_CAMERA, tFocusMan2, tLeavingCat]);
+  }, [USE_SPLINE_CAMERA, tFocusMan2, tFocusCat]);
 
   const textSegments = useMemo(() => {
     if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline];
@@ -318,8 +318,8 @@ export default function StopCircleOverlay() {
         endIn: t13b
           ? t13 + (t13b - t13) * 0.8
           : t14
-          ? t13 + (t14 - t13) * 0.8
-          : t13 + 0.06,
+            ? t13 + (t14 - t13) * 0.8
+            : t13 + 0.06,
         startOut: t13b ? t13 + (t13b - t13) * 0.8 : t14 ? t14 - 0.02 : t13 + 0.2,
         endOut: t13b || t14 || t13 + 0.3,
         delayIn: 0.0,
@@ -417,9 +417,9 @@ export default function StopCircleOverlay() {
   const catStart =
     USE_SPLINE_CAMERA && tFocusMan2 != null ? tFocusMan2 : t5;
   const catEnd =
-    USE_SPLINE_CAMERA && tLeavingCat != null ? tLeavingCat : t6;
+    USE_SPLINE_CAMERA && tFocusCat != null ? tFocusCat : t6;
   const hasCatSegment =
-    (USE_SPLINE_CAMERA && tFocusMan2 != null && tLeavingCat != null) ||
+    (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) ||
     (t5 != null && t6 != null);
 
   if (hasCatSegment && catStart != null && catEnd != null && t >= catStart && t <= catEnd) {
@@ -458,15 +458,15 @@ export default function StopCircleOverlay() {
 
   // ✅ Paw trail: runs in "This is my cat Skye" segment
   //    - legacy: t5→t6
-  //    - spline: from "Focus on the man 2" → "Leaving the cat"
+  //    - spline: from "Focus on the man 2" → "Focus on the cat"
   // Start paws 15% into the segment (after cat text starts appearing)
   const PAW_DELAY = 0.15;
   let pawAnimProgress = 0;
   let pawLayerActive = false;
-  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tLeavingCat != null) {
-    const pawStartT = tFocusMan2 + safeSpan(tFocusMan2, tLeavingCat) * PAW_DELAY;
-    if (t >= pawStartT && t <= tLeavingCat) {
-      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, tLeavingCat));
+  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) {
+    const pawStartT = tFocusMan2 + safeSpan(tFocusMan2, tFocusCat) * PAW_DELAY;
+    if (t >= pawStartT && t <= tFocusCat) {
+      pawAnimProgress = clamp01((t - pawStartT) / safeSpan(pawStartT, tFocusCat));
       pawLayerActive = true;
     }
   } else if (
@@ -1064,24 +1064,23 @@ export default function StopCircleOverlay() {
               transition: "opacity 600ms ease",
               ...(isMobile
                 ? {
-                    left: "50%",
-                    top: `calc(75% + clamp(180px, 45vw, 420px) * ${
-                      circleScaleForLayout * 0.25
+                  left: "50%",
+                  top: `calc(75% + clamp(180px, 45vw, 420px) * ${circleScaleForLayout * 0.25
                     })`,
-                    transform: "translate(-50%, -50%)",
-                    width: "80%",
-                    textAlign: "center",
-                    display: "grid",
-                    placeItems: "center",
-                  }
+                  transform: "translate(-50%, -50%)",
+                  width: "80%",
+                  textAlign: "center",
+                  display: "grid",
+                  placeItems: "center",
+                }
                 : {
-                    left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    marginLeft: "0",
-                    display: "grid",
-                    placeItems: "center start",
-                  }),
+                  left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  marginLeft: "0",
+                  display: "grid",
+                  placeItems: "center start",
+                }),
             }}
             className="stop-overlay-text-container"
           >
