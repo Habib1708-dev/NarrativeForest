@@ -83,6 +83,22 @@ export const useSplineCameraStore = create((set, get) => {
   let lastScrollInputAt = 0;
   const DIVE_BURST_GAP_MS = 140;
 
+  // Track the last logged waypoint
+  let lastLoggedWaypoint = -1;
+
+  const logWaypoint = (tVal) => {
+    const wps = get().waypoints;
+    const numSegments = wps.length - 1;
+    if (numSegments <= 0) return;
+    const currentWpIdx = Math.min(Math.floor(tVal * numSegments), numSegments - 1);
+    if (currentWpIdx !== lastLoggedWaypoint) {
+      lastLoggedWaypoint = currentWpIdx;
+      const currentName = wps[currentWpIdx]?.name || `Waypoint ${currentWpIdx}`;
+      const nextName = wps[currentWpIdx + 1]?.name || "End";
+      console.log(`Camera At Stop: ${currentName} -> (${nextName})`);
+    }
+  };
+
   const startSegment0Dive = (diveCfg) => {
     const dipAmount = Number(diveCfg?.dipAmount ?? -0.05);
     const returnDuration = Math.max(0.05, Number(diveCfg?.returnDuration ?? 0.5));
@@ -279,6 +295,7 @@ export const useSplineCameraStore = create((set, get) => {
     if (Math.abs(nextT - tDriver.value) > 1e-7) {
       tDriver.value = nextT;
       set({ t: nextT });
+      logWaypoint(nextT);
     }
 
     if (!velocityTween?.isActive() && Math.abs(scrollState.velocity) <= 0.0004) {
@@ -570,6 +587,7 @@ export const useSplineCameraStore = create((set, get) => {
       const clamped = clamp01(t);
       tDriver.value = clamped;
       set({ t: clamped });
+      logWaypoint(clamped);
     },
 
     setEnabled: (v) => set({ enabled: !!v }),
