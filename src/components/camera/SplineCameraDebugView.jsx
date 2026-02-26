@@ -432,10 +432,10 @@ export default function SplineCameraDebugView() {
 
       {/* Current position marker (red) */}
       {showSplineViz && (
-      <mesh ref={markerRef}>
-        <sphereGeometry args={[0.08, 14, 14]} />
-        <meshBasicMaterial color="red" />
-      </mesh>
+        <mesh ref={markerRef}>
+          <sphereGeometry args={[0.08, 14, 14]} />
+          <meshBasicMaterial color="red" />
+        </mesh>
       )}
 
       {/* HUD: active axis + selected waypoint / segment info */}
@@ -467,7 +467,7 @@ export default function SplineCameraDebugView() {
           {" | "}
           {selectedSegment >= 0 ? (
             <>
-              Segment {selectedSegment}: {waypoints[selectedSegment]?.name} ->{" "}
+              Segment {selectedSegment}: {waypoints[selectedSegment]?.name} {"-> "}
               {waypoints[selectedSegment + 1]?.name}
             </>
           ) : (
