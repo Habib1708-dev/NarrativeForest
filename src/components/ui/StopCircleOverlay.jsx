@@ -192,6 +192,7 @@ export default function StopCircleOverlay() {
   const tFocusMan2 = stopT("Focus on the man 2");
   const tFocusCat = stopT("Focus on the cat");
   const tLeavingCat = stopT("Leaving the cat");
+  const tSurroundedByNature = stopT("Surrounded by nature");
   const t8 = stopT("stop-8");
   const t9 = stopT("stop-9");
   const t10 = stopT("stop-10");
@@ -291,8 +292,28 @@ export default function StopCircleOverlay() {
     ];
   }, [USE_SPLINE_CAMERA, tFocusMan2, tFocusCat]);
 
+  const natureSegmentSpline = useMemo(() => {
+    if (
+      !USE_SPLINE_CAMERA ||
+      tLeavingCat == null ||
+      tSurroundedByNature == null
+    )
+      return [];
+    const span = safeSpan(tLeavingCat, tSurroundedByNature);
+    return [
+      {
+        text: "We are surrounded by nature...",
+        startIn: tLeavingCat,
+        endIn: tLeavingCat + span * 0.2,
+        startOut: tSurroundedByNature - span * 0.2,
+        endOut: tSurroundedByNature,
+        delayIn: 0.1,
+      },
+    ];
+  }, [USE_SPLINE_CAMERA, tLeavingCat, tSurroundedByNature]);
+
   const textSegments = useMemo(() => {
-    if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline];
+    if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline, ...natureSegmentSpline];
     return [
       ...habibSegment,
       {
@@ -370,7 +391,11 @@ export default function StopCircleOverlay() {
   let glowStrength = 0.25 + 0.45 * progress45;
 
   let circleScale = isMobile ? 2.0 : 1.0;
-  if (t9 !== null && t10 !== null && t > t9) {
+  if (USE_SPLINE_CAMERA && tLeavingCat !== null && tSurroundedByNature !== null && t > tLeavingCat) {
+    const pNature = clamp01((t - tLeavingCat) / safeSpan(tLeavingCat, tSurroundedByNature));
+    if (!isMobile) circleScale = 1.0 + 1.0 * pNature;
+    else circleScale = 2.0 + 0.5 * pNature;
+  } else if (t9 !== null && t10 !== null && t > t9) {
     const p910 = clamp01((t - t9) / safeSpan(t9, t10));
     if (!isMobile) circleScale = 1.0 + 1.0 * p910;
     else circleScale = 2.0;
@@ -422,7 +447,18 @@ export default function StopCircleOverlay() {
     (USE_SPLINE_CAMERA && tFocusMan2 != null && tFocusCat != null) ||
     (t5 != null && t6 != null);
 
-  if (hasCatSegment && catStart != null && catEnd != null && t >= catStart && t <= catEnd) {
+  if (USE_SPLINE_CAMERA && tFocusMan2 != null && tLeavingCat != null && t >= tFocusMan2 && t <= tLeavingCat) {
+    const span = safeSpan(tFocusMan2, tFocusCat);
+    const blendInEnd = tFocusMan2 + span * CAT_TRANSITION_FRAC;
+    let p = 1;
+    if (t < blendInEnd) {
+      p = smoothStep((t - tFocusMan2) / safeSpan(tFocusMan2, blendInEnd));
+    } // No blend out here, it stays orange until tLeavingCat
+    const r = Math.round(HALO_DEFAULT[0] + (HALO_ORANGE[0] - HALO_DEFAULT[0]) * p);
+    const g = Math.round(HALO_DEFAULT[1] + (HALO_ORANGE[1] - HALO_DEFAULT[1]) * p);
+    const b = Math.round(HALO_DEFAULT[2] + (HALO_ORANGE[2] - HALO_DEFAULT[2]) * p);
+    haloColor = `${r}, ${g}, ${b}`;
+  } else if (!USE_SPLINE_CAMERA && hasCatSegment && catStart != null && catEnd != null && t >= catStart && t <= catEnd) {
     const span = safeSpan(catStart, catEnd);
     const blendInEnd = catStart + span * CAT_TRANSITION_FRAC;
     const blendOutStart = catEnd - span * CAT_TRANSITION_FRAC;
@@ -435,6 +471,12 @@ export default function StopCircleOverlay() {
     const r = Math.round(HALO_DEFAULT[0] + (HALO_ORANGE[0] - HALO_DEFAULT[0]) * p);
     const g = Math.round(HALO_DEFAULT[1] + (HALO_ORANGE[1] - HALO_DEFAULT[1]) * p);
     const b = Math.round(HALO_DEFAULT[2] + (HALO_ORANGE[2] - HALO_DEFAULT[2]) * p);
+    haloColor = `${r}, ${g}, ${b}`;
+  } else if (USE_SPLINE_CAMERA && tLeavingCat !== null && tSurroundedByNature !== null && t > tLeavingCat && t <= tSurroundedByNature) {
+    const pNature = clamp01((t - tLeavingCat) / safeSpan(tLeavingCat, tSurroundedByNature));
+    const r = Math.round(HALO_ORANGE[0] + (50 - HALO_ORANGE[0]) * pNature);
+    const g = Math.round(HALO_ORANGE[1] + (255 - HALO_ORANGE[1]) * pNature);
+    const b = Math.round(HALO_ORANGE[2] + (100 - HALO_ORANGE[2]) * pNature);
     haloColor = `${r}, ${g}, ${b}`;
   } else if (t6 !== null && t5 !== null && t9 !== null && t > t5 && t <= t9) {
     const p56 = clamp01((t - t5) / safeSpan(t5, t6));
