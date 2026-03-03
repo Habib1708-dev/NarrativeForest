@@ -187,12 +187,19 @@ export default function StopCircleOverlay() {
   const t4 = stopT("stop-4");
   const t5 = stopT("stop-5");
   const t6 = stopT("stop-6");
-  // Spline sequence: man1 → man2 (Habib), man2 → Focus on the cat (cat text & paws)
+  // Spline sequence: man1 → man2 (Habib), man2 → Focus on the cat (cat text & paws),
+  // then nature/tower/crystals narrative segments.
   const tFocusMan1 = stopT("Focus on the man");
   const tFocusMan2 = stopT("Focus on the man 2");
   const tFocusCat = stopT("Focus on the cat");
   const tLeavingCat = stopT("Leaving the cat");
   const tSurroundedByNature = stopT("Surrounded by nature");
+  const tFocusOnTower = stopT("Focus on the tower");
+  const tApproachingCrystals = stopT("Approaching Crystals");
+  const tFocusCrystals1 = stopT("Focus on crystals 1");
+  const tNew1 = stopT("New 1");
+  const tNew2 = stopT("New 2");
+  const tNew3 = stopT("New 3");
   const t8 = stopT("stop-8");
   const t9 = stopT("stop-9");
   const t10 = stopT("stop-10");
@@ -312,8 +319,35 @@ export default function StopCircleOverlay() {
     ];
   }, [USE_SPLINE_CAMERA, tLeavingCat, tSurroundedByNature]);
 
+  const technologySegmentSpline = useMemo(() => {
+    if (
+      !USE_SPLINE_CAMERA ||
+      tSurroundedByNature == null ||
+      tFocusOnTower == null
+    )
+      return [];
+    const span = safeSpan(tSurroundedByNature, tFocusOnTower);
+    return [
+      {
+        text: "But, we are connected through technology",
+        startIn: tSurroundedByNature,
+        endIn: tSurroundedByNature + span * 0.8,
+        startOut: tSurroundedByNature + span * 0.8,
+        endOut: tFocusOnTower,
+        delayIn: 0.0,
+        type: "carousel",
+      },
+    ];
+  }, [USE_SPLINE_CAMERA, tSurroundedByNature, tFocusOnTower]);
+
   const textSegments = useMemo(() => {
-    if (USE_SPLINE_CAMERA) return [...habibSegment, ...catSegmentSpline, ...natureSegmentSpline];
+    if (USE_SPLINE_CAMERA)
+      return [
+        ...habibSegment,
+        ...catSegmentSpline,
+        ...natureSegmentSpline,
+        ...technologySegmentSpline,
+      ];
     return [
       ...habibSegment,
       {
@@ -351,6 +385,8 @@ export default function StopCircleOverlay() {
     USE_SPLINE_CAMERA,
     habibSegment,
     catSegmentSpline,
+    natureSegmentSpline,
+    technologySegmentSpline,
     t5,
     t6,
     t8,
@@ -401,13 +437,22 @@ export default function StopCircleOverlay() {
     else circleScale = 2.0;
   }
 
-  if (t13bLeft !== null && t > t13bLeft) {
-    const collapseDuration = 0.015;
+  // Collapse circle inward after passing "Surrounded by nature" (spline) or at stop-13b-left (legacy)
+  const COLLAPSE_DURATION = 0.025; // normalized t — quick inward collapse
+  if (USE_SPLINE_CAMERA && tSurroundedByNature != null && t > tSurroundedByNature) {
     const pCollapse = clamp01(
-      (t - t13bLeft) / safeSpan(t13bLeft, t13bLeft + collapseDuration)
+      (t - tSurroundedByNature) / Math.max(1e-6, COLLAPSE_DURATION)
     );
     const collapseFactor = 1.0 - pCollapse;
-
+    circleScale *= collapseFactor;
+    circleOpacity *= collapseFactor;
+    backdropOpacity *= collapseFactor;
+    glowStrength *= collapseFactor;
+  } else if (t13bLeft !== null && t > t13bLeft) {
+    const pCollapse = clamp01(
+      (t - t13bLeft) / safeSpan(t13bLeft, t13bLeft + 0.015)
+    );
+    const collapseFactor = 1.0 - pCollapse;
     circleScale *= collapseFactor;
     circleOpacity *= collapseFactor;
     backdropOpacity *= collapseFactor;
@@ -432,6 +477,17 @@ export default function StopCircleOverlay() {
     0,
     Math.min(circleScale, maxAllowedScale)
   );
+
+  // Keep text position fixed after circle collapses (use pre-collapse scale for layout)
+  const circleCollapsed =
+    (USE_SPLINE_CAMERA && tSurroundedByNature != null && t > tSurroundedByNature) ||
+    (t13bLeft != null && t > t13bLeft);
+  const scaleAtCollapseStart = USE_SPLINE_CAMERA
+    ? (isMobile ? 2.5 : 2.0)
+    : 2.0;
+  const frozenLayoutScale = Math.min(scaleAtCollapseStart, maxAllowedScale);
+  const textLayoutScale = circleCollapsed ? frozenLayoutScale : layoutCircleScale;
+  const textScaleForLayout = circleCollapsed ? frozenLayoutScale : circleScaleForLayout;
 
   // Halo Color Logic — smooth transition to orange on cat segment
   const HALO_DEFAULT = [255, 220, 100];
@@ -710,15 +766,25 @@ export default function StopCircleOverlay() {
   };
 
   const renderTopCenterText = () => {
-    if (t14 === null || t15Spin === null || tRing4b === null) return null;
-
-    const text = "We craft the extraordinary with our creativity";
+    const text =
+      "I leverage creativity to build immersive digital experiences through code";
     const words = text.split(" ");
 
-    const startIn = t14;
-    const endIn = t15Spin;
-    const startOut = t15Spin;
-    const endOut = tRing4b;
+    let startIn = t14;
+    let endIn = t15Spin;
+    let startOut = t15Spin;
+    let endOut = tRing4b;
+
+    if (USE_SPLINE_CAMERA) {
+      if (tApproachingCrystals == null || tFocusCrystals1 == null) return null;
+      const span = safeSpan(tApproachingCrystals, tFocusCrystals1);
+      startIn = tApproachingCrystals;
+      endIn = tApproachingCrystals + span * 0.6;
+      startOut = endIn;
+      endOut = tFocusCrystals1;
+    } else {
+      if (t14 === null || t15Spin === null || tRing4b === null) return null;
+    }
 
     let phase = "hidden";
     let localP = 0;
@@ -797,27 +863,40 @@ export default function StopCircleOverlay() {
   };
 
   const renderArchTexts = () => {
-    if (
-      tSeqArch1 === null ||
-      tSeqArch2 === null ||
-      tSeqArch3 === null ||
-      tSeqArch4 === null
-    ) {
-      return null;
-    }
+    const segmentsSpline =
+      USE_SPLINE_CAMERA && tNew1 != null && tNew2 != null && tNew3 != null
+        ? [
+            {
+              lines: ["I create", "immersive 3D & full-stack websites"],
+              start: tNew1,
+              end: tNew2,
+            },
+            {
+              lines: ["I Develop", "AI models and software"],
+              start: tNew2,
+              end: tNew3,
+            },
+          ]
+        : null;
 
-    const segments = [
-      {
-        lines: ["We make", "creative 3D & full-stack websites"],
-        start: tSeqArch1,
-        end: tSeqArch2,
-      },
-      {
-        lines: ["We Develop", "AI models & softwares"],
-        start: tSeqArch3,
-        end: tSeqArch4,
-      },
-    ];
+    const segmentsLegacy =
+      tSeqArch1 != null && tSeqArch2 != null && tSeqArch3 != null && tSeqArch4 != null
+        ? [
+            {
+              lines: ["I create", "immersive 3D & full-stack websites"],
+              start: tSeqArch1,
+              end: tSeqArch2,
+            },
+            {
+              lines: ["I Develop", "AI models and software"],
+              start: tSeqArch3,
+              end: tSeqArch4,
+            },
+          ]
+        : null;
+
+    const segments = USE_SPLINE_CAMERA ? segmentsSpline : segmentsLegacy;
+    if (!segments || segments.length === 0) return null;
 
     const activeSegment = segments.find((s) => t >= s.start && t <= s.end);
     if (!activeSegment) return null;
@@ -1098,7 +1177,7 @@ export default function StopCircleOverlay() {
             />
           </div>
 
-          {/* Text Container */}
+          {/* Text Container — position uses frozen scale after circle collapse so text stays fixed */}
           <div
             style={{
               position: "absolute",
@@ -1107,8 +1186,7 @@ export default function StopCircleOverlay() {
               ...(isMobile
                 ? {
                   left: "50%",
-                  top: `calc(75% + clamp(180px, 45vw, 420px) * ${circleScaleForLayout * 0.25
-                    })`,
+                  top: `calc(75% + clamp(180px, 45vw, 420px) * ${textScaleForLayout * 0.25})`,
                   transform: "translate(-50%, -50%)",
                   width: "80%",
                   textAlign: "center",
@@ -1116,7 +1194,7 @@ export default function StopCircleOverlay() {
                   placeItems: "center",
                 }
                 : {
-                  left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${layoutCircleScale} + 60px)`,
+                  left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${textLayoutScale} + 60px)`,
                   top: "50%",
                   transform: "translateY(-50%)",
                   marginLeft: "0",

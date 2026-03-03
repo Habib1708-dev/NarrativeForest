@@ -11,9 +11,10 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import { useControls, folder, button } from "leva";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useCameraStore } from "../../state/useCameraStore";
 import { useDebugStore } from "../../state/useDebugStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 /* ─── static defaults (used when debug panel is off) ─── */
 const RADIOTOWER_DEFAULTS = Object.freeze({
@@ -234,23 +235,39 @@ export default forwardRef(function RadioTower(_, ref) {
   const progressRef = useRef(-0.2);
   const worldYRangeRef = useRef({ min: 0, max: 1 });
   const shouldBuildRef = useRef(false);
+  const splineBuildTriggeredRef = useRef(false);
 
-  // Subscribe to camera store to detect stop-13 and beyond
+  // Target world position for triggering the tower build (from user capture)
+  const buildTriggerPos = useMemo(
+    () =>
+      new THREE.Vector3(
+        -1.857748438844871,
+        -3.5044019937951054,
+        -2.444494081129865
+      ),
+    []
+  );
+  // Squared radius for trigger (kept small but non-zero to avoid float issues)
+  const BUILD_TRIGGER_RADIUS_SQ = 0.04 * 0.04; // ~4cm
+
+  const camera = useThree((state) => state.camera);
+
+  // Subscribe to camera store to detect stop-13 and beyond (legacy path only)
   const currentWaypointIndex = useCameraStore((state) => {
+    if (USE_SPLINE_CAMERA) return -1;
     const waypoints = state.waypoints || [];
     const t = state.t ?? 0;
     const nSeg = waypoints.length - 1;
     if (nSeg <= 0) return -1;
-    // Find nearest waypoint
     const nearestIdx = Math.round(t * nSeg);
     return nearestIdx;
   });
 
-  // Determine if tower should be built based on waypoint position
+  // Determine if tower should be built based on legacy waypoint position
   useEffect(() => {
-    const stop13Index = 14; // stop-13 is at index 14 in the waypoints array
+    if (USE_SPLINE_CAMERA) return;
 
-    // Build if at stop-13 or beyond, dissolve if before stop-13
+    const stop13Index = 14; // stop-13 is at index 14 in the waypoints array
     const shouldBuild =
       currentWaypointIndex >= stop13Index && currentWaypointIndex !== -1;
 
@@ -482,8 +499,21 @@ export default forwardRef(function RadioTower(_, ref) {
     }
   });
 
-  // Animate dissolve
+  // Animate dissolve + spline-position trigger
   useFrame((_, dt) => {
+    // When using the spline camera, trigger build once the camera reaches
+    // the specified world position (within a small radius).
+    if (USE_SPLINE_CAMERA && !splineBuildTriggeredRef.current && camera) {
+      const cx = camera.position.x - buildTriggerPos.x;
+      const cy = camera.position.y - buildTriggerPos.y;
+      const cz = camera.position.z - buildTriggerPos.z;
+      const distSq = cx * cx + cy * cy + cz * cz;
+      if (distSq <= BUILD_TRIGGER_RADIUS_SQ) {
+        splineBuildTriggeredRef.current = true;
+        shouldBuildRef.current = true;
+      }
+    }
+
     // Use camera-driven state unless manual control overrides
     const target = build || shouldBuildRef.current ? 1.1 : -0.2;
     const dir = Math.sign(target - progressRef.current);

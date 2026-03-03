@@ -5,7 +5,9 @@ import { useGLTF } from "@react-three/drei";
 import { useControls, button } from "leva";
 import { useFrame } from "@react-three/fiber";
 import { useCameraStore } from "../../state/useCameraStore";
+import { useSplineCameraStore } from "../../state/useSplineCameraStore";
 import { useDebugStore } from "../../state/useDebugStore";
+import { USE_SPLINE_CAMERA } from "../../config";
 
 const GLB_B = "/models/magicPlantsAndCrystal/CrystalCluster2.glb";
 const GLB_TALL_ROD = "/models/magicPlantsAndCrystal/TallRod.glb";
@@ -346,6 +348,7 @@ export default forwardRef(function CrystalClustersB(props, ref) {
   }, []);
 
   const currentWaypointIndex = useCameraStore((state) => {
+    if (USE_SPLINE_CAMERA) return -1;
     const waypoints = state.waypoints || [];
     const t = state.t ?? 0;
     const nSeg = waypoints.length - 1;
@@ -353,26 +356,71 @@ export default forwardRef(function CrystalClustersB(props, ref) {
     return Math.round(t * nSeg);
   });
   const stop15DownIndex = useCameraStore((state) => {
+    if (USE_SPLINE_CAMERA) return -1;
     const wps = state.waypoints || [];
     return wps.findIndex((w) => w?.name === "stop-15-down");
   });
 
+  const splineT = useSplineCameraStore((state) => (USE_SPLINE_CAMERA ? state.t ?? 0 : 0));
+  const splineWaypoints = useSplineCameraStore((state) =>
+    USE_SPLINE_CAMERA ? state.waypoints || [] : []
+  );
+  const tApproachingCrystals = useMemo(() => {
+    if (!USE_SPLINE_CAMERA || !Array.isArray(splineWaypoints) || splineWaypoints.length < 2)
+      return null;
+    const idx = splineWaypoints.findIndex(
+      (w) => (w?.name || "").trim().toLowerCase() === "approaching crystals"
+    );
+    if (idx < 0) return null;
+    const nSeg = splineWaypoints.length - 1;
+    return idx / nSeg;
+  }, [splineWaypoints]);
+
   useEffect(() => {
+    if (USE_SPLINE_CAMERA) {
+      if (tApproachingCrystals == null) {
+        if (shouldBuildRef.current !== false) shouldBuildRef.current = false;
+        return;
+      }
+      const shouldBuild = splineT >= tApproachingCrystals;
+      if (shouldBuild !== shouldBuildRef.current) {
+        shouldBuildRef.current = shouldBuild;
+        if (shouldBuild && crystalAudioRef.current && !isPlayingCrystalSoundRef.current) {
+          crystalAudioRef.current.currentTime = 0;
+          crystalAudioRef.current.play().catch(() => {});
+          isPlayingCrystalSoundRef.current = true;
+          crystalAudioRef.current.onended = () => {
+            isPlayingCrystalSoundRef.current = false;
+          };
+        }
+      }
+      return;
+    }
+
     if (stop15DownIndex < 0) {
       if (shouldBuildRef.current !== false) shouldBuildRef.current = false;
       return;
     }
-    const shouldBuild = currentWaypointIndex >= stop15DownIndex && currentWaypointIndex !== -1;
+    const shouldBuild =
+      currentWaypointIndex >= stop15DownIndex && currentWaypointIndex !== -1;
     if (shouldBuild !== shouldBuildRef.current) {
       shouldBuildRef.current = shouldBuild;
       if (shouldBuild && crystalAudioRef.current && !isPlayingCrystalSoundRef.current) {
         crystalAudioRef.current.currentTime = 0;
         crystalAudioRef.current.play().catch(() => {});
         isPlayingCrystalSoundRef.current = true;
-        crystalAudioRef.current.onended = () => { isPlayingCrystalSoundRef.current = false; };
+        crystalAudioRef.current.onended = () => {
+          isPlayingCrystalSoundRef.current = false;
+        };
       }
     }
-  }, [currentWaypointIndex, stop15DownIndex]);
+  }, [
+    USE_SPLINE_CAMERA,
+    splineT,
+    tApproachingCrystals,
+    currentWaypointIndex,
+    stop15DownIndex,
+  ]);
 
   const materialB = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
   const materialRod = useUnifiedCrystalMaterial(unified, dissolve, progressRef);
