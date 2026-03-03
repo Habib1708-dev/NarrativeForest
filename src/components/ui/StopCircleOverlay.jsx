@@ -33,6 +33,9 @@ export default function StopCircleOverlay() {
     : cameraSetEnabled;
 
   const [isMobile, setIsMobile] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 0
+  );
   const [viewportHeight, setViewportHeight] = useState(() =>
     typeof window !== "undefined" ? window.innerHeight : 0
   );
@@ -48,6 +51,7 @@ export default function StopCircleOverlay() {
   useEffect(() => {
     const updateViewport = () => {
       setIsMobile(window.innerWidth <= 900);
+      setViewportWidth(window.innerWidth);
       setViewportHeight(window.innerHeight);
     };
     updateViewport();
@@ -336,6 +340,7 @@ export default function StopCircleOverlay() {
         endOut: tFocusOnTower,
         delayIn: 0.0,
         type: "carousel",
+        responsiveVariant: "technology",
       },
     ];
   }, [USE_SPLINE_CAMERA, tSurroundedByNature, tFocusOnTower]);
@@ -379,6 +384,7 @@ export default function StopCircleOverlay() {
         endOut: t13b || t14 || t13 + 0.3,
         delayIn: 0.0,
         type: "carousel",
+        responsiveVariant: "technology",
       },
     ];
   }, [
@@ -470,9 +476,6 @@ export default function StopCircleOverlay() {
   );
   const maxAllowedScale =
     maxCircleDiameterPx > 0 ? maxCircleDiameterPx / BASE_CIRCLE_MAX_PX : 1;
-  const layoutCircleScale = !isMobile
-    ? Math.max(Math.min(circleScale, maxAllowedScale), 0)
-    : 1;
   const circleScaleForLayout = Math.max(
     0,
     Math.min(circleScale, maxAllowedScale)
@@ -486,8 +489,33 @@ export default function StopCircleOverlay() {
     ? (isMobile ? 2.5 : 2.0)
     : 2.0;
   const frozenLayoutScale = Math.min(scaleAtCollapseStart, maxAllowedScale);
-  const textLayoutScale = circleCollapsed ? frozenLayoutScale : layoutCircleScale;
   const textScaleForLayout = circleCollapsed ? frozenLayoutScale : circleScaleForLayout;
+
+  // Responsive text anchor: keep clear margin from circle border on all viewports.
+  const circleBaseDiameterPx = Math.max(
+    180,
+    Math.min(420, (viewportWidth || 0) * 0.45)
+  );
+  const circleRadiusForTextPx =
+    (circleBaseDiameterPx * Math.max(0, textScaleForLayout)) * 0.5;
+  const textGapFromCirclePx = isMobile
+    ? Math.max(18, Math.min(34, (viewportWidth || 0) * 0.04))
+    : Math.max(28, Math.min(56, (viewportWidth || 0) * 0.035));
+  const horizontalSafeMarginPx = isMobile ? 14 : 28;
+
+  const desktopTextLeftPx =
+    (viewportWidth || 0) * 0.5 + circleRadiusForTextPx + textGapFromCirclePx;
+  const desktopMaxTextWidthPx = Math.max(
+    220,
+    Math.min(560, (viewportWidth || 0) - desktopTextLeftPx - horizontalSafeMarginPx)
+  );
+
+  const mobileTextTopPx =
+    (viewportHeight || 0) * 0.5 + circleRadiusForTextPx + textGapFromCirclePx;
+  const mobileMaxTextWidthPx = Math.max(
+    220,
+    Math.min((viewportWidth || 0) - horizontalSafeMarginPx * 2, 620)
+  );
 
   // Halo Color Logic — smooth transition to orange on cat segment
   const HALO_DEFAULT = [255, 220, 100];
@@ -616,6 +644,7 @@ export default function StopCircleOverlay() {
       endOut,
       delayIn = 0,
       type,
+      responsiveVariant,
     } = segment;
 
     if (!Number.isFinite(startIn) || !Number.isFinite(endIn)) return null;
@@ -640,6 +669,20 @@ export default function StopCircleOverlay() {
     } else phase = "hidden";
 
     if (phase === "hidden") return null;
+
+    const isTechnologySegment = responsiveVariant === "technology";
+    const responsiveTextStyle = isTechnologySegment
+      ? {
+        fontSize: isMobile
+          ? "clamp(1.15rem, 4.6vw, 1.75rem)"
+          : "clamp(1.45rem, 2.2vw, 2.2rem)",
+        lineHeight: 1.18,
+        letterSpacing: "0.01em",
+        maxWidth: isMobile ? "min(92vw, 560px)" : "min(46vw, 700px)",
+        width: "100%",
+        textAlign: isMobile ? "center" : "left",
+      }
+      : null;
 
     if (type === "carousel") {
       let activeIndex = -1;
@@ -666,8 +709,10 @@ export default function StopCircleOverlay() {
             gridArea: "1/1",
             transform: "translateY(-50%)",
             pointerEvents: "none",
-            width: "max-content",
+            width: "100%",
+            maxWidth: "100%",
             transformOrigin: "left center",
+            ...(responsiveTextStyle || {}),
           }}
         >
           {words.map((word, i) => {
@@ -722,8 +767,10 @@ export default function StopCircleOverlay() {
           gridArea: "1/1",
           transform: "translateY(-50%)",
           pointerEvents: "none",
-          width: "max-content",
+          width: "100%",
+          maxWidth: "100%",
           transformOrigin: "left center",
+          ...(responsiveTextStyle || {}),
         }}
       >
         {words.map((word, i) => {
@@ -1185,22 +1232,26 @@ export default function StopCircleOverlay() {
               transition: "opacity 600ms ease",
               ...(isMobile
                 ? {
-                  left: "50%",
-                  top: `calc(75% + clamp(180px, 45vw, 420px) * ${textScaleForLayout * 0.25})`,
-                  transform: "translate(-50%, -50%)",
-                  width: "80%",
-                  textAlign: "center",
-                  display: "grid",
-                  placeItems: "center",
-                }
+                    left: "50%",
+                    top: `${mobileTextTopPx}px`,
+                    transform: "translateX(-50%)",
+                    width: `min(${mobileMaxTextWidthPx}px, calc(100vw - ${horizontalSafeMarginPx * 2}px))`,
+                    maxWidth: `calc(100vw - ${horizontalSafeMarginPx * 2}px)`,
+                    textAlign: "center",
+                    display: "grid",
+                    placeItems: "center",
+                  }
                 : {
-                  left: `calc(50% + clamp(180px, 45vw, 420px) * 0.5 * ${textLayoutScale} + 60px)`,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  marginLeft: "0",
-                  display: "grid",
-                  placeItems: "center start",
-                }),
+                    left: `${desktopTextLeftPx}px`,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    width: `${desktopMaxTextWidthPx}px`,
+                    maxWidth: `calc(100vw - ${horizontalSafeMarginPx}px)`,
+                    marginLeft: "0",
+                    textAlign: "left",
+                    display: "grid",
+                    placeItems: "center start",
+                  }),
             }}
             className="stop-overlay-text-container"
           >
