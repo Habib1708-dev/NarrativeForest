@@ -339,6 +339,23 @@ export default function Experience() {
     orbitSyncedRef.current = true;
   });
 
+  // Narrative entities culling: hide cabin/man/cat/radiotower/crystals when far from cabin (no draw, no animation cost).
+  useFrame(() => {
+    const group = narrativeGroupRef.current;
+    const cabin = cabinRef.current;
+    if (!group || !cabin || !camera) return;
+    cabin.getWorldPosition(_cabinWorldPos.current);
+    const distSq = camera.position.distanceToSquared(_cabinWorldPos.current);
+    const visible = narrativeVisibleRef.current;
+    if (visible && distSq > NARRATIVE_HIDE_DISTANCE_SQ) {
+      narrativeVisibleRef.current = false;
+      group.visible = false;
+    } else if (!visible && distSq < NARRATIVE_SHOW_DISTANCE_SQ) {
+      narrativeVisibleRef.current = true;
+      group.visible = true;
+    }
+  });
+
   useEffect(() => {
     const canvas = gl?.domElement;
     if (!canvas) return undefined;
@@ -473,10 +490,20 @@ export default function Experience() {
   const radioTowerRef = useRef(null);
   const terrainRef = useRef(null);
   const lakeRef = useRef(null);
+  const narrativeGroupRef = useRef(null);
+  const narrativeVisibleRef = useRef(true);
+  const _cabinWorldPos = useRef(new THREE.Vector3());
   const [terrainGroupHandle, setTerrainGroupHandle] = useState(null);
   const firstFrameRef = useRef(true);
   const orbitControlsRef = useRef(null);
   const orbitSyncedRef = useRef(false);
+
+  // Distance-based hide for narrative entities (cabin, man, cat, radio tower, crystals).
+  // Hide when camera is farther than HIDE_DISTANCE from cabin; show again when closer than SHOW_DISTANCE (hysteresis).
+  const NARRATIVE_SHOW_DISTANCE = 8;
+  const NARRATIVE_HIDE_DISTANCE = 10;
+  const NARRATIVE_SHOW_DISTANCE_SQ = NARRATIVE_SHOW_DISTANCE * NARRATIVE_SHOW_DISTANCE;
+  const NARRATIVE_HIDE_DISTANCE_SQ = NARRATIVE_HIDE_DISTANCE * NARRATIVE_HIDE_DISTANCE;
 
   // Forest occluders (instanced trees + rocks) — NEW
   const [forestOccluders] = useState([]);
@@ -955,15 +982,23 @@ export default function Experience() {
           />
         )}
 
-        {/* Actors */}
-        <Cabin ref={cabinRef} />
-        <Man ref={manRef} />
-        {/* Original Cat component - commented out for testing */}
-        {/* <Cat ref={catRef} /> */}
-        {/* <CatNoTextures ref={catRef} /> */}
-        <CatKTX2 ref={catRef} />
-        <RadioTower ref={radioTowerRef} />
-        <Lake ref={lakeRef} />
+        {/* Actors — narrative entities (cabin, man, cat, tower, crystals) hidden when camera far from cabin */}
+        <group ref={narrativeGroupRef}>
+          <Cabin ref={cabinRef} />
+          <Man ref={manRef} />
+          {/* Original Cat component - commented out for testing */}
+          {/* <Cat ref={catRef} /> */}
+          {/* <CatNoTextures ref={catRef} /> */}
+          <CatKTX2 ref={catRef} />
+          <RadioTower ref={radioTowerRef} />
+          <CrystalClustersB />
+        </group>
+        <Lake
+          ref={lakeRef}
+          distanceCullingEnabled
+          showDistance={12}
+          hideDistance={16}
+        />
         {/* <Lake ref={lakeRef} /> */}
 
         {/* Fog particles (now include forest instanced meshes as occluders) */}
@@ -1012,7 +1047,6 @@ export default function Experience() {
             }}
           />
         )}
-        <CrystalClustersB />
         {/* <Butterfly /> */}
         <IntroButterfly position={getButterflyHabitatFromFirstSegment().center} />
         <IntroText />

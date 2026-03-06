@@ -8,7 +8,7 @@ import React, {
   useCallback,
 } from "react";
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useControls, folder } from "leva";
 import lakeVertexShader from "../../shaders/lake/vertex.glsl?raw";
 import lakeFragmentShader from "../../shaders/lake/fragment.glsl?raw";
@@ -18,11 +18,17 @@ const Lake = forwardRef(function Lake(
     position = [-2, 0.0, -2],
     rotation = [Math.PI * 0.5, 0, 0],
     resolution = 140,
-    // envMap prop removed - environment maps not used in this project
+    // Distance-based hysteresis visibility (performance optimization)
+    distanceCullingEnabled = true,
+    showDistance = 12,
+    hideDistance = 16,
+
   },
   ref
 ) {
   const meshRef = useRef();
+  const isLakeVisibleRef = useRef(true);
+  const { camera } = useThree();
 
   // === Controls ===
   const {
@@ -196,8 +202,43 @@ const Lake = forwardRef(function Lake(
     [resolution]
   );
 
-  // === Tick (only wave time) ===
+  // Keep visibility deterministic when culling is toggled.
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    if (!distanceCullingEnabled) {
+      isLakeVisibleRef.current = true;
+      mesh.visible = true;
+    }
+  }, [distanceCullingEnabled]);
+
+  // === Tick (hysteresis visibility + wave time) ===
   useFrame((_, dt) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    if (distanceCullingEnabled && camera) {
+      const dx = camera.position.x - lakePosX;
+      const dy = camera.position.y - lakePosY;
+      const dz = camera.position.z - lakePosZ;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      let nextVisible = isLakeVisibleRef.current;
+      if (nextVisible && distSq > hideDistanceSq) {
+        nextVisible = false;
+      } else if (!nextVisible && distSq < showDistanceSq) {
+        nextVisible = true;
+      }
+
+      if (nextVisible !== isLakeVisibleRef.current) {
+        isLakeVisibleRef.current = nextVisible;
+        mesh.visible = nextVisible;
+      }
+
+      // Hidden lake: no rendering and no animation updates.
+      if (!isLakeVisibleRef.current) return;
+    }
+
     uniformsRef.current.uTime.value += dt;
   });
 
@@ -209,6 +250,16 @@ const Lake = forwardRef(function Lake(
     () => [lakeSizeX, lakeSizeZ, 1],
     [lakeSizeX, lakeSizeZ]
   );
+
+  const showDistanceSq = useMemo(() => {
+    const d = Math.max(0, Number(showDistance) || 0);
+    return d * d;
+  }, [showDistance]);
+  const hideDistanceSq = useMemo(() => {
+    const s = Math.max(0, Number(showDistance) || 0);
+    const h = Math.max(s + 0.001, Number(hideDistance) || s + 0.001);
+    return h * h;
+  }, [showDistance, hideDistance]);
 
   // === Ref API: footprint ===
   useImperativeHandle(ref, () => ({
