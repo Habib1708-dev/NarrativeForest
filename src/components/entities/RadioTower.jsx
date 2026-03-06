@@ -31,8 +31,8 @@ const RADIOTOWER_DEFAULTS = Object.freeze({
   noiseScale: 2.679,
   noiseAmp: 1.39,
   edgeWidth: 0,
-  glowStrength: 4.12,
-  glowColor: "#ffc06b",
+  glowStrength: 25.2,
+  glowColor: "#ddffbd",
   seed: 327,
 });
 

@@ -91,14 +91,14 @@ const CRYSTAL_DEFAULTS = Object.freeze({
   U_colorA: "#ecfaff", U_colorB: "#bc00f5",
   U_mid: 0.38, U_softness: 0.44,
   U_bottomEmissiveBoost: 2.0, U_bottomFresnelBoost: 3.0, U_bottomFresnelPower: 0.5,
-  U_roughness: 0.15, U_emissiveIntensity: 0.03,
+  U_roughness: 0.15, U_emissiveIntensity: 0.35,
   U_reflectBoost: 1.2, U_reflectPower: 2.0, U_rimBoost: 1.6, U_rimPower: 1.4,
   U_hoverEnabled: true, U_hoverEase: 2.0, U_cycleTime: 10, U_coolTime: 5.0,
   Pair_A_Bottom: "#2ec5ff", Pair_A_Top: "#b000ff",
   Pair_B_Bottom: "#00ff23", Pair_B_Top: "#f9ff87",
   Pair_C_Bottom: "#ffc300", Pair_C_Top: "#adadad",
   build: false, speed: 0.24,
-  edgeWidth: 0.15, glowStrength: 66, glowColor: "#ffb900", coolTimeAfterBuild: 1.5,
+  edgeWidth: 0.15, glowStrength: 3.5, glowColor: "#fff2bd", coolTimeAfterBuild: 1.5,
 });
 
 function CrystalBDebugPanel({ onChange, onReplay }) {
@@ -114,7 +114,7 @@ function CrystalBDebugPanel({ onChange, onReplay }) {
 
   const unifiedSurface = useControls("Crystals B / Surface", {
     U_roughness: { value: 0.15, min: 0, max: 1, step: 0.001 },
-    U_emissiveIntensity: { value: 0.03, min: 0, max: 2, step: 0.01 },
+    U_emissiveIntensity: { value: 0.35, min: 0, max: 2, step: 0.01 },
   }, { collapsed: true });
 
   const unifiedShine = useControls("Crystals B / Shine", {
@@ -141,8 +141,8 @@ function CrystalBDebugPanel({ onChange, onReplay }) {
     build: { value: false, label: "Build Crystals" },
     speed: { value: 0.24, min: 0.05, max: 3, step: 0.01, label: "Speed (units/sec)" },
     edgeWidth: { value: 0.15, min: 0.0, max: 0.4, step: 0.005, label: "Edge Width" },
-    glowStrength: { value: 66, min: 0.0, max: 100, step: 0.1, label: "Glow Strength" },
-    glowColor: { value: "#ffb900", label: "Glow Color" },
+    glowStrength: { value: 3.5, min: 0.0, max: 100, step: 0.1, label: "Glow Strength" },
+    glowColor: { value: "#fff2bd", label: "Glow Color" },
     coolTimeAfterBuild: { value: 1.5, min: 0.1, max: 30, step: 0.05, label: "Glow Cooldown (s)" },
     Replay: button(() => onReplay()),
   }, { collapsed: true });
