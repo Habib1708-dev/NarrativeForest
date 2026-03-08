@@ -319,6 +319,8 @@ export default function StopCircleOverlay() {
         startOut: tSurroundedByNature - span * 0.2,
         endOut: tSurroundedByNature,
         delayIn: 0.1,
+        type: "wordPop",
+        lastWordOnNewLine: true,
       },
     ];
   }, [USE_SPLINE_CAMERA, tLeavingCat, tSurroundedByNature]);
@@ -645,6 +647,7 @@ export default function StopCircleOverlay() {
       delayIn = 0,
       type,
       responsiveVariant,
+      lastWordOnNewLine = false,
     } = segment;
 
     if (!Number.isFinite(startIn) || !Number.isFinite(endIn)) return null;
@@ -755,6 +758,98 @@ export default function StopCircleOverlay() {
               </span>
             );
           })}
+        </div>
+      );
+    }
+
+    // wordPop: each word pops up one by one (all words stay visible)
+    if (type === "wordPop") {
+      const totalWords = words.length;
+      const slotDuration = 1 / (totalWords + 1); // each word gets a slice of the in-phase
+
+      const renderWord = (word, i) => {
+        const wordStart = i * slotDuration;
+        const wordEnd = wordStart + slotDuration;
+        let wordP = 0;
+        if (phase === "in") {
+          if (localP <= wordStart) wordP = 0;
+          else if (localP >= wordEnd) wordP = 1;
+          else wordP = clamp01((localP - wordStart) / (wordEnd - wordStart));
+        } else if (phase === "hold") {
+          wordP = 1;
+        } else if (phase === "out") {
+          wordP = 1 - localP;
+        }
+
+        const scale = 0.85 + 0.15 * wordP;
+        const opacity = wordP;
+        const translateY = 12 * (1 - wordP);
+
+        return (
+          <span
+            key={i}
+            style={{
+              opacity,
+              transform: `scale(${scale}) translateY(${translateY}px)`,
+              display: "inline-block",
+              marginRight: "0.25em",
+              transformOrigin: "center bottom",
+            }}
+          >
+            {word}
+          </span>
+        );
+      };
+
+      // lastWordOnNewLine: render last word on its own line to avoid layout nudge when it pops in
+      if (lastWordOnNewLine && totalWords >= 2) {
+        const firstLineWords = words.slice(0, -1);
+        const lastWord = words[totalWords - 1];
+        const lineGap = isMobile ? "0.28em" : "0.35em";
+
+        return (
+          <div
+            key={index}
+            className="stop-overlay-text"
+            style={{
+              gridArea: "1/1",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+              width: "100%",
+              maxWidth: "100%",
+              transformOrigin: "left center",
+              display: "flex",
+              flexDirection: "column",
+              gap: lineGap,
+              alignItems: isMobile ? "center" : "flex-start",
+              ...(responsiveTextStyle || {}),
+            }}
+          >
+            <div style={{ display: "block", lineHeight: 1.25, textAlign: isMobile ? "center" : "left" }}>
+              {firstLineWords.map((word, i) => renderWord(word, i))}
+            </div>
+            <div style={{ display: "block", lineHeight: 1.25, textAlign: isMobile ? "center" : "left" }}>
+              {renderWord(lastWord, totalWords - 1)}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div
+          key={index}
+          className="stop-overlay-text"
+          style={{
+            gridArea: "1/1",
+            transform: "translateY(-50%)",
+            pointerEvents: "none",
+            width: "100%",
+            maxWidth: "100%",
+            transformOrigin: "left center",
+            ...(responsiveTextStyle || {}),
+          }}
+        >
+          {words.map((word, i) => renderWord(word, i))}
         </div>
       );
     }
