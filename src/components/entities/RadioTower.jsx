@@ -28,7 +28,7 @@ const RADIOTOWER_DEFAULTS = Object.freeze({
   tintIntensity: 0.0,
   build: false,
   speed: 0.42,
-  noiseScale: 2.679,
+  noiseScale: 2.498,
   noiseAmp: 1.39,
   edgeWidth: 0,
   glowStrength: 25.2,
