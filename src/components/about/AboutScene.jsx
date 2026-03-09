@@ -4,7 +4,7 @@ import Earth2 from "./Earth2";
 export default function AboutScene() {
   return (
     <>
-      <color attach="background" args={["#02040a"]} />
+      <color attach="background" args={["#1a1a1a"]} />
       <PerspectiveCamera
         makeDefault
         position={[0, 1.5, 6]}

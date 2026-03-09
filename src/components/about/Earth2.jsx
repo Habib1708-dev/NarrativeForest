@@ -17,6 +17,7 @@ import earthVertexShader from "../../shaders/earth2/earthVertex.glsl";
 import earthFragmentShader from "../../shaders/earth2/earthFragment.glsl";
 import atmosphereVertexShader from "../../shaders/aboutEarth/atmosphereVertex.glsl";
 import atmosphereFragmentShader from "../../shaders/aboutEarth/atmosphereFragment.glsl";
+import NorthernLights2 from "./NorthernLights2";
 
 const SEGMENTS = 128;
 
@@ -62,6 +63,9 @@ export default function Earth2() {
           uCloudOpacity: new Uniform(0.8),
           uSpecularStrength: new Uniform(0.6),
           uNormalScale: new Uniform(1.0),
+          uDayTintColor: new Uniform(new Color("#ffffff")),
+          uDayTintIntensity: new Uniform(0.0),
+          uDaySaturation: new Uniform(1.0),
         },
       }),
     [dayMap, nightMap, cloudsMap, normalMap, specularMap]
@@ -72,6 +76,7 @@ export default function Earth2() {
       new ShaderMaterial({
         side: BackSide,
         transparent: true,
+        depthWrite: false,
         vertexShader: atmosphereVertexShader,
         fragmentShader: atmosphereFragmentShader,
         uniforms: {
@@ -111,6 +116,14 @@ export default function Earth2() {
         {
           phi: { value: Math.PI * 0.5, min: 0, max: Math.PI, step: 0.01 },
           theta: { value: 0.5, min: -Math.PI, max: Math.PI, step: 0.01 },
+        },
+        { collapsed: false }
+      ),
+      "Day tint": folder(
+        {
+          dayTintColor: { value: "#ffffff" },
+          dayTintIntensity: { value: 0.0, min: 0, max: 1.0, step: 0.01 },
+          daySaturation: { value: 1.0, min: 0, max: 2.0, step: 0.01 },
         },
         { collapsed: false }
       ),
@@ -163,6 +176,11 @@ export default function Earth2() {
       earthControls.atmosphereTwilightColor
     );
 
+    earthMaterial.uniforms.uDayTintColor.value.set(earthControls.dayTintColor);
+    earthMaterial.uniforms.uDayTintIntensity.value =
+      earthControls.dayTintIntensity;
+    earthMaterial.uniforms.uDaySaturation.value = earthControls.daySaturation;
+
     earthMaterial.uniforms.uNormalScale.value = earthControls.normalScale;
     earthMaterial.uniforms.uCloudOpacity.value = earthControls.cloudOpacity;
     earthMaterial.uniforms.uSpecularStrength.value =
@@ -187,11 +205,14 @@ export default function Earth2() {
         material={earthMaterial}
       />
 
+      <NorthernLights2 />
+
       <mesh
         geometry={geometry}
         scale={2.08}
         frustumCulled
         material={atmosphereMaterial}
+        renderOrder={0}
       />
     </group>
   );

@@ -10,6 +10,9 @@ uniform float uNightLightIntensity;
 uniform float uCloudOpacity;
 uniform float uSpecularStrength;
 uniform float uNormalScale;
+uniform vec3 uDayTintColor;
+uniform float uDayTintIntensity;
+uniform float uDaySaturation;
 
 varying vec2 vUv;
 varying vec3 vNormal;
@@ -34,6 +37,9 @@ void main()
     // Day/night blend
     float dayMix = smoothstep(-0.25, 0.5, sunOrientation);
     vec3 dayColor = texture2D(uDayTexture, vUv).rgb;
+    dayColor = mix(dayColor, dayColor * uDayTintColor, uDayTintIntensity);
+    float dayLuma = dot(dayColor, vec3(0.299, 0.587, 0.114));
+    dayColor = mix(vec3(dayLuma), dayColor, uDaySaturation);
     vec3 nightColor = texture2D(uNightTexture, vUv).rgb * uNightLightIntensity;
     color = mix(nightColor, dayColor, dayMix);
 
