@@ -3,10 +3,13 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { button, folder, useControls } from "leva";
 import {
+  AdditiveBlending,
   BackSide,
   Color,
+  DynamicDrawUsage,
   MathUtils,
   NoColorSpace,
+  PointsMaterial,
   ShaderMaterial,
   Spherical,
   SphereGeometry,
@@ -20,7 +23,6 @@ import earthFragmentShader from "../../shaders/earth2/earthFragment.glsl";
 import atmosphereVertexShader from "../../shaders/aboutEarth/atmosphereVertex.glsl";
 import atmosphereFragmentShader from "../../shaders/aboutEarth/atmosphereFragment.glsl";
 import NorthernLights2 from "./NorthernLights2";
-import Earth2PopulationBars from "./Earth2PopulationBars";
 
 const SEGMENTS = 128;
 
@@ -38,7 +40,11 @@ const RIPPLE_DURATION_SEC = 2.5;
 export default function Earth2() {
   const earthRef = useRef(null);
   const earthSurfaceRef = useRef(null);
+  const particlePointsRef = useRef(null);
+  const atmosphereRef = useRef(null);
+  const northernLightsOpacityRef = useRef(1);
   const spaceKeyRef = useRef(false);
+  const particleTransition = useRef({ target: 0, progress: 0 });
   const { gl } = useThree();
   const languageTargets = useRef({
     specularViewMix: 0,
@@ -81,6 +87,51 @@ export default function Earth2() {
     return geo;
   }, []);
 
+  const particleSystem = useMemo(() => {
+    const particlesGeometry = geometry.clone();
+    const positionAttribute = particlesGeometry.getAttribute("position");
+    const normalAttribute = particlesGeometry.getAttribute("normal");
+    const basePositions = Float32Array.from(positionAttribute.array);
+    const baseNormals = normalAttribute
+      ? Float32Array.from(normalAttribute.array)
+      : Float32Array.from(positionAttribute.array);
+    const scatterDirections = new Float32Array(basePositions.length);
+    const scatterStrengths = new Float32Array(positionAttribute.count);
+    const phases = new Float32Array(positionAttribute.count);
+    const randomDirection = new Vector3();
+    const surfaceNormal = new Vector3();
+
+    positionAttribute.setUsage(DynamicDrawUsage);
+
+    for (let i = 0; i < positionAttribute.count; i += 1) {
+      const i3 = i * 3;
+
+      surfaceNormal
+        .fromArray(baseNormals, i3)
+        .normalize();
+
+      randomDirection
+        .set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1)
+        .addScaledVector(surfaceNormal, 0.75)
+        .normalize();
+
+      scatterDirections[i3] = randomDirection.x;
+      scatterDirections[i3 + 1] = randomDirection.y;
+      scatterDirections[i3 + 2] = randomDirection.z;
+      scatterStrengths[i] = 0.45 + Math.random() * 0.75;
+      phases[i] = Math.random() * Math.PI * 2;
+    }
+
+    return {
+      geometry: particlesGeometry,
+      basePositions,
+      baseNormals,
+      scatterDirections,
+      scatterStrengths,
+      phases,
+    };
+  }, [geometry]);
+
   const sunDirection = useMemo(() => new Vector3(), []);
   const sunSpherical = useMemo(
     () => new Spherical(1, Math.PI * 0.5, 0.5),
@@ -90,6 +141,7 @@ export default function Earth2() {
   const earthMaterial = useMemo(
     () =>
       new ShaderMaterial({
+        transparent: true,
         vertexShader: earthVertexShader,
         fragmentShader: earthFragmentShader,
         uniforms: {
@@ -137,6 +189,7 @@ export default function Earth2() {
           uPointRippleOpacity: new Uniform(0.45),
           uPointRippleVisibility: new Uniform(0.0),
           uPointRippleColor: new Uniform(new Color("#ffbf00")),
+          uDissolveOpacity: new Uniform(1.0),
           uTime: new Uniform(0.0),
         },
       }),
@@ -164,10 +217,26 @@ export default function Earth2() {
           uAtmosphereDayColor: new Uniform(new Color("#00aaff")),
           uAtmosphereTwilightColor: new Uniform(new Color("#6f6f6f")),
           uCloudOpacity: new Uniform(0.8),
+          uDissolveOpacity: new Uniform(1.0),
         },
       }),
     []
   );
+
+  const particleMaterial = useMemo(() => {
+    const material = new PointsMaterial({
+      color: new Color("#ffffff"),
+      size: 0.035,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: AdditiveBlending,
+      sizeAttenuation: true,
+    });
+
+    material.toneMapped = false;
+    return material;
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -208,15 +277,17 @@ export default function Earth2() {
   useEffect(() => {
     return () => {
       geometry.dispose();
+      particleSystem.geometry.dispose();
     };
-  }, [geometry]);
+  }, [geometry, particleSystem.geometry]);
 
   useEffect(() => {
     return () => {
       earthMaterial.dispose();
       atmosphereMaterial.dispose();
+      particleMaterial.dispose();
     };
-  }, [atmosphereMaterial, earthMaterial]);
+  }, [atmosphereMaterial, earthMaterial, particleMaterial]);
 
   const [earthControls, setEarthControls] = useControls(
     "Earth2",
@@ -250,6 +321,105 @@ export default function Earth2() {
           cloudOpacity: { value: 0.8, min: 0, max: 1.0, step: 0.01 },
           specularStrength: { value: 0.6, min: 0, max: 2.0, step: 0.01 },
           nightLightIntensity: { value: 1.4, min: 0, max: 2.0, step: 0.01 },
+        },
+        { collapsed: false }
+      ),
+      Particles: folder(
+        {
+          "Turn To Particles": button(() => {
+            particleTransition.current.target = 1;
+          }),
+          "Return To Globe": button(() => {
+            particleTransition.current.target = 0;
+          }),
+          particleSize: {
+            value: 0.032,
+            min: 0.005,
+            max: 0.12,
+            step: 0.001,
+            label: "Point size",
+          },
+          particleOpacity: {
+            value: 0.95,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Brightness",
+          },
+          particleColor: { value: "#f8fbff", label: "Color" },
+          particleSurfaceLift: {
+            value: 0.045,
+            min: 0,
+            max: 0.25,
+            step: 0.001,
+            label: "Surface lift",
+          },
+          particleDrift: {
+            value: 0.02,
+            min: 0,
+            max: 0.2,
+            step: 0.001,
+            label: "Soft drift",
+          },
+          particleShimmer: {
+            value: 0.012,
+            min: 0,
+            max: 0.05,
+            step: 0.001,
+            label: "Surface shimmer",
+          },
+          particleShimmerSpeed: {
+            value: 2.1,
+            min: 0,
+            max: 10,
+            step: 0.1,
+            label: "Shimmer speed",
+          },
+          particleTransitionSpeed: {
+            value: 2.8,
+            min: 0.5,
+            max: 12,
+            step: 0.1,
+            label: "Transition speed",
+          },
+          "Globe ↔ particles": folder(
+            {
+              crossfadeStart: {
+                value: 0.02,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Crossfade start",
+              },
+              crossfadeEnd: {
+                value: 0.72,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Crossfade end",
+              },
+            },
+            { collapsed: false }
+          ),
+          "Atmosphere (fade only)": folder(
+            {
+              atmosphereFadeStart: {
+                value: 0.0,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Fade start",
+              },
+              atmosphereFadeEnd: {
+                value: 0.5,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Fade end",
+              },
+            },
+            { collapsed: true }
+          ),
         },
         { collapsed: false }
       ),
@@ -467,6 +637,110 @@ export default function Earth2() {
       delta
     );
 
+    particleTransition.current.progress = MathUtils.damp(
+      particleTransition.current.progress,
+      particleTransition.current.target,
+      earthControls.particleTransitionSpeed,
+      delta
+    );
+
+    const particleProgress = particleTransition.current.progress;
+    const particleTime = earthMaterial.uniforms.uTime.value;
+
+    // Single crossfade: globe fades out as particles fade in (same range = smooth handoff)
+    const crossfadeEnd = Math.max(
+      earthControls.crossfadeStart + 0.02,
+      earthControls.crossfadeEnd
+    );
+    const particleVisibility = MathUtils.smoothstep(
+      particleProgress,
+      earthControls.crossfadeStart,
+      crossfadeEnd
+    );
+    const globeVisibility =
+      1.0 -
+      MathUtils.smoothstep(
+        particleProgress,
+        earthControls.crossfadeStart,
+        crossfadeEnd
+      );
+
+    // Atmosphere only fades out (no particles)
+    const atmosphereFadeEnd = Math.max(
+      earthControls.atmosphereFadeStart + 0.02,
+      earthControls.atmosphereFadeEnd
+    );
+    const atmosphereVisibility =
+      1.0 -
+      MathUtils.smoothstep(
+        particleProgress,
+        earthControls.atmosphereFadeStart,
+        atmosphereFadeEnd
+      );
+
+    particleMaterial.color.set(earthControls.particleColor);
+    particleMaterial.size = earthControls.particleSize;
+    particleMaterial.opacity =
+      earthControls.particleOpacity * particleVisibility;
+    earthMaterial.uniforms.uDissolveOpacity.value = globeVisibility;
+    atmosphereMaterial.uniforms.uDissolveOpacity.value = atmosphereVisibility;
+
+    // Keep globe occlusion stable so background effects (e.g. northern lights) don't bleed through.
+    if (!earthMaterial.depthWrite) earthMaterial.depthWrite = true;
+    if (!earthMaterial.depthTest) earthMaterial.depthTest = true;
+
+    // Show the full particle shell from frame one by bypassing depth test only for points.
+    const showParticles = particleVisibility > 0.001;
+    const particleDepthTest = !showParticles;
+    if (particleMaterial.depthTest !== particleDepthTest) {
+      particleMaterial.depthTest = particleDepthTest;
+    }
+
+    if (particlePointsRef.current) {
+      particlePointsRef.current.visible = showParticles;
+    }
+    if (earthRef.current) {
+      earthRef.current.visible = globeVisibility > 0.001;
+    }
+    if (atmosphereRef.current) {
+      atmosphereRef.current.visible = atmosphereVisibility > 0.001;
+    }
+
+    const particlePositions = particleSystem.geometry.getAttribute("position");
+    const positionArray = particlePositions.array;
+
+    for (let i = 0; i < particlePositions.count; i += 1) {
+      const i3 = i * 3;
+      const scatterStrength = particleSystem.scatterStrengths[i];
+      const phase = particleSystem.phases[i];
+      const surfaceLift =
+        earthControls.particleSurfaceLift * scatterStrength * particleVisibility;
+      const driftOffset =
+        earthControls.particleDrift *
+        scatterStrength *
+        Math.sin(particleTime * 0.8 + phase * 1.37) *
+        particleVisibility;
+      const shimmerOffset =
+        Math.sin(particleTime * earthControls.particleShimmerSpeed + phase) *
+        earthControls.particleShimmer *
+        particleVisibility;
+
+      positionArray[i3] =
+        particleSystem.basePositions[i3] +
+        particleSystem.baseNormals[i3] * (surfaceLift + shimmerOffset) +
+        particleSystem.scatterDirections[i3] * driftOffset;
+      positionArray[i3 + 1] =
+        particleSystem.basePositions[i3 + 1] +
+        particleSystem.baseNormals[i3 + 1] * (surfaceLift + shimmerOffset) +
+        particleSystem.scatterDirections[i3 + 1] * driftOffset;
+      positionArray[i3 + 2] =
+        particleSystem.basePositions[i3 + 2] +
+        particleSystem.baseNormals[i3 + 2] * (surfaceLift + shimmerOffset) +
+        particleSystem.scatterDirections[i3 + 2] * driftOffset;
+    }
+
+    particlePositions.needsUpdate = true;
+
     // Animate per-language ripple progress toward 1 when that language is shown
     const r = rippleProgress.current;
     const t = languageTargets.current;
@@ -497,6 +771,9 @@ export default function Earth2() {
       4.0,
       delta
     );
+    // Northern lights: on for day/night view, off for specular view (same curve as globe)
+    northernLightsOpacityRef.current =
+      1.0 - earthMaterial.uniforms.uSpecularViewMix.value;
     earthMaterial.uniforms.uScandinavianMix.value = MathUtils.damp(
       earthMaterial.uniforms.uScandinavianMix.value,
       languageTargets.current.scandinavianMix,
@@ -538,12 +815,20 @@ export default function Earth2() {
           material={earthMaterial}
           onPointerDown={handleSpherePointerDown}
         />
-        <Earth2PopulationBars radius={2} />
+        <points
+          ref={particlePointsRef}
+          geometry={particleSystem.geometry}
+          material={particleMaterial}
+          scale={2}
+          frustumCulled
+          renderOrder={2}
+        />
       </group>
 
-      <NorthernLights2 />
+      <NorthernLights2 opacityRef={northernLightsOpacityRef} />
 
       <mesh
+        ref={atmosphereRef}
         geometry={geometry}
         scale={2.08}
         frustumCulled

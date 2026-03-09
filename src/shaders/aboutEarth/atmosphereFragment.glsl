@@ -2,6 +2,7 @@ uniform vec3 uSunDirection;
 uniform vec3 uAtmosphereDayColor;
 uniform vec3 uAtmosphereTwilightColor;
 uniform float uCloudOpacity;
+uniform float uDissolveOpacity;
 
 varying vec3 vNormal;
 varying vec3 vPosition;
@@ -26,6 +27,7 @@ void main()
 
     float alpha = edgeAlpha * dayAlpha;
     alpha *= mix(0.75, 1.0, clamp(uCloudOpacity, 0.0, 1.0));
+    alpha *= uDissolveOpacity;
 
     gl_FragColor = vec4(color, alpha);
     #include <tonemapping_fragment>

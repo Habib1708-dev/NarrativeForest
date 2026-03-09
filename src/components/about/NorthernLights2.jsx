@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { folder, useControls } from "leva";
 import {
@@ -6,6 +6,7 @@ import {
   Color,
   CylinderGeometry,
   DoubleSide,
+  MathUtils,
   ShaderMaterial,
   Uniform,
 } from "three";
@@ -44,7 +45,9 @@ const DEFAULTS = {
   fresnelStrength: 0.0,
 };
 
-export default function NorthernLights2() {
+export default function NorthernLights2({ opacityRef = null }) {
+  const meshRef = useRef(null);
+  const smoothedOpacityRef = useRef(1);
   const controls = useControls(
     "Northern Lights 2",
     {
@@ -231,6 +234,7 @@ export default function NorthernLights2() {
           uGapFill: new Uniform(controls.gapFill),
           uRadialBlend: new Uniform(controls.radialBlend),
           uFresnelStrength: new Uniform(controls.fresnelStrength),
+          uTransitionOpacity: new Uniform(1.0),
           uColorBottom: new Uniform(new Color(controls.colorBottom)),
           uColorTop: new Uniform(new Color(controls.colorTop)),
         },
@@ -278,10 +282,23 @@ export default function NorthernLights2() {
     material.uniforms.uFresnelStrength.value = controls.fresnelStrength;
     material.uniforms.uColorBottom.value.set(controls.colorBottom);
     material.uniforms.uColorTop.value.set(controls.colorTop);
+
+    const targetOpacity = opacityRef ? opacityRef.current : 1.0;
+    smoothedOpacityRef.current = MathUtils.damp(
+      smoothedOpacityRef.current,
+      targetOpacity,
+      5.0,
+      delta
+    );
+    material.uniforms.uTransitionOpacity.value = smoothedOpacityRef.current;
+    if (meshRef.current) {
+      meshRef.current.visible = smoothedOpacityRef.current > 0.0005;
+    }
   });
 
   return (
     <mesh
+      ref={meshRef}
       geometry={geometry}
       material={material}
       scale={2}

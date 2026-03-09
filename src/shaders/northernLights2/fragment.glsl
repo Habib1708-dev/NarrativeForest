@@ -16,6 +16,7 @@ uniform float uTopFadeEnd;
 uniform float uGapFill;
 uniform float uRadialBlend;
 uniform float uFresnelStrength;
+uniform float uTransitionOpacity;
 uniform vec3 uColorBottom;
 uniform vec3 uColorTop;
 
@@ -76,9 +77,13 @@ void main() {
         streakEnergy * curtainAlpha * 1.85 +
         fresnel * curtainAlpha * uFresnelStrength
     ) * uIntensity * uDensity;
+    emission *= uTransitionOpacity;
 
     color *= mix(0.75, 1.35, streakEnergy);
-    gl_FragColor = vec4(color * emission, clamp(emission, 0.0, 1.0));
+    gl_FragColor = vec4(
+        color * emission,
+        clamp(emission * uTransitionOpacity, 0.0, 1.0)
+    );
 
     #include <tonemapping_fragment>
     #include <colorspace_fragment>

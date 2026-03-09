@@ -25,6 +25,7 @@ uniform float uPointRippleScale;
 uniform float uPointRippleOpacity;
 uniform float uPointRippleVisibility;
 uniform vec3 uPointRippleColor;
+uniform float uDissolveOpacity;
 uniform float uTime;
 uniform vec3 uSunDirection;
 uniform vec3 uAtmosphereDayColor;
@@ -243,7 +244,7 @@ void main()
     vec3 specularColor = mix(vec3(1.0), atmosphereColor, fresnel);
     color += specular * specularColor;
 
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(color, uDissolveOpacity);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
 }
