@@ -36,12 +36,22 @@ export default function Earth2() {
     specularViewEnabled: false,
   });
 
-  const [dayMap, nightMap, cloudsMap, normalMap, specularMap] = useTexture([
+  const [
+    dayMap,
+    nightMap,
+    cloudsMap,
+    normalMap,
+    specularMap,
+    elevBumpMap,
+    citiesMaskMap,
+  ] = useTexture([
     "/textures/earth/earth2/8k_earth_daymap.jpg",
     "/textures/earth/earth2/8k_earth_nightmap.jpg",
     "/textures/earth/earth2/2k_earth_clouds.jpg",
     "/textures/earth/earth2/2k_earth_normal_map (1).jpg",
     "/textures/earth/earth2/8k_earth_specular_languages_map (1).jpg",
+    "/textures/earth/earth2/elev_bump_8k.jpg",
+    "/textures/earth/earth2/cities_mask.png",
   ]);
 
   const geometry = useMemo(() => {
@@ -67,6 +77,8 @@ export default function Earth2() {
           uCloudsTexture: new Uniform(cloudsMap),
           uNormalMap: new Uniform(normalMap),
           uSpecularMap: new Uniform(specularMap),
+          uElevBumpMap: new Uniform(elevBumpMap),
+          uCitiesMask: new Uniform(citiesMaskMap),
           uSunDirection: new Uniform(new Vector3(0, 0, 1)),
           uAtmosphereDayColor: new Uniform(new Color("#00aaff")),
           uAtmosphereTwilightColor: new Uniform(new Color("#6f6f6f")),
@@ -83,9 +95,23 @@ export default function Earth2() {
           uTurkishMix: new Uniform(0.0),
           uBlueMix: new Uniform(0.0),
           uLanguageColor: new Uniform(new Color("#ffffff")),
+          uLanguageOverlayOpacity: new Uniform(0.0),
+          uSpecularViewElevMix: new Uniform(0.0),
+          uElevContrast: new Uniform(1.0),
+          uCitiesMode: new Uniform(0.0),
+          uCitiesOpacity: new Uniform(0.0),
+          uCitiesColor: new Uniform(new Color("#ffffff")),
         },
       }),
-    [dayMap, nightMap, cloudsMap, normalMap, specularMap]
+    [
+      dayMap,
+      nightMap,
+      cloudsMap,
+      normalMap,
+      specularMap,
+      elevBumpMap,
+      citiesMaskMap,
+    ]
   );
 
   const atmosphereMaterial = useMemo(
@@ -156,6 +182,45 @@ export default function Earth2() {
       "Language Spread": folder(
         {
           languageColor: { value: "#ffffff", label: "Color" },
+          specularViewElevMix: {
+            value: 0.0,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Height map in specular view",
+          },
+          elevContrast: {
+            value: 1.0,
+            min: 0.2,
+            max: 3.0,
+            step: 0.01,
+            label: "Elevation contrast",
+          },
+          Cities: folder(
+            {
+              citiesMode: {
+                value: "overlay",
+                options: { "Overlay on specular": "overlay", "Day/night style": "daynight" },
+                label: "Mode",
+              },
+              citiesOpacity: {
+                value: 0.9,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Opacity",
+              },
+              citiesColor: { value: "#ffffff", label: "Color" },
+            },
+            { collapsed: true }
+          ),
+          languageCoverOpacity: {
+            value: 0.8,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Language cover opacity",
+          },
           "Enable specular view": button(() => {
             interactionState.current.specularViewEnabled = true;
             languageTargets.current.specularViewMix = 1;
@@ -169,35 +234,30 @@ export default function Earth2() {
             languageTargets.current.blueMix = 0;
           }),
           "Show Scandinavian": button(() => {
-            if (!interactionState.current.specularViewEnabled) return;
             languageTargets.current.scandinavianMix = 1;
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 0;
           }),
           "Show Arabic": button(() => {
-            if (!interactionState.current.specularViewEnabled) return;
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 1;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 0;
           }),
           "Show Turkish": button(() => {
-            if (!interactionState.current.specularViewEnabled) return;
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 1;
             languageTargets.current.blueMix = 0;
           }),
           "Show Blue": button(() => {
-            if (!interactionState.current.specularViewEnabled) return;
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 1;
           }),
           "Show all languages": button(() => {
-            if (!interactionState.current.specularViewEnabled) return;
             languageTargets.current.scandinavianMix = 1;
             languageTargets.current.arabicMix = 1;
             languageTargets.current.turkishMix = 1;
@@ -222,14 +282,33 @@ export default function Earth2() {
     cloudsMap.colorSpace = NoColorSpace;
     normalMap.colorSpace = NoColorSpace;
     specularMap.colorSpace = NoColorSpace;
+    elevBumpMap.colorSpace = NoColorSpace;
+    citiesMaskMap.colorSpace = NoColorSpace;
 
     const maxAnisotropy = gl.capabilities.getMaxAnisotropy();
     const anisotropy = Math.min(8, maxAnisotropy || 1);
-    [dayMap, nightMap, cloudsMap, normalMap, specularMap].forEach((texture) => {
+    [
+      dayMap,
+      nightMap,
+      cloudsMap,
+      normalMap,
+      specularMap,
+      elevBumpMap,
+      citiesMaskMap,
+    ].forEach((texture) => {
       texture.anisotropy = anisotropy;
       texture.needsUpdate = true;
     });
-  }, [dayMap, gl, nightMap, cloudsMap, normalMap, specularMap]);
+  }, [
+    dayMap,
+    gl,
+    nightMap,
+    cloudsMap,
+    normalMap,
+    specularMap,
+    elevBumpMap,
+    citiesMaskMap,
+  ]);
 
   useFrame((_, delta) => {
     sunSpherical.phi = earthControls.phi;
@@ -257,6 +336,15 @@ export default function Earth2() {
       earthControls.dayTintIntensity;
     earthMaterial.uniforms.uDaySaturation.value = earthControls.daySaturation;
     earthMaterial.uniforms.uLanguageColor.value.set(earthControls.languageColor);
+    earthMaterial.uniforms.uLanguageOverlayOpacity.value =
+      earthControls.languageCoverOpacity;
+    earthMaterial.uniforms.uSpecularViewElevMix.value =
+      earthControls.specularViewElevMix;
+    earthMaterial.uniforms.uElevContrast.value = earthControls.elevContrast;
+    earthMaterial.uniforms.uCitiesMode.value =
+      earthControls.citiesMode === "daynight" ? 1.0 : 0.0;
+    earthMaterial.uniforms.uCitiesOpacity.value = earthControls.citiesOpacity;
+    earthMaterial.uniforms.uCitiesColor.value.set(earthControls.citiesColor);
 
     earthMaterial.uniforms.uNormalScale.value = earthControls.normalScale;
     earthMaterial.uniforms.uCloudOpacity.value = earthControls.cloudOpacity;

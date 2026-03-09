@@ -3,6 +3,13 @@ uniform sampler2D uNightTexture;
 uniform sampler2D uCloudsTexture;
 uniform sampler2D uNormalMap;
 uniform sampler2D uSpecularMap;
+uniform sampler2D uElevBumpMap;
+uniform sampler2D uCitiesMask;
+uniform float uSpecularViewElevMix;
+uniform float uElevContrast;
+uniform float uCitiesMode;
+uniform float uCitiesOpacity;
+uniform vec3 uCitiesColor;
 uniform vec3 uSunDirection;
 uniform vec3 uAtmosphereDayColor;
 uniform vec3 uAtmosphereTwilightColor;
@@ -19,6 +26,7 @@ uniform float uArabicMix;
 uniform float uTurkishMix;
 uniform float uBlueMix;
 uniform vec3 uLanguageColor;
+uniform float uLanguageOverlayOpacity;
 
 varying vec2 vUv;
 varying vec3 vNormal;
@@ -86,6 +94,7 @@ void main()
     vec3 specularMapColor = texture2D(uSpecularMap, vUv).rgb;
     vec4 languageMasks = getExpandedLanguageMasks(vUv);
     float combinedLanguageMask = clamp(languageMasks.r + languageMasks.g + languageMasks.b + languageMasks.a, 0.0, 1.0);
+    // Single specular map: languages texture as B&W (colored regions = no specular)
     float specularMask = dot(specularMapColor, vec3(0.299, 0.587, 0.114));
     specularMask *= (1.0 - smoothstep(0.05, 0.2, combinedLanguageMask));
 
@@ -97,7 +106,15 @@ void main()
     dayColor = mix(vec3(dayLuma), dayColor, uDaySaturation);
     vec3 nightColor = texture2D(uNightTexture, vUv).rgb * uNightLightIntensity;
     color = mix(nightColor, dayColor, dayMix);
-    color = mix(color, vec3(specularMask), uSpecularViewMix);
+    // Specular view: combine specular (water vs land) + elevation for clear sea/land distinction
+    // Specular: water bright, land darker. Elevation: land has height detail, ocean low/dark.
+    // Combined: sea = white (from specular), land = elevation grayscale (terrain shading).
+    float elevLuma = dot(texture2D(uElevBumpMap, vUv).rgb, vec3(0.299, 0.587, 0.114));
+    elevLuma = (elevLuma - 0.5) * uElevContrast + 0.5;
+    elevLuma = clamp(elevLuma, 0.0, 1.0);
+    float seaLandBase = mix(elevLuma, 1.0, specularMask);
+    float specularViewBase = mix(specularMask, seaLandBase, uSpecularViewElevMix);
+    color = mix(color, vec3(specularViewBase), uSpecularViewMix);
 
     // Clouds (standalone texture)
     float cloudsValue = texture2D(uCloudsTexture, vUv).r;
@@ -106,6 +123,12 @@ void main()
     cloudsMix *= uCloudOpacity;
     cloudsMix *= (1.0 - uSpecularViewMix);
     color = mix(color, vec3(1.0), cloudsMix);
+
+    // Cities: overlay on specular+elev only, or day/night style (follow sun)
+    float cityMask = texture2D(uCitiesMask, vUv).r;
+    float citiesMix = cityMask * uCitiesOpacity;
+    citiesMix *= (1.0 - uCitiesMode) * uSpecularViewMix + uCitiesMode * dayMix;
+    color = mix(color, uCitiesColor, clamp(citiesMix, 0.0, 1.0));
 
     // Atmosphere fresnel
     float fresnel = dot(viewDirection, normal) + 1.0;
@@ -120,7 +143,8 @@ void main()
     selectedLanguageMask += languageMasks.b * uTurkishMix;
     selectedLanguageMask += languageMasks.a * uBlueMix;
     selectedLanguageMask = clamp(selectedLanguageMask, 0.0, 1.0);
-    color = mix(color, uLanguageColor, selectedLanguageMask * uSpecularViewMix);
+    // Single opacity for language cover in all modes (specular view + day/night overlay)
+    color = mix(color, uLanguageColor, selectedLanguageMask * uLanguageOverlayOpacity);
 
     // Specular highlights masked to oceans via specular map
     vec3 reflection = reflect(-uSunDirection, normal);
