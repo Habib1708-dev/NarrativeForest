@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
-import { folder, useControls } from "leva";
+import { button, folder, useControls } from "leva";
 import {
   BackSide,
   Color,
+  MathUtils,
   NoColorSpace,
   ShaderMaterial,
   Spherical,
@@ -24,13 +25,23 @@ const SEGMENTS = 128;
 export default function Earth2() {
   const earthRef = useRef(null);
   const { gl } = useThree();
+  const languageTargets = useRef({
+    specularViewMix: 0,
+    scandinavianMix: 0,
+    arabicMix: 0,
+    turkishMix: 0,
+    blueMix: 0,
+  });
+  const interactionState = useRef({
+    specularViewEnabled: false,
+  });
 
   const [dayMap, nightMap, cloudsMap, normalMap, specularMap] = useTexture([
     "/textures/earth/earth2/8k_earth_daymap.jpg",
     "/textures/earth/earth2/8k_earth_nightmap.jpg",
     "/textures/earth/earth2/2k_earth_clouds.jpg",
     "/textures/earth/earth2/2k_earth_normal_map (1).jpg",
-    "/textures/earth/earth2/2k_earth_specular_map.jpg",
+    "/textures/earth/earth2/8k_earth_specular_languages_map (1).jpg",
   ]);
 
   const geometry = useMemo(() => {
@@ -59,13 +70,19 @@ export default function Earth2() {
           uSunDirection: new Uniform(new Vector3(0, 0, 1)),
           uAtmosphereDayColor: new Uniform(new Color("#00aaff")),
           uAtmosphereTwilightColor: new Uniform(new Color("#6f6f6f")),
-          uNightLightIntensity: new Uniform(0.4),
+          uNightLightIntensity: new Uniform(1.4),
           uCloudOpacity: new Uniform(0.8),
           uSpecularStrength: new Uniform(0.6),
           uNormalScale: new Uniform(1.0),
           uDayTintColor: new Uniform(new Color("#ffffff")),
           uDayTintIntensity: new Uniform(0.0),
           uDaySaturation: new Uniform(1.0),
+          uSpecularViewMix: new Uniform(0.0),
+          uScandinavianMix: new Uniform(0.0),
+          uArabicMix: new Uniform(0.0),
+          uTurkishMix: new Uniform(0.0),
+          uBlueMix: new Uniform(0.0),
+          uLanguageColor: new Uniform(new Color("#ffffff")),
         },
       }),
     [dayMap, nightMap, cloudsMap, normalMap, specularMap]
@@ -132,7 +149,66 @@ export default function Earth2() {
           normalScale: { value: 1.0, min: 0, max: 3.0, step: 0.01 },
           cloudOpacity: { value: 0.8, min: 0, max: 1.0, step: 0.01 },
           specularStrength: { value: 0.6, min: 0, max: 2.0, step: 0.01 },
-          nightLightIntensity: { value: 0.4, min: 0, max: 2.0, step: 0.01 },
+          nightLightIntensity: { value: 1.4, min: 0, max: 2.0, step: 0.01 },
+        },
+        { collapsed: false }
+      ),
+      "Language Spread": folder(
+        {
+          languageColor: { value: "#ffffff", label: "Color" },
+          "Enable specular view": button(() => {
+            interactionState.current.specularViewEnabled = true;
+            languageTargets.current.specularViewMix = 1;
+          }),
+          "Return to day/night": button(() => {
+            interactionState.current.specularViewEnabled = false;
+            languageTargets.current.specularViewMix = 0;
+            languageTargets.current.scandinavianMix = 0;
+            languageTargets.current.arabicMix = 0;
+            languageTargets.current.turkishMix = 0;
+            languageTargets.current.blueMix = 0;
+          }),
+          "Show Scandinavian": button(() => {
+            if (!interactionState.current.specularViewEnabled) return;
+            languageTargets.current.scandinavianMix = 1;
+            languageTargets.current.arabicMix = 0;
+            languageTargets.current.turkishMix = 0;
+            languageTargets.current.blueMix = 0;
+          }),
+          "Show Arabic": button(() => {
+            if (!interactionState.current.specularViewEnabled) return;
+            languageTargets.current.scandinavianMix = 0;
+            languageTargets.current.arabicMix = 1;
+            languageTargets.current.turkishMix = 0;
+            languageTargets.current.blueMix = 0;
+          }),
+          "Show Turkish": button(() => {
+            if (!interactionState.current.specularViewEnabled) return;
+            languageTargets.current.scandinavianMix = 0;
+            languageTargets.current.arabicMix = 0;
+            languageTargets.current.turkishMix = 1;
+            languageTargets.current.blueMix = 0;
+          }),
+          "Show Blue": button(() => {
+            if (!interactionState.current.specularViewEnabled) return;
+            languageTargets.current.scandinavianMix = 0;
+            languageTargets.current.arabicMix = 0;
+            languageTargets.current.turkishMix = 0;
+            languageTargets.current.blueMix = 1;
+          }),
+          "Show all languages": button(() => {
+            if (!interactionState.current.specularViewEnabled) return;
+            languageTargets.current.scandinavianMix = 1;
+            languageTargets.current.arabicMix = 1;
+            languageTargets.current.turkishMix = 1;
+            languageTargets.current.blueMix = 1;
+          }),
+          "Hide languages": button(() => {
+            languageTargets.current.scandinavianMix = 0;
+            languageTargets.current.arabicMix = 0;
+            languageTargets.current.turkishMix = 0;
+            languageTargets.current.blueMix = 0;
+          }),
         },
         { collapsed: false }
       ),
@@ -180,6 +256,7 @@ export default function Earth2() {
     earthMaterial.uniforms.uDayTintIntensity.value =
       earthControls.dayTintIntensity;
     earthMaterial.uniforms.uDaySaturation.value = earthControls.daySaturation;
+    earthMaterial.uniforms.uLanguageColor.value.set(earthControls.languageColor);
 
     earthMaterial.uniforms.uNormalScale.value = earthControls.normalScale;
     earthMaterial.uniforms.uCloudOpacity.value = earthControls.cloudOpacity;
@@ -189,6 +266,36 @@ export default function Earth2() {
       earthControls.nightLightIntensity;
     atmosphereMaterial.uniforms.uCloudOpacity.value =
       earthControls.cloudOpacity;
+    earthMaterial.uniforms.uSpecularViewMix.value = MathUtils.damp(
+      earthMaterial.uniforms.uSpecularViewMix.value,
+      languageTargets.current.specularViewMix,
+      4.0,
+      delta
+    );
+    earthMaterial.uniforms.uScandinavianMix.value = MathUtils.damp(
+      earthMaterial.uniforms.uScandinavianMix.value,
+      languageTargets.current.scandinavianMix,
+      5.0,
+      delta
+    );
+    earthMaterial.uniforms.uArabicMix.value = MathUtils.damp(
+      earthMaterial.uniforms.uArabicMix.value,
+      languageTargets.current.arabicMix,
+      5.0,
+      delta
+    );
+    earthMaterial.uniforms.uTurkishMix.value = MathUtils.damp(
+      earthMaterial.uniforms.uTurkishMix.value,
+      languageTargets.current.turkishMix,
+      5.0,
+      delta
+    );
+    earthMaterial.uniforms.uBlueMix.value = MathUtils.damp(
+      earthMaterial.uniforms.uBlueMix.value,
+      languageTargets.current.blueMix,
+      5.0,
+      delta
+    );
 
     if (earthRef.current) {
       earthRef.current.rotation.y += delta * 0.1;
