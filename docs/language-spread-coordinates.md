@@ -36,3 +36,22 @@ Coordinates are from sphere clicks (Space + click) in Earth2. Used as UV origins
 ## Radial ripple
 
 The effect uses the **UV coordinates** above as event origins. For each language, distance from that UV to the current pixel is computed; a circular wave expands from the origin and fills the colored mask as the ripple progress goes from 0 to 1.
+
+## Additional point-ripple coordinates
+
+These are the three newer points from the screenshot, labeled by you for the standalone circular ripple effect.
+
+### Lebanon
+- **Latitude:** 33.96282337248603°
+- **Longitude (logged):** -104.87095500018344°
+- **Approx. ripple UV:** `u: 0.598969569444`, `v: 0.688682352069`
+
+### Iraq
+- **Latitude:** 33.34119023741806°
+- **Longitude (logged):** -96.03056358049905°
+- **Approx. ripple UV:** `u: 0.623526212276`, `v: 0.685228834652`
+
+### Denmark
+- **Latitude:** 56.616066358594566°
+- **Longitude (logged):** -131.27317332661522°
+- **Approx. ripple UV:** `u: 0.525630074093`, `v: 0.814533702003`

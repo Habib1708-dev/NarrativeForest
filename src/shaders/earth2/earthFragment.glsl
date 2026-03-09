@@ -14,10 +14,18 @@ uniform vec2 uTurkishOriginUV;
 uniform vec2 uArabicOriginUV;
 uniform vec2 uScandinavianOriginUV;
 uniform vec2 uEnglishOriginUV;
+uniform vec2 uLebanonRippleUV;
+uniform vec2 uIraqRippleUV;
+uniform vec2 uDenmarkRippleUV;
 uniform float uTurkishRippleProgress;
 uniform float uArabicRippleProgress;
 uniform float uScandinavianRippleProgress;
 uniform float uEnglishRippleProgress;
+uniform float uPointRippleScale;
+uniform float uPointRippleOpacity;
+uniform float uPointRippleVisibility;
+uniform vec3 uPointRippleColor;
+uniform float uTime;
 uniform vec3 uSunDirection;
 uniform vec3 uAtmosphereDayColor;
 uniform vec3 uAtmosphereTwilightColor;
@@ -41,6 +49,8 @@ varying vec3 vNormal;
 varying vec3 vPosition;
 varying vec3 vTangent;
 varying vec3 vBitangent;
+
+const float PI = 3.14159265358979323846;
 
 float getSaturation(vec3 color)
 {
@@ -93,11 +103,43 @@ float uvDistance(vec2 a, vec2 b)
     return length(d);
 }
 
+vec3 uvToSphereDirection(vec2 uv)
+{
+    float phi = (uv.x - 0.5) * PI * 2.0;
+    float theta = (uv.y - 0.5) * PI;
+    float cosTheta = cos(theta);
+    return normalize(vec3(
+        sin(phi) * cosTheta,
+        sin(theta),
+        cos(phi) * cosTheta
+    ));
+}
+
+float sphericalDistance(vec2 a, vec2 b)
+{
+    vec3 dirA = uvToSphereDirection(a);
+    vec3 dirB = uvToSphereDirection(b);
+    return acos(clamp(dot(dirA, dirB), -1.0, 1.0));
+}
+
 float rippleFill(vec2 originUV, float progress, float maxRadius, float edge)
 {
     float d = uvDistance(vUv, originUV);
     float r = progress * maxRadius;
     return 1.0 - smoothstep(r - edge, r + edge, d);
+}
+
+float ringPulse(vec2 originUV, float time, float maxRadius, float width)
+{
+    float d = sphericalDistance(vUv, originUV);
+    float cycle = fract(time / 2.2);
+    float radius = cycle * maxRadius;
+    float spacing = max(width * 3.5, maxRadius * 0.18);
+    float ring0 = 1.0 - smoothstep(width, width * 1.6, abs(d - radius));
+    float ring1 = 1.0 - smoothstep(width, width * 1.6, abs(d - max(0.0, radius - spacing)));
+    float ring2 = 1.0 - smoothstep(width, width * 1.6, abs(d - max(0.0, radius - spacing * 2.0)));
+    float fadeAtBoundary = 1.0 - smoothstep(maxRadius * 0.65, maxRadius, radius);
+    return max(ring0, max(ring1, ring2)) * fadeAtBoundary;
 }
 
 void main()
@@ -159,6 +201,17 @@ void main()
     float atmosphereDayMix = smoothstep(-0.5, 1.0, sunOrientation);
     vec3 atmosphereColor = mix(uAtmosphereTwilightColor, uAtmosphereDayColor, atmosphereDayMix);
     color = mix(color, atmosphereColor, fresnel * atmosphereDayMix);
+
+    float pointRippleWidth = max(0.0009, uPointRippleScale * 0.035);
+    float pointRippleLebanon = ringPulse(uLebanonRippleUV, uTime, uPointRippleScale, pointRippleWidth);
+    float pointRippleIraq = ringPulse(uIraqRippleUV, uTime + 0.8, uPointRippleScale, pointRippleWidth);
+    float pointRippleDenmark = ringPulse(uDenmarkRippleUV, uTime + 1.6, uPointRippleScale, pointRippleWidth);
+    float pointRippleMask = max(pointRippleLebanon, max(pointRippleIraq, pointRippleDenmark));
+    color = mix(
+        color,
+        uPointRippleColor,
+        pointRippleMask * uPointRippleOpacity * uPointRippleVisibility
+    );
 
     // Radial ripple: per-language wave expands from origin UV; each animates on its own
     // Max radius must cover full UV extent with wraparound (diagonal 0.5^2+0.5^2 = 0.707)

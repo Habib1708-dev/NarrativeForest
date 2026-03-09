@@ -20,6 +20,7 @@ import earthFragmentShader from "../../shaders/earth2/earthFragment.glsl";
 import atmosphereVertexShader from "../../shaders/aboutEarth/atmosphereVertex.glsl";
 import atmosphereFragmentShader from "../../shaders/aboutEarth/atmosphereFragment.glsl";
 import NorthernLights2 from "./NorthernLights2";
+import Earth2PopulationBars from "./Earth2PopulationBars";
 
 const SEGMENTS = 128;
 
@@ -28,11 +29,15 @@ const TURKISH_ORIGIN_UV = new Vector2(0.5926148215402667, 0.7208708637800467);
 const ARABIC_ORIGIN_UV = new Vector2(0.600045657460341, 0.6897751993640002);
 const SCANDINAVIAN_ORIGIN_UV = new Vector2(0.5347596871653373, 0.812034899839748);
 const ENGLISH_ORIGIN_UV = new Vector2(0.4967239532384653, 0.7895651614540524);
+const LEBANON_RIPPLE_UV = new Vector2(0.598969569444, 0.688682352069);
+const IRAQ_RIPPLE_UV = new Vector2(0.623526212276, 0.685228834652);
+const DENMARK_RIPPLE_UV = new Vector2(0.525630074093, 0.814533702003);
 
 const RIPPLE_DURATION_SEC = 2.5;
 
 export default function Earth2() {
   const earthRef = useRef(null);
+  const earthSurfaceRef = useRef(null);
   const spaceKeyRef = useRef(false);
   const { gl } = useThree();
   const languageTargets = useRef({
@@ -125,6 +130,14 @@ export default function Earth2() {
           uArabicRippleProgress: new Uniform(0.0),
           uScandinavianRippleProgress: new Uniform(0.0),
           uEnglishRippleProgress: new Uniform(0.0),
+          uLebanonRippleUV: new Uniform(LEBANON_RIPPLE_UV.clone()),
+          uIraqRippleUV: new Uniform(IRAQ_RIPPLE_UV.clone()),
+          uDenmarkRippleUV: new Uniform(DENMARK_RIPPLE_UV.clone()),
+          uPointRippleScale: new Uniform(0.028),
+          uPointRippleOpacity: new Uniform(0.45),
+          uPointRippleVisibility: new Uniform(0.0),
+          uPointRippleColor: new Uniform(new Color("#ffbf00")),
+          uTime: new Uniform(0.0),
         },
       }),
     [
@@ -174,7 +187,9 @@ export default function Earth2() {
   const handleSpherePointerDown = (e) => {
     if (!spaceKeyRef.current) return;
     e.stopPropagation();
-    const point = e.point.clone().divideScalar(2);
+    const point = earthRef.current
+      ? earthRef.current.worldToLocal(e.point.clone()).normalize()
+      : e.point.clone().normalize();
     const lat = Math.asin(Math.max(-1, Math.min(1, point.y)));
     const lng = Math.atan2(point.x, point.z);
     const latDeg = (lat * 180) / Math.PI;
@@ -203,9 +218,9 @@ export default function Earth2() {
     };
   }, [atmosphereMaterial, earthMaterial]);
 
-  const earthControls = useControls(
+  const [earthControls, setEarthControls] = useControls(
     "Earth2",
-    {
+    () => ({
       Atmosphere: folder(
         {
           atmosphereDayColor: { value: "#00aaff" },
@@ -280,9 +295,34 @@ export default function Earth2() {
             step: 0.01,
             label: "Language cover opacity",
           },
+          "Point ripples": folder(
+            {
+              pointRipplesLive: { value: false, label: "Live continuously" },
+              pointRippleScale: {
+                value: 0.028,
+                min: 0.003,
+                max: 0.08,
+                step: 0.001,
+                label: "Scale",
+              },
+              pointRippleOpacity: {
+                value: 0.45,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Opacity",
+              },
+              pointRippleColor: { value: "#ffbf00", label: "Color" },
+            },
+            { collapsed: true }
+          ),
           "Enable specular view": button(() => {
             interactionState.current.specularViewEnabled = true;
             languageTargets.current.specularViewMix = 1;
+            setEarthControls({
+              atmosphereDayColor: "#5f5f5f",
+              atmosphereTwilightColor: "#5f5f5f",
+            });
           }),
           "Return to day/night": button(() => {
             interactionState.current.specularViewEnabled = false;
@@ -339,7 +379,7 @@ export default function Earth2() {
         },
         { collapsed: false }
       ),
-    },
+    }),
     { collapsed: false }
   );
 
@@ -412,6 +452,20 @@ export default function Earth2() {
       earthControls.citiesMode === "daynight" ? 1.0 : 0.0;
     earthMaterial.uniforms.uCitiesOpacity.value = earthControls.citiesOpacity;
     earthMaterial.uniforms.uCitiesColor.value.set(earthControls.citiesColor);
+    earthMaterial.uniforms.uPointRippleScale.value =
+      earthControls.pointRippleScale;
+    earthMaterial.uniforms.uPointRippleOpacity.value =
+      earthControls.pointRippleOpacity;
+    earthMaterial.uniforms.uPointRippleColor.value.set(
+      earthControls.pointRippleColor
+    );
+    earthMaterial.uniforms.uTime.value += delta;
+    earthMaterial.uniforms.uPointRippleVisibility.value = MathUtils.damp(
+      earthMaterial.uniforms.uPointRippleVisibility.value,
+      earthControls.pointRipplesLive ? 1.0 : 0.0,
+      4.0,
+      delta
+    );
 
     // Animate per-language ripple progress toward 1 when that language is shown
     const r = rippleProgress.current;
@@ -468,21 +522,24 @@ export default function Earth2() {
       delta
     );
 
-    if (earthRef.current && earthControls.rotate) {
-      earthRef.current.rotation.y += delta * 0.1;
+    if (earthSurfaceRef.current && earthControls.rotate) {
+      earthSurfaceRef.current.rotation.y += delta * 0.1;
     }
   });
 
   return (
     <group position={[0, 0, 0]}>
-      <mesh
-        ref={earthRef}
-        geometry={geometry}
-        scale={2}
-        frustumCulled
-        material={earthMaterial}
-        onPointerDown={handleSpherePointerDown}
-      />
+      <group ref={earthSurfaceRef}>
+        <mesh
+          ref={earthRef}
+          geometry={geometry}
+          scale={2}
+          frustumCulled
+          material={earthMaterial}
+          onPointerDown={handleSpherePointerDown}
+        />
+        <Earth2PopulationBars radius={2} />
+      </group>
 
       <NorthernLights2 />
 
