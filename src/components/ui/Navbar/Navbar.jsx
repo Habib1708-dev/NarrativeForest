@@ -159,12 +159,12 @@ export default function Navbar() {
           <ul className="navbar-links navbar-links--desktop">
             <li>
               <Link
-                to="/about-us"
+                to="/about-me"
                 className={`navbar-link ${
-                  location.pathname === "/about-us" ? "active" : ""
+                  location.pathname === "/about-me" ? "active" : ""
                 }`}
               >
-                About Us
+                About Me
               </Link>
             </li>
             <li>
@@ -253,13 +253,13 @@ export default function Navbar() {
         <ul className="navbar-drawer-links">
           <li>
             <Link
-              to="/about-us"
+              to="/about-me"
               className={`navbar-drawer-link ${
-                location.pathname === "/about-us" ? "active" : ""
+                location.pathname === "/about-me" ? "active" : ""
               }`}
               onClick={closeDrawer}
             >
-              About Us
+              About Me
             </Link>
           </li>
           <li>
