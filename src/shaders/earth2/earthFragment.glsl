@@ -10,6 +10,14 @@ uniform float uElevContrast;
 uniform float uCitiesMode;
 uniform float uCitiesOpacity;
 uniform vec3 uCitiesColor;
+uniform vec2 uTurkishOriginUV;
+uniform vec2 uArabicOriginUV;
+uniform vec2 uScandinavianOriginUV;
+uniform vec2 uEnglishOriginUV;
+uniform float uTurkishRippleProgress;
+uniform float uArabicRippleProgress;
+uniform float uScandinavianRippleProgress;
+uniform float uEnglishRippleProgress;
 uniform vec3 uSunDirection;
 uniform vec3 uAtmosphereDayColor;
 uniform vec3 uAtmosphereTwilightColor;
@@ -78,6 +86,20 @@ vec4 getExpandedLanguageMasks(vec2 uv)
     return clamp(masks, 0.0, 1.0);
 }
 
+float uvDistance(vec2 a, vec2 b)
+{
+    vec2 d = abs(a - b);
+    d = min(d, 1.0 - d);
+    return length(d);
+}
+
+float rippleFill(vec2 originUV, float progress, float maxRadius, float edge)
+{
+    float d = uvDistance(vUv, originUV);
+    float r = progress * maxRadius;
+    return 1.0 - smoothstep(r - edge, r + edge, d);
+}
+
 void main()
 {
     vec3 viewDirection = normalize(vPosition - cameraPosition);
@@ -138,10 +160,19 @@ void main()
     vec3 atmosphereColor = mix(uAtmosphereTwilightColor, uAtmosphereDayColor, atmosphereDayMix);
     color = mix(color, atmosphereColor, fresnel * atmosphereDayMix);
 
-    float selectedLanguageMask = languageMasks.r * uScandinavianMix;
-    selectedLanguageMask += languageMasks.g * uArabicMix;
-    selectedLanguageMask += languageMasks.b * uTurkishMix;
-    selectedLanguageMask += languageMasks.a * uBlueMix;
+    // Radial ripple: per-language wave expands from origin UV; each animates on its own
+    // Max radius must cover full UV extent with wraparound (diagonal 0.5^2+0.5^2 = 0.707)
+    float maxRadius = 0.72;
+    float rippleEdge = 0.03;
+    float rippleScandinavian = rippleFill(uScandinavianOriginUV, uScandinavianRippleProgress, maxRadius, rippleEdge);
+    float rippleArabic = rippleFill(uArabicOriginUV, uArabicRippleProgress, maxRadius, rippleEdge);
+    float rippleTurkish = rippleFill(uTurkishOriginUV, uTurkishRippleProgress, maxRadius, rippleEdge);
+    float rippleEnglish = rippleFill(uEnglishOriginUV, uEnglishRippleProgress, maxRadius, rippleEdge);
+
+    float selectedLanguageMask = languageMasks.r * uScandinavianMix * rippleScandinavian;
+    selectedLanguageMask += languageMasks.g * uArabicMix * rippleArabic;
+    selectedLanguageMask += languageMasks.b * uTurkishMix * rippleTurkish;
+    selectedLanguageMask += languageMasks.a * uBlueMix * rippleEnglish;
     selectedLanguageMask = clamp(selectedLanguageMask, 0.0, 1.0);
     // Single opacity for language cover in all modes (specular view + day/night overlay)
     color = mix(color, uLanguageColor, selectedLanguageMask * uLanguageOverlayOpacity);

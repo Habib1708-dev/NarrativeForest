@@ -12,6 +12,7 @@ import {
   SphereGeometry,
   SRGBColorSpace,
   Uniform,
+  Vector2,
   Vector3,
 } from "three";
 import earthVertexShader from "../../shaders/earth2/earthVertex.glsl";
@@ -22,8 +23,17 @@ import NorthernLights2 from "./NorthernLights2";
 
 const SEGMENTS = 128;
 
+// Language spread origin UVs (from docs/language-spread-coordinates.md) for radial ripple
+const TURKISH_ORIGIN_UV = new Vector2(0.5926148215402667, 0.7208708637800467);
+const ARABIC_ORIGIN_UV = new Vector2(0.600045657460341, 0.6897751993640002);
+const SCANDINAVIAN_ORIGIN_UV = new Vector2(0.5347596871653373, 0.812034899839748);
+const ENGLISH_ORIGIN_UV = new Vector2(0.4967239532384653, 0.7895651614540524);
+
+const RIPPLE_DURATION_SEC = 2.5;
+
 export default function Earth2() {
   const earthRef = useRef(null);
+  const spaceKeyRef = useRef(false);
   const { gl } = useThree();
   const languageTargets = useRef({
     specularViewMix: 0,
@@ -31,6 +41,12 @@ export default function Earth2() {
     arabicMix: 0,
     turkishMix: 0,
     blueMix: 0,
+  });
+  const rippleProgress = useRef({
+    scandinavian: 0,
+    arabic: 0,
+    turkish: 0,
+    english: 0,
   });
   const interactionState = useRef({
     specularViewEnabled: false,
@@ -101,6 +117,14 @@ export default function Earth2() {
           uCitiesMode: new Uniform(0.0),
           uCitiesOpacity: new Uniform(0.0),
           uCitiesColor: new Uniform(new Color("#ffffff")),
+          uTurkishOriginUV: new Uniform(TURKISH_ORIGIN_UV.clone()),
+          uArabicOriginUV: new Uniform(ARABIC_ORIGIN_UV.clone()),
+          uScandinavianOriginUV: new Uniform(SCANDINAVIAN_ORIGIN_UV.clone()),
+          uEnglishOriginUV: new Uniform(ENGLISH_ORIGIN_UV.clone()),
+          uTurkishRippleProgress: new Uniform(0.0),
+          uArabicRippleProgress: new Uniform(0.0),
+          uScandinavianRippleProgress: new Uniform(0.0),
+          uEnglishRippleProgress: new Uniform(0.0),
         },
       }),
     [
@@ -131,6 +155,40 @@ export default function Earth2() {
       }),
     []
   );
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.code === "Space") spaceKeyRef.current = true;
+    };
+    const onKeyUp = (e) => {
+      if (e.code === "Space") spaceKeyRef.current = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  const handleSpherePointerDown = (e) => {
+    if (!spaceKeyRef.current) return;
+    e.stopPropagation();
+    const point = e.point.clone().divideScalar(2);
+    const lat = Math.asin(Math.max(-1, Math.min(1, point.y)));
+    const lng = Math.atan2(point.x, point.z);
+    const latDeg = (lat * 180) / Math.PI;
+    const lngDeg = (lng * 180) / Math.PI;
+    const uv = e.uv;
+    console.log("Sphere coordinates:", {
+      latitude: latDeg,
+      longitude: lngDeg,
+      latRad: lat,
+      lngRad: lng,
+      unitPoint: { x: point.x, y: point.y, z: point.z },
+      uv: uv ? { u: uv.x, v: uv.y } : null,
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -172,6 +230,7 @@ export default function Earth2() {
       ),
       Surface: folder(
         {
+          rotate: { value: true, label: "Rotate earth" },
           normalScale: { value: 1.0, min: 0, max: 3.0, step: 0.01 },
           cloudOpacity: { value: 0.8, min: 0, max: 1.0, step: 0.01 },
           specularStrength: { value: 0.6, min: 0, max: 2.0, step: 0.01 },
@@ -181,16 +240,16 @@ export default function Earth2() {
       ),
       "Language Spread": folder(
         {
-          languageColor: { value: "#ffffff", label: "Color" },
+          languageColor: { value: "#ffbf00", label: "Color" },
           specularViewElevMix: {
-            value: 0.0,
+            value: 0.43,
             min: 0,
             max: 1,
             step: 0.01,
             label: "Height map in specular view",
           },
           elevContrast: {
-            value: 1.0,
+            value: 1.13,
             min: 0.2,
             max: 3.0,
             step: 0.01,
@@ -210,12 +269,12 @@ export default function Earth2() {
                 step: 0.01,
                 label: "Opacity",
               },
-              citiesColor: { value: "#ffffff", label: "Color" },
+              citiesColor: { value: "#ffbf00", label: "Color" },
             },
             { collapsed: true }
           ),
           languageCoverOpacity: {
-            value: 0.8,
+            value: 0.34,
             min: 0,
             max: 1,
             step: 0.01,
@@ -238,30 +297,38 @@ export default function Earth2() {
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 0;
+            rippleProgress.current.scandinavian = 0;
           }),
           "Show Arabic": button(() => {
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 1;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 0;
+            rippleProgress.current.arabic = 0;
           }),
           "Show Turkish": button(() => {
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 1;
             languageTargets.current.blueMix = 0;
+            rippleProgress.current.turkish = 0;
           }),
           "Show Blue": button(() => {
             languageTargets.current.scandinavianMix = 0;
             languageTargets.current.arabicMix = 0;
             languageTargets.current.turkishMix = 0;
             languageTargets.current.blueMix = 1;
+            rippleProgress.current.english = 0;
           }),
           "Show all languages": button(() => {
             languageTargets.current.scandinavianMix = 1;
             languageTargets.current.arabicMix = 1;
             languageTargets.current.turkishMix = 1;
             languageTargets.current.blueMix = 1;
+            rippleProgress.current.scandinavian = 0;
+            rippleProgress.current.arabic = 0;
+            rippleProgress.current.turkish = 0;
+            rippleProgress.current.english = 0;
           }),
           "Hide languages": button(() => {
             languageTargets.current.scandinavianMix = 0;
@@ -346,6 +413,22 @@ export default function Earth2() {
     earthMaterial.uniforms.uCitiesOpacity.value = earthControls.citiesOpacity;
     earthMaterial.uniforms.uCitiesColor.value.set(earthControls.citiesColor);
 
+    // Animate per-language ripple progress toward 1 when that language is shown
+    const r = rippleProgress.current;
+    const t = languageTargets.current;
+    if (t.scandinavianMix > 0 && r.scandinavian < 1)
+      r.scandinavian = Math.min(1, r.scandinavian + delta / RIPPLE_DURATION_SEC);
+    if (t.arabicMix > 0 && r.arabic < 1)
+      r.arabic = Math.min(1, r.arabic + delta / RIPPLE_DURATION_SEC);
+    if (t.turkishMix > 0 && r.turkish < 1)
+      r.turkish = Math.min(1, r.turkish + delta / RIPPLE_DURATION_SEC);
+    if (t.blueMix > 0 && r.english < 1)
+      r.english = Math.min(1, r.english + delta / RIPPLE_DURATION_SEC);
+    earthMaterial.uniforms.uScandinavianRippleProgress.value = r.scandinavian;
+    earthMaterial.uniforms.uArabicRippleProgress.value = r.arabic;
+    earthMaterial.uniforms.uTurkishRippleProgress.value = r.turkish;
+    earthMaterial.uniforms.uEnglishRippleProgress.value = r.english;
+
     earthMaterial.uniforms.uNormalScale.value = earthControls.normalScale;
     earthMaterial.uniforms.uCloudOpacity.value = earthControls.cloudOpacity;
     earthMaterial.uniforms.uSpecularStrength.value =
@@ -385,7 +468,7 @@ export default function Earth2() {
       delta
     );
 
-    if (earthRef.current) {
+    if (earthRef.current && earthControls.rotate) {
       earthRef.current.rotation.y += delta * 0.1;
     }
   });
@@ -398,6 +481,7 @@ export default function Earth2() {
         scale={2}
         frustumCulled
         material={earthMaterial}
+        onPointerDown={handleSpherePointerDown}
       />
 
       <NorthernLights2 />
