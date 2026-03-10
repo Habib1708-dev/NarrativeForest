@@ -5,11 +5,11 @@ import { button, folder, useControls } from "leva";
 import {
   AdditiveBlending,
   BackSide,
+  BufferAttribute,
   Color,
   DynamicDrawUsage,
   MathUtils,
   NoColorSpace,
-  PointsMaterial,
   ShaderMaterial,
   Spherical,
   SphereGeometry,
@@ -20,6 +20,8 @@ import {
 } from "three";
 import earthVertexShader from "../../shaders/earth2/earthVertex.glsl";
 import earthFragmentShader from "../../shaders/earth2/earthFragment.glsl";
+import particleVertexShader from "../../shaders/earth2/particleVertex.glsl";
+import particleFragmentShader from "../../shaders/earth2/particleFragment.glsl";
 import atmosphereVertexShader from "../../shaders/aboutEarth/atmosphereVertex.glsl";
 import atmosphereFragmentShader from "../../shaders/aboutEarth/atmosphereFragment.glsl";
 import NorthernLights2 from "./NorthernLights2";
@@ -45,7 +47,7 @@ export default function Earth2() {
   const northernLightsOpacityRef = useRef(1);
   const spaceKeyRef = useRef(false);
   const particleTransition = useRef({ target: 0, progress: 0 });
-  const { gl } = useThree();
+  const { gl, size } = useThree();
   const languageTargets = useRef({
     specularViewMix: 0,
     scandinavianMix: 0,
@@ -121,6 +123,8 @@ export default function Earth2() {
       scatterStrengths[i] = 0.45 + Math.random() * 0.75;
       phases[i] = Math.random() * Math.PI * 2;
     }
+
+    particlesGeometry.setAttribute("phase", new BufferAttribute(phases, 1));
 
     return {
       geometry: particlesGeometry,
@@ -224,19 +228,31 @@ export default function Earth2() {
   );
 
   const particleMaterial = useMemo(() => {
-    const material = new PointsMaterial({
-      color: new Color("#ffffff"),
-      size: 0.035,
+    const material = new ShaderMaterial({
       transparent: true,
-      opacity: 0,
       depthWrite: false,
       blending: AdditiveBlending,
-      sizeAttenuation: true,
+      vertexShader: particleVertexShader,
+      fragmentShader: particleFragmentShader,
+      uniforms: {
+        uColor: new Uniform(new Color("#ffffff")),
+        uOpacity: new Uniform(0.0),
+        uSize: new Uniform(0.04),
+        uPixelRatio: new Uniform(Math.min(gl.getPixelRatio(), 2)),
+        uViewportHeight: new Uniform(size.height),
+        uSolidRatio: new Uniform(0.05),
+        uSolidAlpha: new Uniform(5.0),
+        uGlowSpread: new Uniform(0.02),
+        uTime: new Uniform(0.0),
+        uSparklingAlpha: new Uniform(0.0),
+        uSparklingFrequency: new Uniform(1.0),
+        uSparklingDuration: new Uniform(0.01),
+      },
     });
 
     material.toneMapped = false;
     return material;
-  }, []);
+  }, [gl, size.height]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -333,7 +349,7 @@ export default function Earth2() {
             particleTransition.current.target = 0;
           }),
           particleSize: {
-            value: 0.032,
+            value: 0.04,
             min: 0.005,
             max: 0.12,
             step: 0.001,
@@ -382,6 +398,58 @@ export default function Earth2() {
             step: 0.1,
             label: "Transition speed",
           },
+          "Point shape": folder(
+            {
+              solidRatio: {
+                value: 0.05,
+                min: 0,
+                max: 0.5,
+                step: 0.01,
+                label: "Solid core size",
+              },
+              solidAlpha: {
+                value: 5.0,
+                min: 0,
+                max: 10,
+                step: 0.01,
+                label: "Core opacity",
+              },
+              glowSpread: {
+                value: 0.02,
+                min: 0,
+                max: 0.1,
+                step: 0.001,
+                label: "Glow falloff",
+              },
+            },
+            { collapsed: true }
+          ),
+          Sparkling: folder(
+            {
+              sparklingAlpha: {
+                value: 0,
+                min: 0,
+                max: 10,
+                step: 0.01,
+                label: "Sparkle boost (0 = off)",
+              },
+              sparklingFrequency: {
+                value: 1.0,
+                min: 0,
+                max: 10,
+                step: 0.01,
+                label: "Frequency",
+              },
+              sparklingDuration: {
+                value: 0.01,
+                min: 0,
+                max: 0.1,
+                step: 0.001,
+                label: "Duration",
+              },
+            },
+            { collapsed: true }
+          ),
           "Globe ↔ particles": folder(
             {
               crossfadeStart: {
@@ -678,10 +746,22 @@ export default function Earth2() {
         atmosphereFadeEnd
       );
 
-    particleMaterial.color.set(earthControls.particleColor);
-    particleMaterial.size = earthControls.particleSize;
-    particleMaterial.opacity =
+    particleMaterial.uniforms.uColor.value.set(earthControls.particleColor);
+    particleMaterial.uniforms.uSize.value = earthControls.particleSize;
+    particleMaterial.uniforms.uOpacity.value =
       earthControls.particleOpacity * particleVisibility;
+    particleMaterial.uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 2);
+    particleMaterial.uniforms.uViewportHeight.value = size.height;
+    particleMaterial.uniforms.uTime.value = earthMaterial.uniforms.uTime.value;
+    particleMaterial.uniforms.uSolidRatio.value = earthControls.solidRatio;
+    particleMaterial.uniforms.uSolidAlpha.value = earthControls.solidAlpha;
+    particleMaterial.uniforms.uGlowSpread.value = earthControls.glowSpread;
+    particleMaterial.uniforms.uSparklingAlpha.value =
+      earthControls.sparklingAlpha;
+    particleMaterial.uniforms.uSparklingFrequency.value =
+      earthControls.sparklingFrequency;
+    particleMaterial.uniforms.uSparklingDuration.value =
+      earthControls.sparklingDuration;
     earthMaterial.uniforms.uDissolveOpacity.value = globeVisibility;
     atmosphereMaterial.uniforms.uDissolveOpacity.value = atmosphereVisibility;
 
