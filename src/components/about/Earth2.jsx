@@ -6,8 +6,10 @@ import {
   AdditiveBlending,
   BackSide,
   BufferAttribute,
+  BufferGeometry,
   Color,
   DynamicDrawUsage,
+  Line,
   MathUtils,
   NoColorSpace,
   ShaderMaterial,
@@ -24,6 +26,8 @@ import particleVertexShader from "../../shaders/earth2/particleVertex.glsl";
 import particleFragmentShader from "../../shaders/earth2/particleFragment.glsl";
 import atmosphereVertexShader from "../../shaders/aboutEarth/atmosphereVertex.glsl";
 import atmosphereFragmentShader from "../../shaders/aboutEarth/atmosphereFragment.glsl";
+import funnelLineVertexShader from "../../shaders/funnelLine/vertex.glsl";
+import funnelLineFragmentShader from "../../shaders/funnelLine/fragment.glsl";
 import NorthernLights2 from "./NorthernLights2";
 
 const SEGMENTS = 128;
@@ -38,12 +42,118 @@ const IRAQ_RIPPLE_UV = new Vector2(0.623526212276, 0.685228834652);
 const DENMARK_RIPPLE_UV = new Vector2(0.525630074093, 0.814533702003);
 
 const RIPPLE_DURATION_SEC = 2.5;
+const TAU = Math.PI * 2;
+const FUNNEL_SEGMENT_COUNT = 96;
+
+// Vertical funnel: axis along Y. Top (wide mouth) near sphere half-bottom, tip and end below.
+// mouthRadius is the upper opening radius in funnel-local unit space (group has scale 2).
+function getFunnelShape(gravity, mouthRadius = 0.7) {
+  const gravityNorm = MathUtils.clamp(gravity / 5, 0, 1);
+
+  return {
+    entryY: -0.45,
+    tipY: -1.1,
+    endY: -1.8,
+    mouthRadius: Math.max(0.05, mouthRadius),
+    tipRadius: 0.018,
+    convergeRatio: 0.7,
+    captureRatio: MathUtils.lerp(0.4, 0.14, gravityNorm),
+    swirlTurns: MathUtils.lerp(0.7, 1.8, gravityNorm),
+    waveAmplitude: MathUtils.lerp(0.09, 0.025, gravityNorm),
+  };
+}
+
+// Writes funnel guide point in funnel-local space (axis Y, cross-section XZ). Optional offset for particle space.
+function writeFunnelGuidePoint(
+  target,
+  progress,
+  laneAngle,
+  time,
+  gravity,
+  mouthRadius,
+  seed = 0,
+  offsetX = 0,
+  offsetZ = 0
+) {
+  const shape = getFunnelShape(gravity, mouthRadius);
+  const t = MathUtils.clamp(progress, 0, 1);
+  const eased = MathUtils.smootherstep(t, 0, 1);
+  const radius = MathUtils.lerp(shape.mouthRadius, shape.tipRadius, eased);
+  const wave =
+    Math.sin(time * 1.4 + seed * TAU + t * 10.0) *
+    shape.waveAmplitude *
+    (1 - eased);
+  const angle = laneAngle + eased * shape.swirlTurns * TAU + wave;
+  const y = MathUtils.lerp(shape.entryY, shape.tipY, eased);
+
+  target.set(
+    Math.cos(angle) * radius + offsetX,
+    y,
+    Math.sin(angle) * radius + offsetZ
+  );
+
+  return target;
+}
+
+function writeFunnelExitPoint(
+  target,
+  progress,
+  gravity,
+  mouthRadius,
+  offsetX = 0,
+  offsetZ = 0
+) {
+  const shape = getFunnelShape(gravity, mouthRadius);
+  const t = MathUtils.smootherstep(MathUtils.clamp(progress, 0, 1), 0, 1);
+  const y = MathUtils.lerp(shape.tipY, shape.endY, t);
+  target.set(offsetX, y, offsetZ);
+  return target;
+}
+
+function writeFunnelParticlePoint(
+  target,
+  progress,
+  laneAngle,
+  time,
+  gravity,
+  mouthRadius,
+  seed = 0,
+  offsetX = 0,
+  offsetZ = 0
+) {
+  const shape = getFunnelShape(gravity, mouthRadius);
+  const t = MathUtils.clamp(progress, 0, 1);
+
+  if (t <= shape.convergeRatio) {
+    return writeFunnelGuidePoint(
+      target,
+      t / Math.max(shape.convergeRatio, 0.0001),
+      laneAngle,
+      time,
+      gravity,
+      mouthRadius,
+      seed,
+      offsetX,
+      offsetZ
+    );
+  }
+
+  return writeFunnelExitPoint(
+    target,
+    (t - shape.convergeRatio) / Math.max(1 - shape.convergeRatio, 0.0001),
+    gravity,
+    mouthRadius,
+    offsetX,
+    offsetZ
+  );
+}
 
 export default function Earth2() {
   const earthRef = useRef(null);
   const earthSurfaceRef = useRef(null);
   const particlePointsRef = useRef(null);
   const atmosphereRef = useRef(null);
+  const funnelGroupRef = useRef(null);
   const northernLightsOpacityRef = useRef(1);
   const spaceKeyRef = useRef(false);
   const particleTransition = useRef({ target: 0, progress: 0 });
@@ -100,10 +210,29 @@ export default function Earth2() {
     const scatterDirections = new Float32Array(basePositions.length);
     const scatterStrengths = new Float32Array(positionAttribute.count);
     const phases = new Float32Array(positionAttribute.count);
+    const funnelLaneAngles = new Float32Array(positionAttribute.count);
+    const funnelOffsets = new Float32Array(positionAttribute.count);
+    const funnelSpeedFactors = new Float32Array(positionAttribute.count);
+    const funnelRanks = new Uint32Array(positionAttribute.count);
     const randomDirection = new Vector3();
     const surfaceNormal = new Vector3();
+    const shuffledIndices = Array.from(
+      { length: positionAttribute.count },
+      (_, index) => index
+    );
 
     positionAttribute.setUsage(DynamicDrawUsage);
+
+    for (let i = shuffledIndices.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = shuffledIndices[i];
+      shuffledIndices[i] = shuffledIndices[j];
+      shuffledIndices[j] = tmp;
+    }
+
+    shuffledIndices.forEach((particleIndex, rank) => {
+      funnelRanks[particleIndex] = rank;
+    });
 
     for (let i = 0; i < positionAttribute.count; i += 1) {
       const i3 = i * 3;
@@ -122,6 +251,9 @@ export default function Earth2() {
       scatterDirections[i3 + 2] = randomDirection.z;
       scatterStrengths[i] = 0.45 + Math.random() * 0.75;
       phases[i] = Math.random() * Math.PI * 2;
+      funnelLaneAngles[i] = Math.atan2(basePositions[i3 + 2], basePositions[i3]);
+      funnelOffsets[i] = Math.random();
+      funnelSpeedFactors[i] = 0.8 + Math.random() * 0.7;
     }
 
     particlesGeometry.setAttribute("phase", new BufferAttribute(phases, 1));
@@ -133,6 +265,10 @@ export default function Earth2() {
       scatterDirections,
       scatterStrengths,
       phases,
+      funnelLaneAngles,
+      funnelOffsets,
+      funnelSpeedFactors,
+      funnelRanks,
     };
   }, [geometry]);
 
@@ -254,6 +390,27 @@ export default function Earth2() {
     return material;
   }, [gl, size.height]);
 
+  const funnelLineMaterial = useMemo(() => {
+    const material = new ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: AdditiveBlending,
+      vertexShader: funnelLineVertexShader,
+      fragmentShader: funnelLineFragmentShader,
+      uniforms: {
+        uColor: new Uniform(new Color("#8fc9ff")),
+        uOpacity: new Uniform(0.35),
+        uFullOpacityY: new Uniform(-0.6),
+        uFadeBlendRange: new Uniform(0.35),
+        uFadeAtTop: new Uniform(1.0),
+      },
+    });
+
+    material.toneMapped = false;
+    return material;
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.code === "Space") spaceKeyRef.current = true;
@@ -302,8 +459,9 @@ export default function Earth2() {
       earthMaterial.dispose();
       atmosphereMaterial.dispose();
       particleMaterial.dispose();
+      funnelLineMaterial.dispose();
     };
-  }, [atmosphereMaterial, earthMaterial, particleMaterial]);
+  }, [atmosphereMaterial, earthMaterial, funnelLineMaterial, particleMaterial]);
 
   const [earthControls, setEarthControls] = useControls(
     "Earth2",
@@ -466,6 +624,101 @@ export default function Earth2() {
                 step: 0.01,
                 label: "Crossfade end",
               },
+            },
+            { collapsed: false }
+          ),
+          Funnel: folder(
+            {
+              funnelEnabled: { value: true, label: "Enable funnel" },
+              funnelParticleCount: {
+                value: 250,
+                min: 0,
+                max: 500,
+                step: 1,
+                label: "Points inside",
+              },
+              funnelGravity: {
+                value: 0.1,
+                min: 0.1,
+                max: 5,
+                step: 0.01,
+                label: "Gravity",
+              },
+              funnelSpeed: {
+                value: 0.6,
+                min: 0.05,
+                max: 4,
+                step: 0.01,
+                label: "Travel speed",
+              },
+              funnelOpacity: {
+                value: 0.34,
+                min: 0,
+                max: 1,
+                step: 0.01,
+                label: "Tunnel opacity",
+              },
+              funnelLineCount: {
+                value: 8,
+                min: 8,
+                max: 180,
+                step: 1,
+                label: "Tunnel lines",
+              },
+              funnelMouthRadius: {
+                value: 0.65,
+                min: 0.2,
+                max: 1.2,
+                step: 0.01,
+                label: "Upper opening width",
+              },
+              funnelOffsetX: {
+                value: 0,
+                min: -1.5,
+                max: 1.5,
+                step: 0.01,
+                label: "Horizontal X",
+              },
+              funnelOffsetZ: {
+                value: 0,
+                min: -1.5,
+                max: 1.5,
+                step: 0.01,
+                label: "Horizontal Z",
+              },
+              funnelOffsetY: {
+                value: -0.81,
+                min: -1.5,
+                max: 1.5,
+                step: 0.01,
+                label: "Vertical Y",
+              },
+              "Line fade (top)": folder(
+                {
+                  funnelFadeAtTop: {
+                    value: 1,
+                    min: 0,
+                    max: 1,
+                    step: 0.01,
+                    label: "Fade at top (0=off)",
+                  },
+                  funnelFullOpacityY: {
+                    value: -1.24,
+                    min: -1.5,
+                    max: 0.5,
+                    step: 0.01,
+                    label: "Full opacity Y",
+                  },
+                  funnelFadeBlendRange: {
+                    value: 0.53,
+                    min: 0.01,
+                    max: 1.2,
+                    step: 0.01,
+                    label: "Blend range (smooth=larger)",
+                  },
+                },
+                { collapsed: false }
+              ),
             },
             { collapsed: false }
           ),
@@ -655,6 +908,50 @@ export default function Earth2() {
     citiesMaskMap,
   ]);
 
+  useEffect(() => {
+    const group = funnelGroupRef.current;
+    if (!group) return undefined;
+
+    group.clear();
+
+    const guideCount = Math.max(1, Math.floor(earthControls.funnelLineCount));
+
+    for (let i = 0; i < guideCount; i += 1) {
+      const geometry = new BufferGeometry();
+      const positions = new Float32Array(FUNNEL_SEGMENT_COUNT * 3);
+      geometry.setAttribute("position", new BufferAttribute(positions, 3));
+
+      const line = new Line(geometry, funnelLineMaterial);
+      line.frustumCulled = false;
+      line.renderOrder = 1;
+      line.userData = {
+        type: "guide",
+        laneAngle: (i / guideCount) * TAU,
+        seed: i / guideCount,
+      };
+      group.add(line);
+    }
+
+    const exitGeometry = new BufferGeometry();
+    exitGeometry.setAttribute(
+      "position",
+      new BufferAttribute(new Float32Array(FUNNEL_SEGMENT_COUNT * 3), 3)
+    );
+
+    const exitLine = new Line(exitGeometry, funnelLineMaterial);
+    exitLine.frustumCulled = false;
+    exitLine.renderOrder = 1;
+    exitLine.userData = { type: "exit" };
+    group.add(exitLine);
+
+    return () => {
+      group.children.forEach((child) => {
+        child.geometry?.dispose?.();
+      });
+      group.clear();
+    };
+  }, [earthControls.funnelLineCount, funnelLineMaterial]);
+
   useFrame((_, delta) => {
     sunSpherical.phi = earthControls.phi;
     sunSpherical.theta = earthControls.theta;
@@ -786,8 +1083,81 @@ export default function Earth2() {
       atmosphereRef.current.visible = atmosphereVisibility > 0.001;
     }
 
+    const funnelVisible =
+      earthControls.funnelEnabled && particleVisibility > 0.001;
+    if (funnelGroupRef.current) {
+      funnelGroupRef.current.visible = funnelVisible;
+    }
+    funnelLineMaterial.uniforms.uColor.value.set(earthControls.particleColor);
+    funnelLineMaterial.uniforms.uOpacity.value =
+      earthControls.funnelOpacity * particleVisibility;
+    funnelLineMaterial.uniforms.uFullOpacityY.value =
+      earthControls.funnelFullOpacityY;
+    funnelLineMaterial.uniforms.uFadeBlendRange.value =
+      earthControls.funnelFadeBlendRange;
+    funnelLineMaterial.uniforms.uFadeAtTop.value =
+      earthControls.funnelFadeAtTop;
+
+    if (funnelVisible && funnelGroupRef.current) {
+      funnelGroupRef.current.children.forEach((line) => {
+        const positionAttr = line.geometry.getAttribute("position");
+        const positions = positionAttr.array;
+
+        if (line.userData.type === "guide") {
+          for (let i = 0; i < FUNNEL_SEGMENT_COUNT; i += 1) {
+            const t = i / (FUNNEL_SEGMENT_COUNT - 1);
+            writeFunnelGuidePoint(
+              sunDirection,
+              t,
+              line.userData.laneAngle,
+              particleTime,
+              earthControls.funnelGravity,
+              earthControls.funnelMouthRadius,
+              line.userData.seed,
+              0,
+              0
+            );
+            const i3 = i * 3;
+            positions[i3] = sunDirection.x;
+            positions[i3 + 1] = sunDirection.y;
+            positions[i3 + 2] = sunDirection.z;
+          }
+        } else {
+          for (let i = 0; i < FUNNEL_SEGMENT_COUNT; i += 1) {
+            const t = i / (FUNNEL_SEGMENT_COUNT - 1);
+            writeFunnelExitPoint(
+              sunDirection,
+              t,
+              earthControls.funnelGravity,
+              earthControls.funnelMouthRadius,
+              0,
+              0
+            );
+            const i3 = i * 3;
+            positions[i3] = sunDirection.x;
+            positions[i3 + 1] = sunDirection.y;
+            positions[i3 + 2] = sunDirection.z;
+          }
+        }
+
+        positionAttr.needsUpdate = true;
+      });
+    }
+
     const particlePositions = particleSystem.geometry.getAttribute("position");
     const positionArray = particlePositions.array;
+    const funnelShape = getFunnelShape(
+      earthControls.funnelGravity,
+      earthControls.funnelMouthRadius
+    );
+    const funnelParticleOffsetX = earthControls.funnelOffsetX * 0.5;
+    const funnelParticleOffsetZ = earthControls.funnelOffsetZ * 0.5;
+    const funnelParticleOffsetY = earthControls.funnelOffsetY * 0.5;
+    const funnelParticleCount = Math.min(
+      particlePositions.count,
+      Math.max(0, Math.floor(earthControls.funnelParticleCount))
+    );
+    const funnelSpeed = earthControls.funnelSpeed * 0.18;
 
     for (let i = 0; i < particlePositions.count; i += 1) {
       const i3 = i * 3;
@@ -804,19 +1174,86 @@ export default function Earth2() {
         Math.sin(particleTime * earthControls.particleShimmerSpeed + phase) *
         earthControls.particleShimmer *
         particleVisibility;
-
-      positionArray[i3] =
+      const shellX =
         particleSystem.basePositions[i3] +
         particleSystem.baseNormals[i3] * (surfaceLift + shimmerOffset) +
         particleSystem.scatterDirections[i3] * driftOffset;
-      positionArray[i3 + 1] =
+      const shellY =
         particleSystem.basePositions[i3 + 1] +
         particleSystem.baseNormals[i3 + 1] * (surfaceLift + shimmerOffset) +
         particleSystem.scatterDirections[i3 + 1] * driftOffset;
-      positionArray[i3 + 2] =
+      const shellZ =
         particleSystem.basePositions[i3 + 2] +
         particleSystem.baseNormals[i3 + 2] * (surfaceLift + shimmerOffset) +
         particleSystem.scatterDirections[i3 + 2] * driftOffset;
+      const funnelActive =
+        funnelVisible && particleSystem.funnelRanks[i] < funnelParticleCount;
+
+      if (funnelActive) {
+        const funnelProgress =
+          (particleTime *
+            funnelSpeed *
+            particleSystem.funnelSpeedFactors[i] +
+            particleSystem.funnelOffsets[i]) %
+          1;
+
+        if (funnelProgress < funnelShape.captureRatio) {
+          const captureMix = Math.pow(
+            MathUtils.smootherstep(
+              funnelProgress / Math.max(funnelShape.captureRatio, 0.0001),
+              0,
+              1
+            ),
+            MathUtils.lerp(1.7, 0.65, earthControls.funnelGravity / 5)
+          );
+
+          writeFunnelGuidePoint(
+            sunDirection,
+            0,
+            particleSystem.funnelLaneAngles[i],
+            particleTime,
+            earthControls.funnelGravity,
+            earthControls.funnelMouthRadius,
+            particleSystem.funnelOffsets[i],
+            funnelParticleOffsetX,
+            funnelParticleOffsetZ
+          );
+
+          positionArray[i3] = MathUtils.lerp(shellX, sunDirection.x, captureMix);
+          positionArray[i3 + 1] = MathUtils.lerp(
+            shellY,
+            sunDirection.y + funnelParticleOffsetY,
+            captureMix
+          );
+          positionArray[i3 + 2] = MathUtils.lerp(
+            shellZ,
+            sunDirection.z,
+            captureMix
+          );
+        } else {
+          writeFunnelParticlePoint(
+            sunDirection,
+            (funnelProgress - funnelShape.captureRatio) /
+              Math.max(1 - funnelShape.captureRatio, 0.0001),
+            particleSystem.funnelLaneAngles[i],
+            particleTime,
+            earthControls.funnelGravity,
+            earthControls.funnelMouthRadius,
+            particleSystem.funnelOffsets[i],
+            funnelParticleOffsetX,
+            funnelParticleOffsetZ
+          );
+
+          positionArray[i3] = sunDirection.x;
+          positionArray[i3 + 1] = sunDirection.y + funnelParticleOffsetY;
+          positionArray[i3 + 2] = sunDirection.z;
+        }
+        continue;
+      }
+
+      positionArray[i3] = shellX;
+      positionArray[i3 + 1] = shellY;
+      positionArray[i3 + 2] = shellZ;
     }
 
     particlePositions.needsUpdate = true;
@@ -894,6 +1331,15 @@ export default function Earth2() {
           frustumCulled
           material={earthMaterial}
           onPointerDown={handleSpherePointerDown}
+        />
+        <group
+          ref={funnelGroupRef}
+          position={[
+            earthControls.funnelOffsetX,
+            earthControls.funnelOffsetY,
+            earthControls.funnelOffsetZ,
+          ]}
+          scale={2}
         />
         <points
           ref={particlePointsRef}
