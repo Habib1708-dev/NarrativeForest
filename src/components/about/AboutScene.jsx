@@ -1,5 +1,6 @@
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import Earth2 from "./Earth2";
+import Motherboard from "../entities/Motherboard";
 
 export default function AboutScene() {
   return (
@@ -13,9 +14,26 @@ export default function AboutScene() {
         far={100}
       />
 
+      <Motherboard />
       <Earth2 />
 
-      <OrbitControls enablePan={false} enableZoom enableRotate />
+      <OrbitControls
+        makeDefault
+        target={[0, 0, 0]}
+        minDistance={0.1}
+        maxDistance={Infinity}
+        enableDamping
+        dampingFactor={0.05}
+        enablePan
+        panSpeed={1}
+        enableZoom
+        zoomSpeed={1.2}
+        screenSpacePanning
+        enableRotate
+        rotateSpeed={0.6}
+        minPolarAngle={0}
+        maxPolarAngle={Math.PI}
+      />
     </>
   );
 }
