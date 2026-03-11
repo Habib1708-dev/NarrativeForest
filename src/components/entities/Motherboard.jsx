@@ -161,7 +161,10 @@ const FRAGMENT_SHADER = `
       finalColor = mix(uMotherboardColor, uPlaneColor, blend);
     }
 
-    gl_FragColor = vec4(finalColor, 1.0);
+    float lum = dot(finalColor, vec3(0.299, 0.587, 0.114));
+    float alpha = smoothstep(0.04, 0.18, lum);
+    if (alpha < 0.01) discard;
+    gl_FragColor = vec4(finalColor, alpha);
   }
 `;
 
@@ -176,6 +179,7 @@ export default function Motherboard({
   defaultMotherboardColor = "#f2f5f7",
   defaultPosition = [0, -5.5, 0],
   defaultRotation = [-90, 0, 0],
+  planeVisible = true,
 }) {
   const motherboardTexture = useTexture(texturePath);
   const aiTexture = useTexture("/textures/motherboard/AI.png");
@@ -199,6 +203,9 @@ export default function Motherboard({
       new ShaderMaterial({
         vertexShader: VERTEX_SHADER,
         fragmentShader: FRAGMENT_SHADER,
+        transparent: true,
+        depthWrite: true,
+        depthTest: true,
         uniforms: {
           uTexture: { value: motherboardTexture },
           uPlaneColor: { value: new Color(defaultPlaneColor) },
@@ -570,21 +577,10 @@ export default function Motherboard({
 
   return (
     <group>
-      <mesh
-        position={[controls.positionX, controls.positionY, controls.positionZ]}
-        rotation={[
-          degToRad(controls.rotationX),
-          degToRad(controls.rotationY),
-          degToRad(controls.rotationZ),
-        ]}
-        material={material}
-      >
-        <planeGeometry args={[controls.planeWidth, controls.planeHeight]} />
-      </mesh>
       <group
         position={[
           controls.positionX + controls.offsetX,
-          chipCenterY,
+          chipCenterY + 0.001,
           controls.positionZ + controls.offsetZ,
         ]}
         rotation={[
@@ -592,6 +588,7 @@ export default function Motherboard({
           degToRad(controls.chipRotationY),
           degToRad(controls.chipRotationZ),
         ]}
+        renderOrder={0}
       >
         <mesh>
           <boxGeometry
@@ -606,7 +603,14 @@ export default function Motherboard({
             depthWrite={false}
             depthTest={false}
           />
-          <meshBasicMaterial attach="material-3" color={controls.chipColor} />
+          <meshBasicMaterial
+            attach="material-3"
+            transparent
+            opacity={0}
+            depthWrite={true}
+            depthTest={true}
+            colorWrite={false}
+          />
           <primitive object={gridMaterial} attach="material-4" />
           <primitive object={gridMaterial} attach="material-5" />
         </mesh>
@@ -621,6 +625,20 @@ export default function Motherboard({
           />
         </mesh>
       </group>
+      {planeVisible && (
+        <mesh
+          position={[controls.positionX, controls.positionY, controls.positionZ]}
+          rotation={[
+            degToRad(controls.rotationX),
+            degToRad(controls.rotationY),
+            degToRad(controls.rotationZ),
+          ]}
+          material={material}
+          renderOrder={1}
+        >
+          <planeGeometry args={[controls.planeWidth, controls.planeHeight]} />
+        </mesh>
+      )}
     </group>
   );
 }

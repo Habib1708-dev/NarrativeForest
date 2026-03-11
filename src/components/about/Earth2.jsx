@@ -516,14 +516,14 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
             particleTransition.current.target = 0;
           }),
           particleSize: {
-            value: 0.04,
+            value: 0.119,
             min: 0.005,
-            max: 0.12,
+            max: 0.2,
             step: 0.001,
             label: "Point size",
           },
           particleOpacity: {
-            value: 0.95,
+            value: 0.167,
             min: 0,
             max: 1,
             step: 0.01,
@@ -538,7 +538,7 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
             label: "Surface lift",
           },
           particleDrift: {
-            value: 0.02,
+            value: 0.099,
             min: 0,
             max: 0.2,
             step: 0.001,

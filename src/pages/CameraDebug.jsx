@@ -52,7 +52,11 @@ export default function CameraDebug() {
         <Canvas
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
-        gl={{ preserveDrawingBuffer: false, powerPreference: "high-performance" }}
+        gl={{
+          antialias: true,
+          preserveDrawingBuffer: false,
+          powerPreference: "high-performance",
+        }}
         dpr={[1, 1.5]}
       >
         {/* Full scene — same as Home page */}

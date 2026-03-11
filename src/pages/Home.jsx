@@ -188,10 +188,11 @@ export default function Home() {
       <CanvasErrorBoundary>
         <Canvas
           camera={{ position: [-1.8, -4.8, -5], fov: 50, near: 0.05, far: 2000 }}
-          gl={{ 
+          gl={{
+            antialias: true,
             preserveDrawingBuffer: false,
             powerPreference: "high-performance",
-            failIfMajorPerformanceCaveat: false
+            failIfMajorPerformanceCaveat: false,
           }}
           dpr={[1, 1.5]}
           onCreated={({ gl }) => {
