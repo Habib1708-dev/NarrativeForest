@@ -414,14 +414,14 @@ export default function Motherboard({
             label: "Side cell rows",
           },
           sideGlassMinOpacity: {
-            value: 0.2,
+            value: 0.78,
             min: 0.01,
             max: 1,
             step: 0.001,
             label: "Side glass min opacity",
           },
           sideGlassMaxOpacity: {
-            value: 0.6,
+            value: 1,
             min: 0.01,
             max: 1,
             step: 0.001,
@@ -440,7 +440,7 @@ export default function Motherboard({
             label: "AI logo rotation",
           },
           aiGlassOpacity: {
-            value: 0.42,
+            value: 1,
             min: 0,
             max: 1,
             step: 0.01,

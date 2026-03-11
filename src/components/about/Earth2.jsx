@@ -45,17 +45,17 @@ const RIPPLE_DURATION_SEC = 2.5;
 const TAU = Math.PI * 2;
 const FUNNEL_SEGMENT_COUNT = 96;
 
-// Vertical funnel: axis along Y. Top (wide mouth) near sphere half-bottom, tip and end below.
+// Vertical funnel: axis along Y. Top (wide mouth) near sphere half-bottom; 12 lines converge at convergenceTipY.
 // mouthRadius is the upper opening radius in funnel-local unit space (group has scale 2).
-function getFunnelShape(gravity, mouthRadius = 0.7) {
+function getFunnelShape(gravity, mouthRadius = 0.7, convergenceTipY = -1.1, bottomY = -1.8) {
   const gravityNorm = MathUtils.clamp(gravity / 5, 0, 1);
 
   return {
     entryY: -0.45,
-    tipY: -1.1,
-    endY: -1.8,
+    tipY: convergenceTipY,
+    endY: bottomY,
     mouthRadius: Math.max(0.05, mouthRadius),
-    tipRadius: 0.018,
+    tipRadius: 0, // All lines meet at one point (convergence tip)
     convergeRatio: 0.7,
     captureRatio: MathUtils.lerp(0.4, 0.14, gravityNorm),
     swirlTurns: MathUtils.lerp(0.7, 1.8, gravityNorm),
@@ -73,9 +73,10 @@ function writeFunnelGuidePoint(
   mouthRadius,
   seed = 0,
   offsetX = 0,
-  offsetZ = 0
+  offsetZ = 0,
+  convergenceTipY = -1.1
 ) {
-  const shape = getFunnelShape(gravity, mouthRadius);
+  const shape = getFunnelShape(gravity, mouthRadius, convergenceTipY);
   const t = MathUtils.clamp(progress, 0, 1);
   const eased = MathUtils.smootherstep(t, 0, 1);
   const radius = MathUtils.lerp(shape.mouthRadius, shape.tipRadius, eased);
@@ -101,9 +102,11 @@ function writeFunnelExitPoint(
   gravity,
   mouthRadius,
   offsetX = 0,
-  offsetZ = 0
+  offsetZ = 0,
+  convergenceTipY = -1.1,
+  bottomY = -1.8
 ) {
-  const shape = getFunnelShape(gravity, mouthRadius);
+  const shape = getFunnelShape(gravity, mouthRadius, convergenceTipY, bottomY);
   const t = MathUtils.smootherstep(MathUtils.clamp(progress, 0, 1), 0, 1);
   const y = MathUtils.lerp(shape.tipY, shape.endY, t);
   target.set(offsetX, y, offsetZ);
@@ -119,9 +122,11 @@ function writeFunnelParticlePoint(
   mouthRadius,
   seed = 0,
   offsetX = 0,
-  offsetZ = 0
+  offsetZ = 0,
+  convergenceTipY = -1.1,
+  bottomY = -1.8
 ) {
-  const shape = getFunnelShape(gravity, mouthRadius);
+  const shape = getFunnelShape(gravity, mouthRadius, convergenceTipY, bottomY);
   const t = MathUtils.clamp(progress, 0, 1);
 
   if (t <= shape.convergeRatio) {
@@ -134,7 +139,8 @@ function writeFunnelParticlePoint(
       mouthRadius,
       seed,
       offsetX,
-      offsetZ
+      offsetZ,
+      shape.tipY
     );
   }
 
@@ -144,7 +150,9 @@ function writeFunnelParticlePoint(
     gravity,
     mouthRadius,
     offsetX,
-    offsetZ
+    offsetZ,
+    shape.tipY,
+    shape.endY
   );
 }
 
@@ -654,7 +662,7 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
                 label: "Gravity",
               },
               funnelSpeed: {
-                value: 0.6,
+                value: 0.14,
                 min: 0.05,
                 max: 4,
                 step: 0.01,
@@ -680,6 +688,20 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
                 max: 1.2,
                 step: 0.01,
                 label: "Upper opening width",
+              },
+              funnelConvergenceTipY: {
+                value: -1.1,
+                min: -1.8,
+                max: 0,
+                step: 0.01,
+                label: "Convergence tip Y",
+              },
+              funnelBottomY: {
+                value: -2.19,
+                min: -2.5,
+                max: 0,
+                step: 0.01,
+                label: "Bottom extent Y (extend down)",
               },
               funnelOffsetX: {
                 value: 0,
@@ -946,7 +968,6 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
       "position",
       new BufferAttribute(new Float32Array(FUNNEL_SEGMENT_COUNT * 3), 3)
     );
-
     const exitLine = new Line(exitGeometry, funnelLineMaterial);
     exitLine.frustumCulled = false;
     exitLine.renderOrder = 1;
@@ -1115,6 +1136,8 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
       earthControls.funnelFadeAtTop;
 
     if (funnelVisible && funnelGroupRef.current) {
+      const convergenceTipY = earthControls.funnelConvergenceTipY;
+      const bottomY = earthControls.funnelBottomY;
       funnelGroupRef.current.children.forEach((line) => {
         const positionAttr = line.geometry.getAttribute("position");
         const positions = positionAttr.array;
@@ -1131,7 +1154,8 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
               earthControls.funnelMouthRadius,
               line.userData.seed,
               0,
-              0
+              0,
+              convergenceTipY
             );
             const i3 = i * 3;
             positions[i3] = sunDirection.x;
@@ -1147,7 +1171,9 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
               earthControls.funnelGravity,
               earthControls.funnelMouthRadius,
               0,
-              0
+              0,
+              convergenceTipY,
+              bottomY
             );
             const i3 = i * 3;
             positions[i3] = sunDirection.x;
@@ -1164,7 +1190,9 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
     const positionArray = particlePositions.array;
     const funnelShape = getFunnelShape(
       earthControls.funnelGravity,
-      earthControls.funnelMouthRadius
+      earthControls.funnelMouthRadius,
+      earthControls.funnelConvergenceTipY,
+      earthControls.funnelBottomY
     );
     const funnelParticleOffsetX = earthControls.funnelOffsetX * 0.5;
     const funnelParticleOffsetZ = earthControls.funnelOffsetZ * 0.5;
@@ -1232,7 +1260,8 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
             earthControls.funnelMouthRadius,
             particleSystem.funnelOffsets[i],
             funnelParticleOffsetX,
-            funnelParticleOffsetZ
+            funnelParticleOffsetZ,
+            earthControls.funnelConvergenceTipY
           );
 
           positionArray[i3] = MathUtils.lerp(shellX, sunDirection.x, captureMix);
@@ -1257,7 +1286,9 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
             earthControls.funnelMouthRadius,
             particleSystem.funnelOffsets[i],
             funnelParticleOffsetX,
-            funnelParticleOffsetZ
+            funnelParticleOffsetZ,
+            earthControls.funnelConvergenceTipY,
+            earthControls.funnelBottomY
           );
 
           positionArray[i3] = sunDirection.x;
