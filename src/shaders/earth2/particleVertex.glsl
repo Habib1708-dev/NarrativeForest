@@ -1,6 +1,7 @@
 uniform float uSize;
 uniform float uPixelRatio;
 uniform float uViewportHeight;
+uniform float uMinPointSize;
 
 attribute float phase;
 
@@ -14,4 +15,5 @@ void main() {
 
   gl_PointSize = uSize * uPixelRatio * uViewportHeight * 0.5;
   gl_PointSize *= 1.0 / max(0.0001, -mvPosition.z);
+  gl_PointSize = max(gl_PointSize, uMinPointSize);
 }

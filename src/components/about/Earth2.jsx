@@ -148,7 +148,7 @@ function writeFunnelParticlePoint(
   );
 }
 
-export default function Earth2() {
+export default function Earth2({ onParticleBloomChange = () => {} }) {
   const earthRef = useRef(null);
   const earthSurfaceRef = useRef(null);
   const particlePointsRef = useRef(null);
@@ -157,6 +157,7 @@ export default function Earth2() {
   const northernLightsOpacityRef = useRef(1);
   const spaceKeyRef = useRef(false);
   const particleTransition = useRef({ target: 0, progress: 0 });
+  const particleBloomEnabledRef = useRef(false);
   const { gl, size } = useThree();
   const languageTargets = useRef({
     specularViewMix: 0,
@@ -376,6 +377,7 @@ export default function Earth2() {
         uSize: new Uniform(0.04),
         uPixelRatio: new Uniform(Math.min(gl.getPixelRatio(), 2)),
         uViewportHeight: new Uniform(size.height),
+        uMinPointSize: new Uniform(2.25),
         uSolidRatio: new Uniform(0.05),
         uSolidAlpha: new Uniform(5.0),
         uGlowSpread: new Uniform(0.02),
@@ -456,12 +458,19 @@ export default function Earth2() {
 
   useEffect(() => {
     return () => {
+      onParticleBloomChange(false);
       earthMaterial.dispose();
       atmosphereMaterial.dispose();
       particleMaterial.dispose();
       funnelLineMaterial.dispose();
     };
-  }, [atmosphereMaterial, earthMaterial, funnelLineMaterial, particleMaterial]);
+  }, [
+    atmosphereMaterial,
+    earthMaterial,
+    funnelLineMaterial,
+    onParticleBloomChange,
+    particleMaterial,
+  ]);
 
   const [earthControls, setEarthControls] = useControls(
     "Earth2",
@@ -1049,6 +1058,7 @@ export default function Earth2() {
       earthControls.particleOpacity * particleVisibility;
     particleMaterial.uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 2);
     particleMaterial.uniforms.uViewportHeight.value = size.height;
+    particleMaterial.uniforms.uMinPointSize.value = 2.25;
     particleMaterial.uniforms.uTime.value = earthMaterial.uniforms.uTime.value;
     particleMaterial.uniforms.uSolidRatio.value = earthControls.solidRatio;
     particleMaterial.uniforms.uSolidAlpha.value = earthControls.solidAlpha;
@@ -1068,6 +1078,12 @@ export default function Earth2() {
 
     // Show the full particle shell from frame one by bypassing depth test only for points.
     const showParticles = particleVisibility > 0.001;
+    const particleBloomEnabled =
+      particleTransition.current.target > 0.5 && showParticles;
+    if (particleBloomEnabledRef.current !== particleBloomEnabled) {
+      particleBloomEnabledRef.current = particleBloomEnabled;
+      onParticleBloomChange(particleBloomEnabled);
+    }
     const particleDepthTest = !showParticles;
     if (particleMaterial.depthTest !== particleDepthTest) {
       particleMaterial.depthTest = particleDepthTest;

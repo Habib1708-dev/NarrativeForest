@@ -13,15 +13,17 @@ varying float vPhase;
 void main() {
   vec2 centeredUv = gl_PointCoord - vec2(0.5);
   float distanceToCenter = length(centeredUv);
-  float safeDistance = max(distanceToCenter, 0.0001);
+  if (distanceToCenter >= 0.5) discard;
 
+  float coreRadius = max(uSolidRatio * 0.5, 0.02);
+  float glowRadius = min(0.5, coreRadius + max(uGlowSpread, 0.01) * 6.0);
   float alphaSolid =
-    (1.0 - step(uSolidRatio * 0.5, distanceToCenter)) * uSolidAlpha;
-
-  float alphaGlow = (uGlowSpread / safeDistance) - (uGlowSpread * 2.0);
-  alphaGlow *= (1.0 - alphaSolid);
-
-  float alpha = max(alphaGlow, alphaSolid) * uOpacity;
+    (1.0 - smoothstep(max(coreRadius - 0.08, 0.0), coreRadius, distanceToCenter)) *
+    uSolidAlpha;
+  float alphaGlow =
+    1.0 - smoothstep(max(coreRadius * 0.65, 0.0), glowRadius, distanceToCenter);
+  float edgeFade = 1.0 - smoothstep(0.42, 0.5, distanceToCenter);
+  float alpha = max(alphaGlow * 0.85, alphaSolid) * edgeFade * uOpacity;
 
   float sparkleLife = mod(uTime * uSparklingFrequency, 1.0);
   float window = uSparklingDuration * uSparklingFrequency * 0.5;
