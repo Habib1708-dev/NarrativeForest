@@ -537,7 +537,7 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
             step: 0.01,
             label: "Brightness",
           },
-          particleColor: { value: "#f8fbff", label: "Color" },
+          particleColor: { value: "#f8fbff", label: "Particle color" },
           particleSurfaceLift: {
             value: 0.045,
             min: 0,
@@ -647,6 +647,7 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
           Funnel: folder(
             {
               funnelEnabled: { value: true, label: "Enable funnel" },
+              funnelColor: { value: "#f8fbff", label: "Funnel line color" },
               funnelParticleCount: {
                 value: 250,
                 min: 0,
@@ -1125,7 +1126,7 @@ export default function Earth2({ onParticleBloomChange = () => {} }) {
     if (funnelGroupRef.current) {
       funnelGroupRef.current.visible = funnelVisible;
     }
-    funnelLineMaterial.uniforms.uColor.value.set(earthControls.particleColor);
+    funnelLineMaterial.uniforms.uColor.value.set(earthControls.funnelColor);
     funnelLineMaterial.uniforms.uOpacity.value =
       earthControls.funnelOpacity * particleVisibility;
     funnelLineMaterial.uniforms.uFullOpacityY.value =

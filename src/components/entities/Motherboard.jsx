@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTexture } from "@react-three/drei";
-import { folder, useControls } from "leva";
+import { useFrame } from "@react-three/fiber";
+import { button, folder, useControls } from "leva";
 import {
   ClampToEdgeWrapping,
   Color,
@@ -32,10 +33,11 @@ const GRID_FRAGMENT = `
   uniform float uNumCols;
   uniform float uNumRows;
   uniform float uBlackRows;
-  uniform float uGlassMinOpacity;
-  uniform float uGlassMaxOpacity;
+  uniform float uMaxDarkestValue;
+  uniform float uBuildOpacity;
+  uniform float uChipMinY;
+  uniform float uChipMaxY;
   uniform vec3 uSolidColor;
-  uniform vec3 uGlassColor;
 
   varying vec2 vUv;
   varying vec3 vWorldPosition;
@@ -50,26 +52,18 @@ const GRID_FRAGMENT = `
     vec2 cellId = floor(gridUv);
     float isBlackBand = step(uNumRows - uBlackRows, cellId.y);
 
-    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-    vec3 N = normalize(vWorldNormal);
-    float fresnel = pow(1.0 - max(dot(N, viewDir), 0.0), 2.2);
-    float randomOpacity = mix(
-      min(uGlassMinOpacity, uGlassMaxOpacity),
-      max(uGlassMinOpacity, uGlassMaxOpacity),
-      hash12(cellId)
-    );
-    float tintMix = 0.2 + 0.45 * fresnel + 0.15 * hash12(cellId + 13.7);
-    vec3 glassColor = mix(uGlassColor * 0.7, vec3(1.0), tintMix);
-
-    vec3 color = glassColor;
-    float alpha = randomOpacity;
+    vec3 darkEnd = mix(vec3(0.0), uSolidColor, uMaxDarkestValue);
+    float brightness = hash12(cellId);
+    vec3 color = mix(darkEnd, vec3(1.0), brightness);
 
     if (isBlackBand > 0.5) {
-      color = uSolidColor;
-      alpha = 1.0;
+      color = darkEnd;
     }
 
-    gl_FragColor = vec4(color, alpha);
+    float revealY = mix(uChipMaxY, uChipMinY, uBuildOpacity);
+    float vis = smoothstep(revealY - 0.015, revealY + 0.015, vWorldPosition.y);
+    if (vis < 0.01) discard;
+    gl_FragColor = vec4(color, 1.0);
   }
 `;
 
@@ -91,15 +85,23 @@ const AI_TOP_FRAGMENT = `
   uniform sampler2D uAITexture;
   uniform float uLogoSize;
   uniform float uLogoRotation;
-  uniform float uGlassOpacity;
+  uniform float uBuildOpacity;
+  uniform float uChipMinY;
+  uniform float uChipMaxY;
+  uniform float uMaxDarkestValue;
   uniform vec3 uSolidColor;
-  uniform vec3 uGlassColor;
 
   varying vec2 vUv;
   varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
 
   void main() {
+    float revealY = mix(uChipMaxY, uChipMinY, uBuildOpacity);
+    float vis = smoothstep(revealY - 0.015, revealY + 0.015, vWorldPosition.y);
+    if (vis < 0.01) discard;
+
+    vec3 darkEnd = mix(vec3(0.0), uSolidColor, uMaxDarkestValue);
+
     vec2 center = vec2(0.5, 0.5);
     vec2 scaled = (vUv - center) / uLogoSize + center;
     float c = cos(uLogoRotation);
@@ -107,22 +109,15 @@ const AI_TOP_FRAGMENT = `
     vec2 d = scaled - center;
     vec2 rotated = center + vec2(d.x * c - d.y * s, d.x * s + d.y * c);
     if (rotated.x < 0.0 || rotated.x > 1.0 || rotated.y < 0.0 || rotated.y > 1.0) {
-      gl_FragColor = vec4(uSolidColor, 1.0);
+      gl_FragColor = vec4(darkEnd, 1.0);
       return;
     }
     vec3 sampled = texture2D(uAITexture, rotated).rgb;
     float luminance = dot(sampled, vec3(0.299, 0.587, 0.114));
     float textMask = 1.0 - smoothstep(0.08, 0.92, luminance);
 
-    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-    vec3 N = normalize(vWorldNormal);
-    float fresnel = pow(1.0 - max(dot(N, viewDir), 0.0), 2.0);
-    vec3 glassColor = mix(uGlassColor * 0.7, vec3(1.0), 0.35 + 0.65 * fresnel);
-
-    vec3 finalColor = mix(uSolidColor, glassColor, textMask);
-    float finalAlpha = mix(1.0, uGlassOpacity, textMask);
-
-    gl_FragColor = vec4(finalColor, finalAlpha);
+    vec3 finalColor = mix(darkEnd, vec3(1.0), textMask);
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
 
@@ -141,6 +136,8 @@ const FRAGMENT_SHADER = `
   uniform vec3 uMotherboardColor;
   uniform vec2 uPatternScale;
   uniform vec2 uPatternOffset;
+  uniform float uBuildProgress;
+  uniform float uBuildOpacity;
 
   varying vec2 vUv;
 
@@ -162,7 +159,13 @@ const FRAGMENT_SHADER = `
     }
 
     float lum = dot(finalColor, vec3(0.299, 0.587, 0.114));
-    float alpha = smoothstep(0.04, 0.18, lum);
+    float revealRadius = length(vUv - vec2(0.5, 0.5)) * 1.414; // sqrt(2) so radius 1 reaches corners
+    float revealMask = 1.0 - smoothstep(
+      uBuildProgress - 0.04,
+      uBuildProgress + 0.04,
+      revealRadius
+    );
+    float alpha = smoothstep(0.04, 0.18, lum) * revealMask;
     if (alpha < 0.01) discard;
     gl_FragColor = vec4(finalColor, alpha);
   }
@@ -183,6 +186,8 @@ export default function Motherboard({
 }) {
   const motherboardTexture = useTexture(texturePath);
   const aiTexture = useTexture("/textures/motherboard/AI.png");
+  const buildProgressRef = useRef(0);
+  const buildTargetRef = useRef(0);
 
   useEffect(() => {
     motherboardTexture.colorSpace = SRGBColorSpace;
@@ -222,6 +227,8 @@ export default function Motherboard({
               defaultMotherboardOffset[1]
             ),
           },
+          uBuildProgress: { value: 0 },
+          uBuildOpacity: { value: 0 },
         },
         side: DoubleSide,
       }),
@@ -249,7 +256,7 @@ export default function Motherboard({
       new ShaderMaterial({
         vertexShader: GRID_VERTEX,
         fragmentShader: GRID_FRAGMENT,
-        transparent: true,
+        transparent: false,
         side: DoubleSide,
         depthWrite: true,
         depthTest: true,
@@ -257,10 +264,11 @@ export default function Motherboard({
           uNumCols: { value: DEFAULT_SIDE_CELL_COLUMNS },
           uNumRows: { value: DEFAULT_SIDE_CELL_ROWS },
           uBlackRows: { value: SIDE_BLACK_ROWS },
-          uGlassMinOpacity: { value: 0.2 },
-          uGlassMaxOpacity: { value: 0.6 },
+          uMaxDarkestValue: { value: 1.0 },
+          uBuildOpacity: { value: 0 },
+          uChipMinY: { value: 0 },
+          uChipMaxY: { value: 0 },
           uSolidColor: { value: new Color("#000000") },
-          uGlassColor: { value: new Color("#ffffff") },
         },
       }),
     []
@@ -271,7 +279,7 @@ export default function Motherboard({
       new ShaderMaterial({
         vertexShader: AI_TOP_VERTEX,
         fragmentShader: AI_TOP_FRAGMENT,
-        transparent: true,
+        transparent: false,
         side: DoubleSide,
         depthWrite: true,
         depthTest: true,
@@ -279,9 +287,11 @@ export default function Motherboard({
           uAITexture: { value: null },
           uLogoSize: { value: 0.7 },
           uLogoRotation: { value: 0 },
-          uGlassOpacity: { value: 0.42 },
+          uBuildOpacity: { value: 0 },
+          uChipMinY: { value: 0 },
+          uChipMaxY: { value: 0 },
+          uMaxDarkestValue: { value: 1.0 },
           uSolidColor: { value: new Color("#000000") },
-          uGlassColor: { value: new Color("#ffffff") },
         },
       }),
     []
@@ -413,20 +423,6 @@ export default function Motherboard({
             step: 1,
             label: "Side cell rows",
           },
-          sideGlassMinOpacity: {
-            value: 0.78,
-            min: 0.01,
-            max: 1,
-            step: 0.001,
-            label: "Side glass min opacity",
-          },
-          sideGlassMaxOpacity: {
-            value: 1,
-            min: 0.01,
-            max: 1,
-            step: 0.001,
-            label: "Side glass max opacity",
-          },
           logoSize: {
             value: 1,
             min: 0.2,
@@ -438,13 +434,6 @@ export default function Motherboard({
             value: 0,
             options: { "0°": 0, "90°": 90, "180°": 180, "270°": 270 },
             label: "AI logo rotation",
-          },
-          aiGlassOpacity: {
-            value: 1,
-            min: 0,
-            max: 1,
-            step: 0.01,
-            label: "AI word occlusion",
           },
           offsetX: {
             value: 0,
@@ -490,11 +479,37 @@ export default function Motherboard({
           },
           chipColor: {
             value: "#000000",
-            label: "Color",
+            label: "Color (sides & AI)",
           },
-          glassColor: {
-            value: "#ffffff",
-            label: "Glass color",
+          maxDarkestValue: {
+            value: 1.0,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            label: "Max darkest value",
+          },
+        },
+        { collapsed: false }
+      ),
+      Animation: folder(
+        {
+          activateBuild: button(() => {
+            buildTargetRef.current = 1;
+          }),
+          resetBuild: button(() => {
+            buildTargetRef.current = 0;
+            buildProgressRef.current = 0;
+            material.uniforms.uBuildProgress.value = 0;
+            material.uniforms.uBuildOpacity.value = 0;
+            gridMaterial.uniforms.uBuildOpacity.value = 0;
+            topFaceMaterial.uniforms.uBuildOpacity.value = 0;
+          }),
+          buildDuration: {
+            value: 2.4,
+            min: 0.1,
+            max: 10,
+            step: 0.01,
+            label: "Build duration",
           },
         },
         { collapsed: false }
@@ -529,16 +544,14 @@ export default function Motherboard({
     topFaceMaterial.uniforms.uLogoSize.value = Math.max(0.01, controls.logoSize);
     topFaceMaterial.uniforms.uLogoRotation.value =
       (controls.logoRotation * Math.PI) / 180;
-    topFaceMaterial.uniforms.uGlassOpacity.value = controls.aiGlassOpacity;
     topFaceMaterial.uniforms.uSolidColor.value.set(controls.chipColor);
-    topFaceMaterial.uniforms.uGlassColor.value.set(controls.glassColor);
+    topFaceMaterial.uniforms.uMaxDarkestValue.value = controls.maxDarkestValue;
   }, [
     aiTexture,
     controls.logoSize,
     controls.logoRotation,
-    controls.aiGlassOpacity,
     controls.chipColor,
-    controls.glassColor,
+    controls.maxDarkestValue,
     topFaceMaterial,
   ]);
 
@@ -552,17 +565,13 @@ export default function Motherboard({
       Math.round(controls.sideCellRows)
     );
     gridMaterial.uniforms.uSolidColor.value.set(controls.chipColor);
-    gridMaterial.uniforms.uGlassColor.value.set(controls.glassColor);
-    gridMaterial.uniforms.uGlassMinOpacity.value = controls.sideGlassMinOpacity;
-    gridMaterial.uniforms.uGlassMaxOpacity.value = controls.sideGlassMaxOpacity;
+    gridMaterial.uniforms.uMaxDarkestValue.value = controls.maxDarkestValue;
   }, [
     gridMaterial,
     controls.sideCellColumns,
     controls.sideCellRows,
     controls.chipColor,
-    controls.glassColor,
-    controls.sideGlassMinOpacity,
-    controls.sideGlassMaxOpacity,
+    controls.maxDarkestValue,
   ]);
 
   useEffect(() => {
@@ -574,6 +583,29 @@ export default function Motherboard({
 
   const chipCenterY =
     controls.positionY + controls.chipHeight / 2 + controls.offsetY;
+  const chipMinY = controls.positionY + controls.offsetY + 0.001;
+  const chipMaxY = controls.positionY + controls.offsetY + controls.chipHeight + 0.001;
+
+  useFrame((_, delta) => {
+    const duration = Math.max(controls.buildDuration, 0.0001);
+    const step = delta / duration;
+    const next =
+      buildTargetRef.current > buildProgressRef.current
+        ? Math.min(buildTargetRef.current, buildProgressRef.current + step)
+        : Math.max(buildTargetRef.current, buildProgressRef.current - step);
+
+    if (Math.abs(next - buildProgressRef.current) < 0.0001) return;
+
+    buildProgressRef.current = next;
+    material.uniforms.uBuildProgress.value = next;
+    material.uniforms.uBuildOpacity.value = next;
+    gridMaterial.uniforms.uBuildOpacity.value = next;
+    gridMaterial.uniforms.uChipMinY.value = chipMinY;
+    gridMaterial.uniforms.uChipMaxY.value = chipMaxY;
+    topFaceMaterial.uniforms.uBuildOpacity.value = next;
+    topFaceMaterial.uniforms.uChipMinY.value = chipMinY;
+    topFaceMaterial.uniforms.uChipMaxY.value = chipMaxY;
+  });
 
   return (
     <group>
